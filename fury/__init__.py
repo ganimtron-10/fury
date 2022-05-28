@@ -25,7 +25,7 @@ def get_info(verbose=False):
     import sys
     import numpy
     import scipy
-    import vtk
+    import vtkmodules.vtkCommonCore as ccvtk
 
     mpl, have_mpl, _ = optional_package('matplotlib')
     dipy, have_dipy, _ = optional_package('dipy')
@@ -38,7 +38,7 @@ def get_info(verbose=False):
                 sys_platform=sys.platform,
                 numpy_version=numpy.__version__,
                 scipy_version=scipy.__version__,
-                vtk_version=vtk.vtkVersion.GetVTKVersion())
+                vtk_version=ccvtk.vtkVersion.GetVTKVersion())
 
     d_mpl = dict(matplotlib_version=mpl.__version__) if have_mpl else {}
     d_dipy = dict(dipy_version=dipy.__version__) if have_dipy else {}
@@ -51,6 +51,42 @@ def get_info(verbose=False):
 
     return info
 
+
+def enable_warnings(warnings_origin=None):
+    """Enable global warnings.
+
+    Parameters
+    ----------
+    warnings_origin : list
+        list origin ['all', 'fury', 'vtk', 'matplotlib', ...]
+
+    """
+    warnings_origin = warnings_origin or ('all',)
+
+    if 'all' in warnings_origin or 'vtk' in warnings_origin:
+        import vtkmodules.vtkCommonCore as ccvtk
+        ccvtk.vtkObject.GlobalWarningDisplayOn()
+
+
+def disable_warnings(warnings_origin=None):
+    """Disable global warnings.
+
+    Parameters
+    ----------
+    warnings_origin : list
+        list origin ['all', 'fury', 'vtk', 'matplotlib', ...]
+
+    """
+    warnings_origin = warnings_origin or ('all',)
+
+    if 'all' in warnings_origin or 'vtk' in warnings_origin:
+        import vtkmodules.vtkCommonCore as ccvtk
+        ccvtk.vtkObject.GlobalWarningDisplayOff()
+
+
+# We switch off the warning display during the release
+if not ('post' in __version__) and not ('dev' in __version__):
+    disable_warnings()
 
 # Ignore this specific warning below from vtk < 8.2.
 # FutureWarning: Conversion of the second argument of issubdtype from

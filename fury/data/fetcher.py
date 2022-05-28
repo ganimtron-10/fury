@@ -3,6 +3,7 @@
 import os
 import sys
 import contextlib
+import warnings
 
 from os.path import join as pjoin
 from hashlib import sha256
@@ -23,6 +24,9 @@ else:
 UW_RW_URL = \
     "https://digital.lib.washington.edu/researchworks/bitstream/handle/"
 
+CUBEMAP_DATA_URL = \
+    "https://raw.githubusercontent.com/fury-gl/fury-data/master/cubemaps/"
+
 FURY_DATA_URL = \
     "https://raw.githubusercontent.com/fury-gl/fury-data/master/examples/"
 
@@ -31,6 +35,9 @@ MODEL_DATA_URL = \
 
 TEXTURE_DATA_URL = \
     "https://raw.githubusercontent.com/fury-gl/fury-data/master/textures/"
+
+DMRI_DATA_URL = \
+    "https://raw.githubusercontent.com/fury-gl/fury-data/master/dmri/"
 
 
 class FetcherError(Exception):
@@ -260,6 +267,23 @@ def _make_fetcher(name, folder, baseurl, remote_fnames, local_fnames,
     return fetcher
 
 
+fetch_viz_cubemaps = _make_fetcher(
+    "fetch_viz_cubemaps",
+    pjoin(fury_home, "cubemaps"),
+    CUBEMAP_DATA_URL,
+    ['skybox-nx.jpg', 'skybox-ny.jpg', 'skybox-nz.jpg', 'skybox-px.jpg',
+     'skybox-py.jpg', 'skybox-pz.jpg'],
+    ['skybox-nx.jpg', 'skybox-ny.jpg', 'skybox-nz.jpg', 'skybox-px.jpg',
+     'skybox-py.jpg', 'skybox-pz.jpg'],
+    ['12B1CE6C91AA3AAF258A8A5944DF739A6C1CC76E89D4D7119D1F795A30FC1BF2',
+     'E18FE2206B63D3DF2C879F5E0B9937A61D99734B6C43AC288226C58D2418D23E',
+     '00DDDD1B715D5877AF2A74C014FF6E47891F07435B471D213CD0673A8C47F2B2',
+     'BF20ACD6817C9E7073E485BBE2D2CE56DACFF73C021C2B613BA072BA2DF2B754',
+     '16F0D692AF0B80E46929D8D8A7E596123C76729CC5EB7DFD1C9184B115DD143A',
+     'B850B5E882889DF26BE9289D7C25BA30524B37E56BC2075B968A83197AD977F3'],
+    doc="Download cube map textures for fury"
+)
+
 fetch_viz_icons = _make_fetcher(
     "fetch_viz_icons",
     pjoin(fury_home, "icons"),
@@ -295,13 +319,23 @@ fetch_viz_models = _make_fetcher(
     "fetch_viz_models",
     pjoin(fury_home, "models"),
     MODEL_DATA_URL,
-    ['utah.obj', 'suzanne.obj', 'satellite_obj.obj'],
-    ['utah.obj', 'suzanne.obj', 'satellite_obj.obj'],
+    ['utah.obj', 'suzanne.obj', 'satellite_obj.obj', 'dragon.obj'],
+    ['utah.obj', 'suzanne.obj', 'satellite_obj.obj', 'dragon.obj'],
     ['0B50F12CEDCDC27377AC702B1EE331223BECEC59593B3F00A9E06B57A9C1B7C3',
      'BB4FF4E65D65D71D53000E06D2DC7BF89B702223657C1F64748811A3A6C8D621',
-     '90213FAC81D89BBB59FA541643304E0D95C2D446157ACE044D46F259454C0E74'],
+     '90213FAC81D89BBB59FA541643304E0D95C2D446157ACE044D46F259454C0E74',
+     'A775D6160D04EAB9A4E90180104F148927CEFCCAF9F0BCD748265CB8EE86F41B'],
     doc=" Download the models for shader tutorial"
     )
+
+fetch_viz_dmri = _make_fetcher(
+    "fetch_viz_dmri",
+    pjoin(fury_home, "dmri"),
+    DMRI_DATA_URL,
+    ['fodf.nii.gz'],
+    ['fodf.nii.gz'],
+    ['767ca3e4cd296e78421d83c32201b30be2d859c332210812140caac1b93d492b']
+)
 
 fetch_viz_textures = _make_fetcher(
     "fetch_viz_textures",
@@ -310,36 +344,29 @@ fetch_viz_textures = _make_fetcher(
     ['1_earth_8k.jpg', '2_no_clouds_8k.jpg',
      '5_night_8k.jpg', 'earth.ppm',
      'jupiter.jpg', 'masonry.bmp',
-     'skybox-nx.jpg', 'skybox-ny.jpg',
-     'skybox-px.jpg', 'skybox-py.jpg',
-     'skybox-pz.jpg', 'moon_8k.jpg',
+     'moon_8k.jpg',
      '8k_mercury.jpg', '8k_venus_surface.jpg',
      '8k_mars.jpg', '8k_saturn.jpg',
      '8k_saturn_ring_alpha.png',
      '2k_uranus.jpg', '2k_neptune.jpg',
-     '8k_sun.jpg', '1_earth_16k.jpg'],
+     '8k_sun.jpg', '1_earth_16k.jpg',
+     'clouds.jpg'],
     ['1_earth_8k.jpg', '2_no_clouds_8k.jpg',
      '5_night_8k.jpg', 'earth.ppm',
      'jupiter.jpg', 'masonry.bmp',
-     'skybox-nx.jpg', 'skybox-ny.jpg',
-     'skybox-px.jpg', 'skybox-py.jpg',
-     'skybox-pz.jpg', 'moon-8k.jpg',
+     'moon-8k.jpg',
      '8k_mercury.jpg', '8k_venus_surface.jpg',
      '8k_mars.jpg', '8k_saturn.jpg',
      '8k_saturn_ring_alpha.png',
      '2k_uranus.jpg', '2k_neptune.jpg',
-     '8k_sun.jpg', '1_earth_16k.jpg'],
+     '8k_sun.jpg', '1_earth_16k.jpg',
+     'clouds.jpg'],
     ['0D66DC62768C43D763D3288CE67128AAED27715B11B0529162DC4117F710E26F',
      '5CF740C72287AF7B3ACCF080C3951944ADCB1617083B918537D08CBD9F2C5465',
      'DF443F3E20C7724803690A350D9F6FDB36AD8EBC011B0345FB519A8B321F680A',
      '34CE9AD183D7C7B11E2F682D7EBB84C803E661BE09E01ADB887175AE60C58156',
      '5DF6A384E407BD0D5F18176B7DB96AAE1EEA3CFCFE570DDCE0D34B4F0E493668',
      '045E30B2ABFEAE6318C2CF955040C4A37E6DE595ACE809CE6766D397C0EE205D',
-     '12B1CE6C91AA3AAF258A8A5944DF739A6C1CC76E89D4D7119D1F795A30FC1BF2',
-     'E18FE2206B63D3DF2C879F5E0B9937A61D99734B6C43AC288226C58D2418D23E',
-     'BF20ACD6817C9E7073E485BBE2D2CE56DACFF73C021C2B613BA072BA2DF2B754',
-     '16F0D692AF0B80E46929D8D8A7E596123C76729CC5EB7DFD1C9184B115DD143A',
-     'B850B5E882889DF26BE9289D7C25BA30524B37E56BC2075B968A83197AD977F3',
      '7397A6C2CE0348E148C66EBEFE078467DDB9D0370FF5E63434D0451477624839',
      '5C8BD885AE3571C6BA2CD34B3446B9C6D767E314BF0EE8C1D5C147CADD388FC3',
      '9BC21A50577ED8AC734CDA91058724C7A741C19427AA276224CE349351432C5B',
@@ -349,9 +376,52 @@ fetch_viz_textures = _make_fetcher(
      'D15239D46F82D3EA13D2B260B5B29B2A382F42F2916DAE0694D0387B1204A09D',
      'CB42EA82709741D28B0AF44D8B283CBC6DBD0C521A7F0E1E1E010ADE00977DF6',
      'F22B1CFB306DDCE72A7E3B628668A0175B745038CE6268557CB2F7F1BDF98B9D',
-     '7DD1DAC926101B5D7B7F2E952E53ACF209421B5CCE57C03168BCE0AAD675998A'],
+     '7DD1DAC926101B5D7B7F2E952E53ACF209421B5CCE57C03168BCE0AAD675998A',
+     '85043336E023C4C9394CFD6D48D257A5564B4F895BFCEC01C70E4898CC77F003'],
     doc="Download textures for fury"
     )
+
+
+def read_viz_cubemap(name, suffix_type=1, ext='.jpg'):
+    """Read specific cube map with specific suffix type and extension.
+
+    Parameters
+    ----------
+    name : str
+    suffix_type : int, optional
+        0 for numeric suffix (e.g., skybox_0.jpg, skybox_1.jpg, etc.), 1 for
+        -p/nC encoding where C is either x, y or z (e.g., skybox-px.jpeg,
+        skybox-ny.jpeg, etc.), 2 for pos/negC where C is either x, y, z (e.g.,
+        skybox_posx.png, skybox_negy.png, etc.), and 3 for position in the cube
+        map (e.g., skybox_right.jpg, skybox_front.jpg, etc).
+    ext : str, optional
+        Image type extension. (.jpg, .jpeg, .png, etc.).
+
+    Returns
+    -------
+    list of paths : list
+        List with the complete paths of the skybox textures.
+
+    """
+    # Set of commonly used cube map naming conventions and its associated
+    # indexing number. For a correct creation and display of the skybox,
+    # textures must be read in this order.
+    suffix_types = {
+        0: ['0', '1', '2', '3', '4', '5'],
+        1: ['-px', '-nx', '-py', '-ny', '-pz', '-nz'],
+        2: ['posx', 'negx', 'posy', 'negy', 'posz', 'negz'],
+        3: ['right', 'left', 'top', 'bottom', 'front', 'back']
+    }
+    if suffix_type in suffix_types:
+        conv = suffix_types[suffix_type]
+    else:
+        warnings.warn('read_viz_cubemap(): Invalid suffix_type.')
+        return None
+    cubemap_fnames = []
+    folder = pjoin(fury_home, 'cubemaps')
+    for dir_conv in conv:
+        cubemap_fnames.append(pjoin(folder, name + dir_conv + ext))
+    return cubemap_fnames
 
 
 def read_viz_icons(style='icomoon', fname='infinity.png'):
@@ -371,6 +441,8 @@ def read_viz_icons(style='icomoon', fname='infinity.png'):
         Complete path of icon.
 
     """
+    if not os.path.isdir(pjoin(fury_home, 'icons')):
+        fetch_viz_icons()
     folder = pjoin(fury_home, 'icons', style)
     return pjoin(folder, fname)
 
@@ -410,4 +482,23 @@ def read_viz_textures(fname):
 
     """
     folder = pjoin(fury_home, 'textures')
+    return pjoin(folder, fname)
+
+
+def read_viz_dmri(fname):
+    """Read specific dMRI image.
+
+    Parameters
+    ----------
+    fname: str
+        Filename of the texture.
+        This should be found in folder HOME/.fury/dmri/.
+
+    Returns
+    -------
+    path : str
+        Complete path of dMRI image.
+
+    """
+    folder = pjoin(fury_home, 'dmri')
     return pjoin(folder, fname)

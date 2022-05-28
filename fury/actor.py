@@ -1,20 +1,38 @@
 """Module that provide actors to render."""
 
-import os.path as op
-import numpy as np
-import vtk
-from vtk.util import numpy_support
+import warnings
+from functools import partial
 
-import fury.shaders as fs
+import numpy as np
+
+from fury.shaders import (add_shader_callback, attribute_to_actor,
+                          compose_shader, import_fury_shader,
+                          replace_shader_in_actor, shader_to_actor)
 from fury import layout
-from fury.colormap import colormap_lookup_table, create_colormap, orient2rgb
-from fury.deprecator import deprecated_params
+from fury.actors.odf_slicer import OdfSlicerActor
+from fury.actors.peak import PeakActor
+from fury.colormap import colormap_lookup_table
+from fury.deprecator import deprecated_params, deprecate_with_version
+from fury.io import load_image
+from fury.lib import (numpy_support, Transform, ImageData, PolyData, Matrix4x4,
+                      ImageReslice, ImageActor, CellPicker, OutlineFilter,
+                      Actor, PolyDataMapper, LookupTable, ImageMapToColors,
+                      Points, CleanPolyData, LoopSubdivisionFilter, TubeFilter,
+                      ButterflySubdivisionFilter, ContourFilter, SplineFilter,
+                      PolyDataNormals, Assembly, LODActor, VTK_UNSIGNED_CHAR,
+                      PolyDataMapper2D, ScalarBarActor, PolyVertex, CellArray,
+                      UnstructuredGrid, DataSetMapper, ConeSource, ArrowSource,
+                      SphereSource, CylinderSource, DiskSource, TexturedSphereSource,
+                      Texture, FloatArray, VTK_TEXT_LEFT, VTK_TEXT_RIGHT,
+                      VTK_TEXT_BOTTOM, VTK_TEXT_TOP, VTK_TEXT_CENTERED,
+                      TexturedActor2D, TextureMapToPlane, TextActor3D,
+                      Follower, VectorText)
+import fury.primitive as fp
 from fury.utils import (lines_to_vtk_polydata, set_input, apply_affine,
                         set_polydata_vertices, set_polydata_triangles,
-                        numpy_to_vtk_matrix, shallow_copy, rgb_to_vtk,
-                        repeat_sources, get_actor_from_primitive)
-from fury.io import load_image
-import fury.primitive as fp
+                        shallow_copy, rgb_to_vtk, numpy_to_vtk_matrix,
+                        repeat_sources, get_actor_from_primitive,
+                        fix_winding_order, numpy_to_vtk_colors, color_check)
 
 
 def slicer(data, affine=None, value_range=None, opacity=1.,
@@ -70,7 +88,7 @@ def slicer(data, affine=None, value_range=None, opacity=1.,
 
     vol = data
 
-    im = vtk.vtkImageData()
+    im = ImageData()
     I, J, K = vol.shape[:3]
     im.SetDimensions(I, J, K)
     # for now setting up for 1x1x1 but transformation comes later.
@@ -80,7 +98,7 @@ def slicer(data, affine=None, value_range=None, opacity=1.,
 
     vtk_type = numpy_support.get_vtk_array_type(vol.dtype)
     im.AllocateScalars(vtk_type, nb_components)
-    # im.AllocateScalars(vtk.VTK_UNSIGNED_CHAR, nb_components)
+    # im.AllocateScalars(VTK_UNSIGNED_CHAR, nb_components)
 
     # copy data
     # what I do below is the same as what is
@@ -103,8 +121,8 @@ def slicer(data, affine=None, value_range=None, opacity=1.,
         affine = np.eye(4)
 
     # Set the transform (identity if none given)
-    transform = vtk.vtkTransform()
-    transform_matrix = vtk.vtkMatrix4x4()
+    transform = Transform()
+    transform_matrix = Matrix4x4()
     transform_matrix.DeepCopy((
         affine[0][0], affine[0][1], affine[0][2], affine[0][3],
         affine[1][0], affine[1][1], affine[1][2], affine[1][3],
@@ -114,7 +132,7 @@ def slicer(data, affine=None, value_range=None, opacity=1.,
     transform.Inverse()
 
     # Set the reslicing
-    image_resliced = vtk.vtkImageReslice()
+    image_resliced = ImageReslice()
     set_input(image_resliced, im)
     image_resliced.SetResliceTransform(transform)
     image_resliced.AutoCropOutputOn()
@@ -142,9 +160,9 @@ def slicer(data, affine=None, value_range=None, opacity=1.,
     if data.ndim == 3:
         resliced = resliced.reshape(ez2 + 1, ey2 + 1, ex2 + 1)
 
-    class ImageActor(vtk.vtkImageActor):
+    class ImActor(ImageActor):
         def __init__(self):
-            self.picker = vtk.vtkCellPicker()
+            self.picker = CellPicker()
             self.output = None
             self.shape = None
             self.outline_actor = None
@@ -152,11 +170,11 @@ def slicer(data, affine=None, value_range=None, opacity=1.,
         def input_connection(self, output):
 
             # outline only
-            outline = vtk.vtkOutlineFilter()
+            outline = OutlineFilter()
             outline.SetInputData(vtk_resliced_data)
-            outline_mapper = vtk.vtkPolyDataMapper()
+            outline_mapper = PolyDataMapper()
             outline_mapper.SetInputConnection(outline.GetOutputPort())
-            self.outline_actor = vtk.vtkActor()
+            self.outline_actor = Actor()
             self.outline_actor.SetMapper(outline_mapper)
             self.outline_actor.GetProperty().SetColor(1, 0.5, 0)
             self.outline_actor.GetProperty().SetLineWidth(5)
@@ -185,7 +203,7 @@ def slicer(data, affine=None, value_range=None, opacity=1.,
                 self.display_extent(ex1, ex2, ey1, ey2, z, z)
 
         def resliced_array(self):
-            """ Returns resliced array as numpy array"""
+            """Return resliced array as numpy array."""
             resliced = numpy_support.vtk_to_numpy(
                 vtk_resliced_data.GetPointData().GetScalars())
 
@@ -206,7 +224,7 @@ def slicer(data, affine=None, value_range=None, opacity=1.,
             self.picker.SetTolerance(value)
 
         def copy(self):
-            im_actor = ImageActor()
+            im_actor = ImActor()
             im_actor.input_connection(self.output)
             im_actor.SetDisplayExtent(*self.GetDisplayExtent())
             im_actor.opacity(self.GetOpacity())
@@ -224,14 +242,15 @@ def slicer(data, affine=None, value_range=None, opacity=1.,
 
     r1, r2 = value_range
 
-    image_actor = ImageActor()
+    image_actor = ImActor()
     if nb_components == 1:
         lut = lookup_colormap
         if lookup_colormap is None:
             # Create a black/white lookup table.
             lut = colormap_lookup_table((r1, r2), (0, 0), (0, 0), (0, 1))
 
-        plane_colors = vtk.vtkImageMapToColors()
+        plane_colors = ImageMapToColors()
+        plane_colors.SetOutputFormatToRGB()
         plane_colors.SetLookupTable(lut)
         plane_colors.SetInputConnection(image_resliced.GetOutputPort())
         plane_colors.Update()
@@ -253,47 +272,48 @@ def slicer(data, affine=None, value_range=None, opacity=1.,
 
 
 def surface(vertices, faces=None, colors=None, smooth=None, subdivision=3):
-    """Generates a surface actor from an array of vertices
-        The color and smoothness of the surface can be customized by specifying
-        the type of subdivision algorithm and the number of subdivisions.
+    """Generate a surface actor from an array of vertices.
 
-        Parameters
-        ----------
-        vertices : array, shape (X, Y, Z)
-            The point cloud defining the surface.
-        faces : array
-            An array of precomputed triangulation for the point cloud.
-            It is an optional parameter, it is computed locally if None
-        colors : (N, 3) array
-            Specifies the colors associated with each vertex in the
-            vertices array.
-            Optional parameter, if not passed, all vertices
-            are colored white
-        smooth : string - "loop" or "butterfly"
-            Defines the type of subdivision to be used
-            for smoothing the surface
-        subdivision : integer, default = 3
-            Defines the number of subdivisions to do for
-            each triangulation of the point cloud.
-            The higher the value, smoother the surface
-            but at the cost of higher computation
+    The color and smoothness of the surface can be customized by specifying
+    the type of subdivision algorithm and the number of subdivisions.
 
-        Returns
-        -------
-        surface_actor : vtkActor
-            A vtkActor visualizing the final surface
-            computed from the point cloud is returned.
+    Parameters
+    ----------
+    vertices : array, shape (X, Y, Z)
+        The point cloud defining the surface.
+    faces : array
+        An array of precomputed triangulation for the point cloud.
+        It is an optional parameter, it is computed locally if None
+    colors : (N, 3) array
+        Specifies the colors associated with each vertex in the
+        vertices array. Range should be 0 to 1.
+        Optional parameter, if not passed, all vertices
+        are colored white
+    smooth : string - "loop" or "butterfly"
+        Defines the type of subdivision to be used
+        for smoothing the surface
+    subdivision : integer, default = 3
+        Defines the number of subdivisions to do for
+        each triangulation of the point cloud.
+        The higher the value, smoother the surface
+        but at the cost of higher computation
+
+    Returns
+    -------
+    surface_actor : Actor
+        An Actor visualizing the final surface
+        computed from the point cloud is returned.
 
     """
     from scipy.spatial import Delaunay
-    points = vtk.vtkPoints()
+    points = Points()
     points.SetData(numpy_support.numpy_to_vtk(vertices))
-    triangle_poly_data = vtk.vtkPolyData()
+    triangle_poly_data = PolyData()
     triangle_poly_data.SetPoints(points)
 
     if colors is not None:
         triangle_poly_data.GetPointData().\
-            SetScalars(numpy_support.numpy_to_vtk(colors))
+            SetScalars(numpy_to_vtk_colors(255 * colors))
 
     if faces is None:
         tri = Delaunay(vertices[:, [0, 1]])
@@ -301,25 +321,25 @@ def surface(vertices, faces=None, colors=None, smooth=None, subdivision=3):
 
     set_polydata_triangles(triangle_poly_data, faces)
 
-    clean_poly_data = vtk.vtkCleanPolyData()
+    clean_poly_data = CleanPolyData()
     clean_poly_data.SetInputData(triangle_poly_data)
 
-    mapper = vtk.vtkPolyDataMapper()
-    surface_actor = vtk.vtkActor()
+    mapper = PolyDataMapper()
+    surface_actor = Actor()
 
     if smooth is None:
         mapper.SetInputData(triangle_poly_data)
         surface_actor.SetMapper(mapper)
 
     elif smooth == "loop":
-        smooth_loop = vtk.vtkLoopSubdivisionFilter()
+        smooth_loop = LoopSubdivisionFilter()
         smooth_loop.SetNumberOfSubdivisions(subdivision)
         smooth_loop.SetInputConnection(clean_poly_data.GetOutputPort())
         mapper.SetInputConnection(smooth_loop.GetOutputPort())
         surface_actor.SetMapper(mapper)
 
     elif smooth == "butterfly":
-        smooth_butterfly = vtk.vtkButterflySubdivisionFilter()
+        smooth_butterfly = ButterflySubdivisionFilter()
         smooth_butterfly.SetNumberOfSubdivisions(subdivision)
         smooth_butterfly.SetInputConnection(clean_poly_data.GetOutputPort())
         mapper.SetInputConnection(smooth_butterfly.GetOutputPort())
@@ -362,13 +382,13 @@ def contour_from_roi(data, affine=None,
     vol = np.interp(data, xp=[data.min(), data.max()], fp=[0, 255])
     vol = vol.astype('uint8')
 
-    im = vtk.vtkImageData()
+    im = ImageData()
     di, dj, dk = vol.shape[:3]
     im.SetDimensions(di, dj, dk)
     voxsz = (1., 1., 1.)
     # im.SetOrigin(0,0,0)
     im.SetSpacing(voxsz[2], voxsz[0], voxsz[1])
-    im.AllocateScalars(vtk.VTK_UNSIGNED_CHAR, nb_components)
+    im.AllocateScalars(VTK_UNSIGNED_CHAR, nb_components)
 
     # copy data
     vol = np.swapaxes(vol, 0, 2)
@@ -383,8 +403,8 @@ def contour_from_roi(data, affine=None,
         affine = np.eye(4)
 
     # Set the transform (identity if none given)
-    transform = vtk.vtkTransform()
-    transform_matrix = vtk.vtkMatrix4x4()
+    transform = Transform()
+    transform_matrix = Matrix4x4()
     transform_matrix.DeepCopy((
         affine[0][0], affine[0][1], affine[0][2], affine[0][3],
         affine[1][0], affine[1][1], affine[1][2], affine[1][3],
@@ -394,7 +414,7 @@ def contour_from_roi(data, affine=None,
     transform.Inverse()
 
     # Set the reslicing
-    image_resliced = vtk.vtkImageReslice()
+    image_resliced = ImageReslice()
     set_input(image_resliced, im)
     image_resliced.SetResliceTransform(transform)
     image_resliced.AutoCropOutputOn()
@@ -409,19 +429,19 @@ def contour_from_roi(data, affine=None,
     image_resliced.SetInterpolationModeToLinear()
     image_resliced.Update()
 
-    skin_extractor = vtk.vtkContourFilter()
+    skin_extractor = ContourFilter()
     skin_extractor.SetInputData(image_resliced.GetOutput())
 
     skin_extractor.SetValue(0, 1)
-    skin_normals = vtk.vtkPolyDataNormals()
+    skin_normals = PolyDataNormals()
     skin_normals.SetInputConnection(skin_extractor.GetOutputPort())
     skin_normals.SetFeatureAngle(60.0)
 
-    skin_mapper = vtk.vtkPolyDataMapper()
+    skin_mapper = PolyDataMapper()
     skin_mapper.SetInputConnection(skin_normals.GetOutputPort())
     skin_mapper.ScalarVisibilityOff()
 
-    skin_actor = vtk.vtkActor()
+    skin_actor = Actor()
 
     skin_actor.SetMapper(skin_mapper)
     skin_actor.GetProperty().SetColor(color[0], color[1], color[2])
@@ -453,13 +473,13 @@ def contour_from_label(data, affine=None, color=None):
         Array surface object displayed in space
         coordinates as calculated by the affine parameter
         in the order of their roi ids.
-    """
 
+    """
     unique_roi_id = np.delete(np.unique(data), 0)
 
     nb_surfaces = len(unique_roi_id)
 
-    unique_roi_surfaces = vtk.vtkAssembly()
+    unique_roi_surfaces = Assembly()
 
     if color is None:
         color = np.random.rand(nb_surfaces, 3)
@@ -470,10 +490,10 @@ def contour_from_label(data, affine=None, color=None):
         opacity = color[:, -1]
         color = color[:, :-1]
     else:
-        opacity = np.ones((nb_surfaces, 1)).astype(np.float)
+        opacity = np.ones((nb_surfaces, 1)).astype(float)
 
     for i, roi_id in enumerate(unique_roi_id):
-        roi_data = np.isin(data, roi_id).astype(np.int)
+        roi_data = np.isin(data, roi_id).astype(int)
         roi_surface = contour_from_roi(roi_data, affine,
                                        color=color[i],
                                        opacity=opacity[i])
@@ -485,7 +505,7 @@ def contour_from_label(data, affine=None, color=None):
 def streamtube(lines, colors=None, opacity=1, linewidth=0.1, tube_sides=9,
                lod=True, lod_points=10 ** 4, lod_points_size=3,
                spline_subdiv=None, lookup_colormap=None):
-    """Use streamtubes to visualize polylines
+    """Use streamtubes to visualize polylines.
 
     Parameters
     ----------
@@ -519,7 +539,7 @@ def streamtube(lines, colors=None, opacity=1, linewidth=0.1, tube_sides=9,
     tube_sides : int, optional
         Default is 9.
     lod : bool, optional
-        Use vtkLODActor(level of detail) rather than vtkActor. Default is True.
+        Use LODActor(level of detail) rather than Actor. Default is True.
         Level of detail actors do not render the full geometry when the
         frame rate is low.
     lod_points : int, optional
@@ -568,7 +588,7 @@ def streamtube(lines, colors=None, opacity=1, linewidth=0.1, tube_sides=9,
     next_input = poly_data
 
     # Set Normals
-    poly_normals = set_input(vtk.vtkPolyDataNormals(), next_input)
+    poly_normals = set_input(PolyDataNormals(), next_input)
     poly_normals.ComputeCellNormalsOn()
     poly_normals.ComputePointNormalsOn()
     poly_normals.ConsistencyOn()
@@ -578,14 +598,14 @@ def streamtube(lines, colors=None, opacity=1, linewidth=0.1, tube_sides=9,
 
     # Spline interpolation
     if (spline_subdiv is not None) and (spline_subdiv > 0):
-        spline_filter = set_input(vtk.vtkSplineFilter(), next_input)
+        spline_filter = set_input(SplineFilter(), next_input)
         spline_filter.SetSubdivideToSpecified()
         spline_filter.SetNumberOfSubdivisions(spline_subdiv)
         spline_filter.Update()
         next_input = spline_filter.GetOutputPort()
 
     # Add thickness to the resulting lines
-    tube_filter = set_input(vtk.vtkTubeFilter(), next_input)
+    tube_filter = set_input(TubeFilter(), next_input)
     tube_filter.SetNumberOfSides(tube_sides)
     tube_filter.SetRadius(linewidth)
     # TODO using the line above we will be able to visualize
@@ -596,10 +616,10 @@ def streamtube(lines, colors=None, opacity=1, linewidth=0.1, tube_sides=9,
     next_input = tube_filter.GetOutputPort()
 
     # Poly mapper
-    poly_mapper = set_input(vtk.vtkPolyDataMapper(), next_input)
+    poly_mapper = set_input(PolyDataMapper(), next_input)
     poly_mapper.ScalarVisibilityOn()
     poly_mapper.SetScalarModeToUsePointFieldData()
-    poly_mapper.SelectColorArray("Colors")
+    poly_mapper.SelectColorArray("colors")
     poly_mapper.Update()
 
     # Color Scale with a lookup table
@@ -612,11 +632,11 @@ def streamtube(lines, colors=None, opacity=1, linewidth=0.1, tube_sides=9,
 
     # Set Actor
     if lod:
-        actor = vtk.vtkLODActor()
+        actor = LODActor()
         actor.SetNumberOfCloudPoints(lod_points)
         actor.GetProperty().SetPointSize(lod_points_size)
     else:
-        actor = vtk.vtkActor()
+        actor = Actor()
 
     actor.SetMapper(poly_mapper)
 
@@ -630,7 +650,7 @@ def streamtube(lines, colors=None, opacity=1, linewidth=0.1, tube_sides=9,
 def line(lines, colors=None, opacity=1, linewidth=1,
          spline_subdiv=None, lod=True, lod_points=10 ** 4, lod_points_size=3,
          lookup_colormap=None, depth_cue=False, fake_tube=False):
-    """ Create an actor for one or more lines.
+    """Create an actor for one or more lines.
 
     Parameters
     ------------
@@ -665,7 +685,7 @@ def line(lines, colors=None, opacity=1, linewidth=1,
         Number of splines subdivision to smooth streamtubes. Default is None
         which means no subdivision.
     lod : bool, optional
-        Use vtkLODActor(level of detail) rather than vtkActor. Default is True.
+        Use LODActor(level of detail) rather than Actor. Default is True.
         Level of detail actors do not render the full geometry when the
         frame rate is low.
     lod_points : int, optional
@@ -683,7 +703,7 @@ def line(lines, colors=None, opacity=1, linewidth=1,
 
     Returns
     ----------
-    v : vtkActor or vtkLODActor object
+    v : Actor or LODActor object
         Line.
 
     Examples
@@ -695,6 +715,7 @@ def line(lines, colors=None, opacity=1, linewidth=1,
     >>> c = actor.line(lines, colors)
     >>> scene.add(c)
     >>> #window.show(scene)
+
     """
     # Poly data with lines and colors
     poly_data, color_is_scalar = lines_to_vtk_polydata(lines, colors)
@@ -702,29 +723,17 @@ def line(lines, colors=None, opacity=1, linewidth=1,
 
     # use spline interpolation
     if (spline_subdiv is not None) and (spline_subdiv > 0):
-        spline_filter = set_input(vtk.vtkSplineFilter(), next_input)
+        spline_filter = set_input(SplineFilter(), next_input)
         spline_filter.SetSubdivideToSpecified()
         spline_filter.SetNumberOfSubdivisions(spline_subdiv)
         spline_filter.Update()
         next_input = spline_filter.GetOutputPort()
 
-    poly_mapper = set_input(vtk.vtkPolyDataMapper(), next_input)
+    poly_mapper = set_input(PolyDataMapper(), next_input)
     poly_mapper.ScalarVisibilityOn()
     poly_mapper.SetScalarModeToUsePointFieldData()
-    poly_mapper.SelectColorArray("Colors")
+    poly_mapper.SelectColorArray("colors")
     poly_mapper.Update()
-
-    if depth_cue:
-        poly_mapper.SetGeometryShaderCode(fs.load("line.geom"))
-
-        @vtk.calldata_type(vtk.VTK_OBJECT)
-        def vtkShaderCallback(_caller, _event, calldata=None):
-            program = calldata
-            if program is not None:
-                program.SetUniformf("linewidth", linewidth)
-
-        poly_mapper.AddObserver(vtk.vtkCommand.UpdateShaderEvent,
-                                vtkShaderCallback)
 
     # Color Scale with a lookup table
     if color_is_scalar:
@@ -737,15 +746,25 @@ def line(lines, colors=None, opacity=1, linewidth=1,
 
     # Set Actor
     if lod:
-        actor = vtk.vtkLODActor()
+        actor = LODActor()
         actor.SetNumberOfCloudPoints(lod_points)
         actor.GetProperty().SetPointSize(lod_points_size)
     else:
-        actor = vtk.vtkActor()
+        actor = Actor()
 
     actor.SetMapper(poly_mapper)
     actor.GetProperty().SetLineWidth(linewidth)
     actor.GetProperty().SetOpacity(opacity)
+
+    if depth_cue:
+        def callback(_caller, _event, calldata=None):
+            program = calldata
+            if program is not None:
+                program.SetUniformf("linewidth", linewidth)
+
+        replace_shader_in_actor(actor, 'geometry',
+                                import_fury_shader('line.geom'))
+        add_shader_callback(actor, callback)
 
     if fake_tube:
         actor.GetProperty().SetRenderLinesAsTubes(True)
@@ -771,12 +790,12 @@ def scalar_bar(lookup_table=None, title=" "):
     :func:`fury.actor.colormap_lookup_table`
 
     """
-    lookup_table_copy = vtk.vtkLookupTable()
+    lookup_table_copy = LookupTable()
     if lookup_table is None:
         lookup_table = colormap_lookup_table()
     # Deepcopy the lookup_table because sometimes vtkPolyDataMapper deletes it
     lookup_table_copy.DeepCopy(lookup_table)
-    scalar_bar = vtk.vtkScalarBarActor()
+    scalar_bar = ScalarBarActor()
     scalar_bar.SetTitle(title)
     scalar_bar.SetLookupTable(lookup_table_copy)
     scalar_bar.SetNumberOfLabels(6)
@@ -804,9 +823,9 @@ def axes(scale=(1, 1, 1), colorx=(1, 0, 0), colory=(0, 1, 0), colorz=(0, 0, 1),
 
     Returns
     -------
-    vtkActor
-    """
+    arrow_actor: Actor
 
+    """
     centers = np.zeros((3, 3))
     dirs = np.array([[1, 0, 0], [0, 1, 0], [0, 0, 1]])
     colors = np.array([colorx + (opacity,),
@@ -814,214 +833,202 @@ def axes(scale=(1, 1, 1), colorx=(1, 0, 0), colory=(0, 1, 0), colorz=(0, 0, 1),
                        colorz + (opacity,)])
 
     scales = np.asarray(scale)
-    return arrow(centers, dirs, colors, scales)
+    arrow_actor = arrow(centers, dirs, colors, scales, repeat_primitive=False)
+    return arrow_actor
 
 
-def odf_slicer(odfs, affine=None, mask=None, sphere=None, scale=2.2,
-               norm=True, radial_scale=True, opacity=1.,
-               colormap='blues', global_cm=False):
-    """ Slice spherical fields in native or world coordinates
+def odf_slicer(odfs, affine=None, mask=None, sphere=None, scale=0.5,
+               norm=True, radial_scale=True, opacity=1.0, colormap=None,
+               global_cm=False, B_matrix=None):
+    """
+    Create an actor for rendering a grid of ODFs given an array of
+    spherical function (SF) or spherical harmonics (SH) coefficients.
 
     Parameters
     ----------
     odfs : ndarray
-        4D array of spherical functions
+        4D ODFs array in SF or SH coefficients. If SH coefficients,
+        `B_matrix` must be supplied.
     affine : array
-        4x4 transformation array from native coordinates to world coordinates
+        4x4 transformation array from native coordinates to world coordinates.
     mask : ndarray
-        3D mask
-    sphere : Sphere
-        a sphere
+        3D mask to apply to ODF field.
+    sphere : dipy Sphere
+        The sphere used for SH to SF projection. If None, a default sphere
+        of 100 vertices will be used.
     scale : float
-        Distance between spheres.
+        Multiplicative factor to apply to ODF amplitudes.
     norm : bool
-        Normalize `sphere_values`.
+        Normalize SF amplitudes so that the maximum
+        ODF amplitude per voxel along a direction is 1.
     radial_scale : bool
-        Scale sphere points according to odf values.
+        Scale sphere points by ODF values.
     opacity : float
-        Takes values from 0 (fully transparent) to 1 (opaque). Default is 1.
-    colormap : None or str
-        If None then white color is used. Otherwise the name of colormap is
-        given. Matplotlib colormaps are supported (e.g., 'inferno').
+        Takes values from 0 (fully transparent) to 1 (opaque).
+    colormap : None or str or tuple
+        The name of the colormap to use. Matplotlib colormaps are supported
+        (e.g., 'inferno'). A plain color can be supplied as a RGB tuple in
+        range [0, 255]. If None then a RGB colormap is used.
     global_cm : bool
         If True the colormap will be applied in all ODFs. If False
-        it will be applied individually at each voxel (default False).
+        it will be applied individually at each voxel.
+    B_matrix : ndarray (n_coeffs, n_vertices)
+        Optional SH to SF matrix for projecting `odfs` given in SH
+        coefficents on the `sphere`. If None, then the input is assumed
+        to be expressed in SF coefficients.
 
     Returns
     ---------
-    actor : vtkActor
-        Spheres
+    actor : OdfSlicerActor
+        Actor representing the ODF field.
     """
+    # first we check if the input array is 4D
+    n_dims = len(odfs.shape)
+    if n_dims != 4:
+        raise ValueError('Invalid number of dimensions for odfs. Expected 4 '
+                         'dimensions, got {0} dimensions.'.format(n_dims))
 
-    if mask is None:
-        mask = np.ones(odfs.shape[:3], dtype=np.bool)
+    # we generate indices for all nonzero voxels
+    valid_odf_mask = np.abs(odfs).max(axis=-1) > 0.
+    if mask is not None:
+        valid_odf_mask = np.logical_and(valid_odf_mask, mask)
+    indices = np.nonzero(valid_odf_mask)
+    shape = odfs.shape[:-1]
+
+    if sphere is None:
+        # Use a default sphere with 100 vertices
+        vertices, faces = fp.prim_sphere('repulsion100')
     else:
-        mask = mask.astype(np.bool)
+        vertices = sphere.vertices
+        faces = fix_winding_order(vertices, sphere.faces, clockwise=True)
 
-    szx, szy, szz = odfs.shape[:3]
-
-    class OdfSlicerActor(vtk.vtkLODActor):
-        def __init__(self):
-            self.mapper = None
-
-        def display_extent(self, x1, x2, y1, y2, z1, z2):
-            tmp_mask = np.zeros(odfs.shape[:3], dtype=np.bool)
-            tmp_mask[x1:x2 + 1, y1:y2 + 1, z1:z2 + 1] = True
-            tmp_mask = np.bitwise_and(tmp_mask, mask)
-
-            self.mapper = _odf_slicer_mapper(odfs=odfs,
-                                             affine=affine,
-                                             mask=tmp_mask,
-                                             sphere=sphere,
-                                             scale=scale,
-                                             norm=norm,
-                                             radial_scale=radial_scale,
-                                             colormap=colormap,
-                                             global_cm=global_cm)
-            self.SetMapper(self.mapper)
-
-        def display(self, x=None, y=None, z=None):
-            if x is None and y is None and z is None:
-                self.display_extent(0, szx - 1, 0, szy - 1,
-                                    int(np.floor(szz/2)), int(np.floor(szz/2)))
-            if x is not None:
-                self.display_extent(x, x, 0, szy - 1, 0, szz - 1)
-            if y is not None:
-                self.display_extent(0, szx - 1, y, y, 0, szz - 1)
-            if z is not None:
-                self.display_extent(0, szx - 1, 0, szy - 1, z, z)
-
-    odf_actor = OdfSlicerActor()
-    odf_actor.display_extent(0, szx - 1, 0, szy - 1,
-                             int(np.floor(szz/2)), int(np.floor(szz/2)))
-    odf_actor.GetProperty().SetOpacity(opacity)
-
-    return odf_actor
-
-
-def _odf_slicer_mapper(odfs, affine=None, mask=None, sphere=None, scale=2.2,
-                       norm=True, radial_scale=True, colormap='plasma',
-                       global_cm=False):
-    """ Helper function for slicing spherical fields
-
-    Parameters
-    ----------
-    odfs : ndarray
-        4D array of spherical functions
-    affine : array
-        4x4 transformation array from native coordinates to world coordinates
-    mask : ndarray
-        3D mask
-    sphere : Sphere
-        a sphere
-    scale : float
-        Distance between spheres.
-    norm : bool
-        Normalize `sphere_values`.
-    radial_scale : bool
-        Scale sphere points according to odf values.
-    colormap : None or str
-        If None then sphere vertices are used to compute orientation-based
-        color. Otherwise the name of colormap is given. Matplotlib colormaps
-        are supported (e.g., 'inferno').
-    global_cm : bool
-        If True the colormap will be applied in all ODFs. If False
-        it will be applied individually at each voxel (default False).
-
-    Returns
-    ---------
-    mapper : vtkPolyDataMapper
-        Spheres mapper
-    """
-    mask = np.ones(odfs.shape[:3]) if mask is None else mask
-
-    ijk = np.ascontiguousarray(np.array(np.nonzero(mask)).T)
-
-    if len(ijk) == 0:
-        return None
-
-    if affine is not None:
-        ijk = np.ascontiguousarray(apply_affine(affine, ijk))
-
-    faces = np.asarray(sphere.faces, dtype=int)
-    vertices = sphere.vertices
-
-    all_xyz = []
-    all_faces = []
-    all_ms = []
-    for (k, center) in enumerate(ijk):
-
-        m = odfs[tuple(center.astype(np.int))].copy()
-
-        if norm:
-            m /= np.abs(m).max()
-
-        if radial_scale:
-            xyz = vertices * m[:, None]
-        else:
-            xyz = vertices.copy()
-
-        all_xyz.append(scale * xyz + center)
-        all_faces.append(faces + k * xyz.shape[0])
-        all_ms.append(m)
-
-    all_xyz = np.ascontiguousarray(np.concatenate(all_xyz))
-    all_xyz_vtk = numpy_support.numpy_to_vtk(all_xyz, deep=True)
-
-    if global_cm:
-        all_ms = np.ascontiguousarray(
-            np.concatenate(all_ms), dtype='f4')
-
-    points = vtk.vtkPoints()
-    points.SetData(all_xyz_vtk)
-
-    all_faces = np.concatenate(all_faces)
-
-    if global_cm:
-        if colormap is None:
-            raise IOError("if global_cm=True, colormap must be defined")
-        else:
-            cols = create_colormap(all_ms.ravel(), colormap)
+    if B_matrix is None:
+        if len(vertices) != odfs.shape[-1]:
+            raise ValueError('Invalid nunber of SF coefficients. '
+                             'Expected {0}, got {1}.'
+                             .format(len(vertices), odfs.shape[-1]))
     else:
-        cols = np.zeros((ijk.shape[0],) + sphere.vertices.shape,
-                        dtype='f4')
-        for k in range(ijk.shape[0]):
-            if colormap is not None:
-                tmp = create_colormap(all_ms[k].ravel(), colormap)
-            else:
-                tmp = orient2rgb(sphere.vertices)
-            cols[k] = tmp.copy()
+        if len(vertices) != B_matrix.shape[1]:
+            raise ValueError('Invalid nunber of SH coefficients. '
+                             'Expected {0}, got {1}.'
+                             .format(len(vertices), B_matrix.shape[1]))
 
-        cols = np.ascontiguousarray(
-            np.reshape(cols, (cols.shape[0] * cols.shape[1],
-                       cols.shape[2])), dtype='f4')
-
-    vtk_colors = numpy_support.numpy_to_vtk(
-        np.asarray(255 * cols),
-        deep=True,
-        array_type=vtk.VTK_UNSIGNED_CHAR)
-
-    vtk_colors.SetName("Colors")
-
-    polydata = vtk.vtkPolyData()
-    polydata.SetPoints(points)
-    set_polydata_triangles(polydata, all_faces)
-
-    polydata.GetPointData().SetScalars(vtk_colors)
-
-    mapper = vtk.vtkPolyDataMapper()
-    mapper.SetInputData(polydata)
-
-    return mapper
+    # create and return an instance of OdfSlicerActor
+    return OdfSlicerActor(odfs[indices], vertices, faces, indices, scale, norm,
+                          radial_scale, shape, global_cm, colormap, opacity,
+                          affine, B_matrix)
 
 
 def _makeNd(array, ndim):
-    """
-    Pads as many 1s at the beginning of array's shape as are need to give
+    """Pad as many 1s at the beginning of array's shape as are need to give
     array ndim dimensions.
     """
     new_shape = (1,) * (ndim - array.ndim) + array.shape
     return array.reshape(new_shape)
+
+
+def _roll_evals(evals, axis=-1):
+    """Check evals shape.
+
+    Helper function to check that the evals provided to functions calculating
+    tensor statistics have the right shape
+
+    Parameters
+    ----------
+    evals : array-like
+        Eigenvalues of a diffusion tensor. shape should be (...,3).
+
+    axis : int
+        The axis of the array which contains the 3 eigenvals. Default: -1
+
+    Returns
+    -------
+    evals : array-like
+        Eigenvalues of a diffusion tensor, rolled so that the 3 eigenvals are
+        the last axis.
+
+    """
+    if evals.shape[-1] != 3:
+        msg = "Expecting 3 eigenvalues, got {}".format(evals.shape[-1])
+        raise ValueError(msg)
+
+    evals = np.rollaxis(evals, axis)
+
+    return evals
+
+def _fa(evals, axis=-1):
+    r"""Return Fractional anisotropy (FA) of a diffusion tensor.
+
+    Parameters
+    ----------
+    evals : array-like
+        Eigenvalues of a diffusion tensor.
+    axis : int
+        Axis of `evals` which contains 3 eigenvalues.
+
+    Returns
+    -------
+    fa : array
+        Calculated FA. Range is 0 <= FA <= 1.
+
+    Notes
+    -----
+    FA is calculated using the following equation:
+
+    .. math::
+
+        FA = \sqrt{\frac{1}{2}\frac{(\lambda_1-\lambda_2)^2+(\lambda_1-
+                    \lambda_3)^2+(\lambda_2-\lambda_3)^2}{\lambda_1^2+
+                    \lambda_2^2+\lambda_3^2}}
+
+    """
+    evals = _roll_evals(evals, axis)
+    # Make sure not to get nans
+    all_zero = (evals == 0).all(axis=0)
+    ev1, ev2, ev3 = evals
+    fa = np.sqrt(0.5 * ((ev1 - ev2) ** 2 +
+                        (ev2 - ev3) ** 2 +
+                        (ev3 - ev1) ** 2) /
+                 ((evals * evals).sum(0) + all_zero))
+
+    return fa
+
+
+def _color_fa(fa, evecs):
+    r""" Color fractional anisotropy of diffusion tensor
+
+    Parameters
+    ----------
+    fa : array-like
+        Array of the fractional anisotropy (can be 1D, 2D or 3D)
+
+    evecs : array-like
+        eigen vectors from the tensor model
+
+    Returns
+    -------
+    rgb : Array with 3 channels for each color as the last dimension.
+        Colormap of the FA with red for the x value, y for the green
+        value and z for the blue value.
+
+    Notes
+    -----
+
+    It is computed from the clipped FA between 0 and 1 using the following
+    formula
+
+    .. math::
+
+        rgb = abs(max(\vec{e})) \times fa
+    """
+
+    if (fa.shape != evecs[..., 0, 0].shape) or ((3, 3) != evecs.shape[-2:]):
+        raise ValueError("Wrong number of dimensions for evecs")
+
+    return np.abs(evecs[..., 0]) * np.clip(fa, 0, 1)[..., None]
+
+
+
 
 
 def tensor_slicer(evals, evecs, affine=None, mask=None, sphere=None, scale=2.2,
@@ -1052,7 +1059,7 @@ def tensor_slicer(evals, evecs, affine=None, mask=None, sphere=None, scale=2.2,
 
     Returns
     ---------
-    actor : vtkActor
+    tensor_actor : Actor
         Ellipsoid
 
     """
@@ -1064,18 +1071,18 @@ def tensor_slicer(evals, evecs, affine=None, mask=None, sphere=None, scale=2.2,
             .format(evals.shape, evecs.shape))
 
     if mask is None:
-        mask = np.ones(evals.shape[:3], dtype=np.bool)
+        mask = np.ones(evals.shape[:3], dtype=bool)
     else:
-        mask = mask.astype(np.bool)
+        mask = mask.astype(bool)
 
     szx, szy, szz = evals.shape[:3]
 
-    class TensorSlicerActor(vtk.vtkLODActor):
+    class TensorSlicerActor(LODActor):
         def __init__(self):
             self.mapper = None
 
         def display_extent(self, x1, x2, y1, y2, z1, z2):
-            tmp_mask = np.zeros(evals.shape[:3], dtype=np.bool)
+            tmp_mask = np.zeros(evals.shape[:3], dtype=bool)
             tmp_mask[x1:x2 + 1, y1:y2 + 1, z1:z2 + 1] = True
             tmp_mask = np.bitwise_and(tmp_mask, mask)
 
@@ -1111,7 +1118,7 @@ def tensor_slicer(evals, evecs, affine=None, mask=None, sphere=None, scale=2.2,
 
 def _tensor_slicer_mapper(evals, evecs, affine=None, mask=None, sphere=None,
                           scale=2.2, norm=True, scalar_colors=None):
-    """Helper function for slicing tensor fields
+    """Return Helper function for slicing tensor fields.
 
     Parameters
     ----------
@@ -1152,8 +1159,8 @@ def _tensor_slicer_mapper(evals, evecs, affine=None, mask=None, sphere=None,
     vertices = sphere.vertices
 
     if scalar_colors is None:
-        from dipy.reconst.dti import color_fa, fractional_anisotropy
-        cfa = color_fa(fractional_anisotropy(evals), evecs)
+        #from dipy.reconst.dti import color_fa, fractional_anisotropy
+        cfa = _color_fa(_fa(evals), evecs)
     else:
         cfa = _makeNd(scalar_colors, 4)
 
@@ -1163,25 +1170,25 @@ def _tensor_slicer_mapper(evals, evecs, affine=None, mask=None, sphere=None,
     all_xyz = []
     all_faces = []
     for (k, center) in enumerate(ijk):
-        ea = evals[tuple(center.astype(np.int))]
+        ea = evals[tuple(center.astype(int))]
         if norm:
             ea /= ea.max()
         ea = np.diag(ea.copy())
 
-        ev = evecs[tuple(center.astype(np.int))].copy()
+        ev = evecs[tuple(center.astype(int))].copy()
         xyz = np.dot(ev, np.dot(ea, vertices.T))
 
         xyz = xyz.T
         all_xyz.append(scale * xyz + center)
         all_faces.append(faces + k * xyz.shape[0])
 
-        cols[k, ...] = np.interp(cfa[tuple(center.astype(np.int))], [0, 1],
+        cols[k, ...] = np.interp(cfa[tuple(center.astype(int))], [0, 1],
                                  [0, 255]).astype('ubyte')
 
     all_xyz = np.ascontiguousarray(np.concatenate(all_xyz))
     all_xyz_vtk = numpy_support.numpy_to_vtk(all_xyz, deep=True)
 
-    points = vtk.vtkPoints()
+    points = Points()
     points.SetData(all_xyz_vtk)
 
     all_faces = np.concatenate(all_faces)
@@ -1193,24 +1200,24 @@ def _tensor_slicer_mapper(evals, evecs, affine=None, mask=None, sphere=None,
     vtk_colors = numpy_support.numpy_to_vtk(
         cols,
         deep=True,
-        array_type=vtk.VTK_UNSIGNED_CHAR)
+        array_type=VTK_UNSIGNED_CHAR)
 
-    vtk_colors.SetName("Colors")
+    vtk_colors.SetName("colors")
 
-    polydata = vtk.vtkPolyData()
+    polydata = PolyData()
     polydata.SetPoints(points)
     set_polydata_triangles(polydata, all_faces)
     polydata.GetPointData().SetScalars(vtk_colors)
 
-    mapper = vtk.vtkPolyDataMapper()
+    mapper = PolyDataMapper()
     mapper.SetInputData(polydata)
 
     return mapper
 
 
 def peak_slicer(peaks_dirs, peaks_values=None, mask=None, affine=None,
-                colors=(1, 0, 0), opacity=1., linewidth=1,
-                lod=False, lod_points=10 ** 4, lod_points_size=3):
+                colors=(1, 0, 0), opacity=1., linewidth=1, lod=False,
+                lod_points=10 ** 4, lod_points_size=3, symmetric=True):
     """Visualize peak directions as given from ``peaks_from_model``.
 
     Parameters
@@ -1228,29 +1235,30 @@ def peak_slicer(peaks_dirs, peaks_values=None, mask=None, affine=None,
     colors : tuple or None
         Default red color. If None then every peak gets an orientation color
         in similarity to a DEC map.
-
     opacity : float, optional
         Takes values from 0 (fully transparent) to 1 (opaque)
-
     linewidth : float, optional
         Line thickness. Default is 1.
-
     lod : bool
-        Use vtkLODActor(level of detail) rather than vtkActor.
+        Use LODActor(level of detail) rather than Actor.
         Default is False. Level of detail actors do not render the full
         geometry when the frame rate is low.
     lod_points : int
         Number of points to be used when LOD is in effect. Default is 10000.
     lod_points_size : int
         Size of points when lod is in effect. Default is 3.
+    symmetric: bool, optional
+        If True, peaks are drawn for both peaks_dirs and -peaks_dirs. Else,
+        peaks are only drawn for directions given by peaks_dirs. Default is
+        True.
 
     Returns
     -------
-    vtkActor
+    peak_actor: Actor
 
     See Also
     --------
-    fury.actor.odf_slicer
+    :func:`fury.actor.odf_slice`
 
     """
     peaks_dirs = np.asarray(peaks_dirs)
@@ -1264,15 +1272,15 @@ def peak_slicer(peaks_dirs, peaks_values=None, mask=None, affine=None,
     grid_shape = np.array(peaks_dirs.shape[:3])
 
     if mask is None:
-        mask = np.ones(grid_shape).astype(np.bool)
+        mask = np.ones(grid_shape).astype(bool)
 
-    class PeakSlicerActor(vtk.vtkLODActor):
+    class PeakSlicerActor(LODActor):
         def __init__(self):
             self.line = None
 
         def display_extent(self, x1, x2, y1, y2, z1, z2):
 
-            tmp_mask = np.zeros(grid_shape, dtype=np.bool)
+            tmp_mask = np.zeros(grid_shape, dtype=bool)
             tmp_mask[x1:x2 + 1, y1:y2 + 1, z1:z2 + 1] = True
             tmp_mask = np.bitwise_and(tmp_mask, mask)
 
@@ -1296,9 +1304,14 @@ def peak_slicer(peaks_dirs, peaks_values=None, mask=None, affine=None,
                         pv = peaks_values[tuple(center)][i]
                     else:
                         pv = 1.
-                    symm = np.vstack((-peaks_dirs[tuple(center)][i] * pv + xyz,
-                                      peaks_dirs[tuple(center)][i] * pv + xyz))
-                    list_dirs.append(symm)
+                    if symmetric:
+                        dirs = np.vstack(
+                            (-peaks_dirs[tuple(center)][i] * pv + xyz,
+                             peaks_dirs[tuple(center)][i] * pv + xyz))
+                    else:
+                        dirs = np.vstack(
+                            (xyz, peaks_dirs[tuple(center)][i] * pv + xyz))
+                    list_dirs.append(dirs)
 
             self.line = line(list_dirs, colors=colors,
                              opacity=opacity, linewidth=linewidth,
@@ -1328,65 +1341,168 @@ def peak_slicer(peaks_dirs, peaks_values=None, mask=None, affine=None,
     return peak_actor
 
 
-def dots(points, color=(1, 0, 0), opacity=1, dot_size=5):
-    """Create one or more 3d points.
+def peak(peaks_dirs, peaks_values=None, mask=None, affine=None, colors=None,
+         linewidth=1, lookup_colormap=None, symmetric=True):
+    """Visualize peak directions as given from ``peaks_from_model``.
+
+    Parameters
+    ----------
+    peaks_dirs : ndarray
+        Peak directions. The shape of the array should be (X, Y, Z, D, 3).
+    peaks_values : ndarray, optional
+        Peak values. The shape of the array should be (X, Y, Z, D).
+    affine : array, optional
+        4x4 transformation array from native coordinates to world coordinates.
+    mask : ndarray, optional
+        3D mask
+    colors : tuple or None, optional
+        Default None. If None then every peak gets an orientation color
+        in similarity to a DEC map.
+    lookup_colormap : vtkLookupTable, optional
+        Add a default lookup table to the colormap. Default is None which calls
+        :func:`fury.actor.colormap_lookup_table`.
+    linewidth : float, optional
+        Line thickness. Default is 1.
+    symmetric: bool, optional
+        If True, peaks are drawn for both peaks_dirs and -peaks_dirs. Else,
+        peaks are only drawn for directions given by peaks_dirs. Default is
+        True.
+
+    Returns
+    -------
+    peak_actor : PeakActor
+        Actor or LODActor representing the peaks directions and/or
+        magnitudes.
+
+    Examples
+    ----------
+    >>> from fury import actor, window
+    >>> import numpy as np
+    >>> scene = window.Scene()
+    >>> peak_dirs = np.random.rand(3, 3, 3, 3, 3)
+    >>> c = actor.peak(peak_dirs)
+    >>> scene.add(c)
+    >>> #window.show(scene)
+
+    """
+    if peaks_dirs.ndim != 5:
+        raise ValueError('Invalid peak directions. The shape of the structure '
+                         'must be (XxYxZxDx3). Your data has {} dimensions.'
+                         ''.format(peaks_dirs.ndim))
+    if peaks_dirs.shape[4] != 3:
+        raise ValueError('Invalid peak directions. The shape of the last '
+                         'dimension must be 3. Your data has a last dimension '
+                         'of {}.'.format(peaks_dirs.shape[4]))
+
+    dirs_shape = peaks_dirs.shape
+
+    if peaks_values is not None:
+        if peaks_values.ndim != 4:
+            raise ValueError('Invalid peak values. The shape of the structure '
+                             'must be (XxYxZxD). Your data has {} dimensions.'
+                             ''.format(peaks_values.ndim))
+        vals_shape = peaks_values.shape
+        if vals_shape != dirs_shape[:4]:
+            raise ValueError('Invalid peak values. The shape of the values '
+                             'must coincide with the shape of the directions.')
+
+    valid_mask = np.abs(peaks_dirs).max(axis=(-2, -1)) > 0
+    if mask is not None:
+        if mask.ndim != 3:
+            warnings.warn('Invalid mask. The mask must be a 3D array. The '
+                          'passed mask has {} dimensions. Ignoring passed '
+                          'mask.'.format(mask.ndim), UserWarning)
+        elif mask.shape != dirs_shape[:3]:
+            warnings.warn('Invalid mask. The shape of the mask must coincide '
+                          'with the shape of the directions. Ignoring passed '
+                          'mask.', UserWarning)
+        else:
+            valid_mask = np.logical_and(valid_mask, mask)
+    indices = np.nonzero(valid_mask)
+
+    return PeakActor(peaks_dirs, indices, values=peaks_values, affine=affine,
+                     colors=colors, lookup_colormap=lookup_colormap,
+                     linewidth=linewidth, symmetric=symmetric)
+
+
+def dot(points, colors=None, opacity=None, dot_size=5):
+    """
+    Create one or more 3d points.
 
     Parameters
     ----------
     points : ndarray, (N, 3)
-    color : tuple (3,)
+        dots positions
+    colors : ndarray (N,3) or (N, 4) or tuple (3,) or tuple (4,)
+        RGB or RGBA (for opacity) R, G, B and A should be at the range [0, 1]
     opacity : float, optional
-        Takes values from 0 (fully transparent) to 1 (opaque)
+        Takes values from 0 (fully transparent) to 1 (opaque).
+        If a value is given, each dot will have the same opacity otherwise
+        opacity is set to 1 by default, or is defined by Alpha parameter
+        in colors if given.
     dot_size : int
 
     Returns
     --------
-    vtkActor
+    dot_actor: Actor
 
     See Also
     ---------
-    fury.actor.point
+    :func:`fury.actor.point`
 
     """
-    if points.ndim == 2:
-        points_no = points.shape[0]
-    else:
-        points_no = 1
+    if points.ndim != 2:
+        raise ValueError('Invalid points. The shape of the structure must be '
+                         '(Nx3). Your data has {} dimensions.'
+                         .format(points.ndim))
 
-    polyVertexPoints = vtk.vtkPoints()
-    polyVertexPoints.SetNumberOfPoints(points_no)
-    aPolyVertex = vtk.vtkPolyVertex()
-    aPolyVertex.GetPointIds().SetNumberOfIds(points_no)
+    if points.shape[1] != 3:
+        raise ValueError('Invalid points. The shape of the last dimension '
+                         'must be 3. Your data has a last dimension of {}.'
+                         .format(points.shape[1]))
 
-    cnt = 0
-    if points.ndim > 1:
-        for point in points:
-            polyVertexPoints.InsertPoint(cnt, point[0], point[1], point[2])
-            aPolyVertex.GetPointIds().SetId(cnt, cnt)
-            cnt += 1
-    else:
-        polyVertexPoints.InsertPoint(cnt, points[0], points[1], points[2])
-        aPolyVertex.GetPointIds().SetId(cnt, cnt)
-        cnt += 1
+    vtk_vertices = Points()
+    vtk_faces = CellArray()
 
-    aPolyVertexGrid = vtk.vtkUnstructuredGrid()
-    aPolyVertexGrid.Allocate(1, 1)
-    aPolyVertexGrid.InsertNextCell(aPolyVertex.GetCellType(),
-                                   aPolyVertex.GetPointIds())
+    # Add points
+    for i in range(len(points)):
+        p = points[i]
+        idd = vtk_vertices.InsertNextPoint(p)
+        vtk_faces.InsertNextCell(1)
+        vtk_faces.InsertCellPoint(idd)
 
-    aPolyVertexGrid.SetPoints(polyVertexPoints)
-    aPolyVertexMapper = vtk.vtkDataSetMapper()
-    aPolyVertexMapper.SetInputData(aPolyVertexGrid)
-    aPolyVertexActor = vtk.vtkActor()
-    aPolyVertexActor.SetMapper(aPolyVertexMapper)
+    color_tuple = color_check(len(points), colors)
+    color_array, global_opacity = color_tuple
 
-    aPolyVertexActor.GetProperty().SetColor(color)
-    aPolyVertexActor.GetProperty().SetOpacity(opacity)
-    aPolyVertexActor.GetProperty().SetPointSize(dot_size)
-    return aPolyVertexActor
+    # Create a polydata object
+    polydata = PolyData()
+    polydata.SetPoints(vtk_vertices)
+    polydata.SetVerts(vtk_faces)
+    polydata.GetPointData().SetScalars(color_array)
+
+    # Visualize
+    mapper = PolyDataMapper()
+    mapper.SetInputData(polydata)
+
+    # Create an actor
+    poly_actor = Actor()
+    poly_actor.SetMapper(mapper)
+
+    if opacity is not None:
+        poly_actor.GetProperty().SetOpacity(opacity)
+    elif global_opacity >= 0:
+        poly_actor.GetProperty().SetOpacity(global_opacity)
+    poly_actor.GetProperty().SetPointSize(dot_size)
+
+    return poly_actor
 
 
-def point(points, colors, _opacity=1., point_radius=0.1, theta=8, phi=8):
+dots = deprecate_with_version(message="dots function has been renamed dot",
+                              since="0.8.1",
+                              until="0.9.0")(dot)
+
+
+def point(points, colors, point_radius=0.1, phi=8, theta=8, opacity=1.):
     """Visualize points as sphere glyphs
 
     Parameters
@@ -1394,14 +1510,19 @@ def point(points, colors, _opacity=1., point_radius=0.1, theta=8, phi=8):
     points : ndarray, shape (N, 3)
     colors : ndarray (N,3) or tuple (3,)
     point_radius : float
-    theta : int
     phi : int
+    theta : int
     opacity : float, optional
-        Takes values from 0 (fully transparent) to 1 (opaque)
+        Takes values from 0 (fully transparent) to 1 (opaque). Default is 1.
 
     Returns
     -------
-    vtkActor
+    point_actor: Actor
+
+    See Also
+    --------
+    :func:`fury.actor.dot`
+    :func:`fury.actor.sphere`
 
     Examples
     --------
@@ -1413,12 +1534,12 @@ def point(points, colors, _opacity=1., point_radius=0.1, theta=8, phi=8):
     >>> # window.show(scene)
 
     """
-    return sphere(centers=points, colors=colors, radii=point_radius,
-                  theta=theta, phi=phi, vertices=None, faces=None)
+    return sphere(centers=points, colors=colors, radii=point_radius, phi=phi,
+                  theta=theta, vertices=None, faces=None, opacity=opacity)
 
 
-def sphere(centers, colors, radii=1., theta=16, phi=16,
-           vertices=None, faces=None):
+def sphere(centers, colors, radii=1., phi=16, theta=16,
+           vertices=None, faces=None, opacity=1, use_primitive=True):
     """Visualize one or many spheres with different colors and radii
 
     Parameters
@@ -1429,17 +1550,24 @@ def sphere(centers, colors, radii=1., theta=16, phi=16,
         RGB or RGBA (for opacity) R, G, B and A should be at the range [0, 1]
     radii : float or ndarray, shape (N,)
         Sphere radius
-    theta : int
-    phi : int
+    phi : int, optional
+        Set the number of points in the latitude direction
+    theta : int, optional
+        Set the number of points in the longitude direction
     vertices : ndarray, shape (N, 3)
         The point cloud defining the sphere.
     faces : ndarray, shape (M, 3)
         If faces is None then a sphere is created based on theta and phi angles
         If not then a sphere is created with the provided vertices and faces.
+    opacity : float, optional
+        Takes values from 0 (fully transparent) to 1 (opaque). Default is 1.
+    use_primitive : boolean, optional
+        If True, uses primitives to create an actor.
+
 
     Returns
     -------
-    vtkActor
+    sphere_actor: Actor
 
     Examples
     --------
@@ -1451,18 +1579,34 @@ def sphere(centers, colors, radii=1., theta=16, phi=16,
     >>> # window.show(scene)
 
     """
-    src = vtk.vtkSphereSource() if faces is None else None
+    if not use_primitive:
+        src = SphereSource() if faces is None else None
 
-    if src is not None:
-        src.SetRadius(1)
-        src.SetThetaResolution(theta)
-        src.SetPhiResolution(phi)
+        if src is not None:
+            src.SetRadius(1)
+            src.SetThetaResolution(theta)
+            src.SetPhiResolution(phi)
 
-    actor = repeat_sources(centers=centers, colors=colors,
-                           active_scalars=radii, source=src,
-                           vertices=vertices, faces=faces)
+        sphere_actor = repeat_sources(centers=centers, colors=colors,
+                                      active_scalars=radii, source=src,
+                                      vertices=vertices, faces=faces)
+        sphere_actor.GetProperty().SetOpacity(opacity)
+        return sphere_actor
 
-    return actor
+    scales = np.multiply(radii, [1, 1, 1])
+    directions = (1, 0, 0)
+
+    if faces is None and vertices is None:
+        vertices, faces = fp.prim_sphere(phi=phi, theta=theta)
+
+    res = fp.repeat_primitive(vertices, faces,
+                              directions=directions, centers=centers,
+                              colors=colors, scales=scales)
+    big_verts, big_faces, big_colors, _ = res
+    sphere_actor = get_actor_from_primitive(
+            big_verts, big_faces, big_colors)
+    sphere_actor.GetProperty().SetOpacity(opacity)
+    return sphere_actor
 
 
 def cylinder(centers, directions, colors, radius=0.05, heights=1,
@@ -1493,7 +1637,7 @@ def cylinder(centers, directions, colors, radius=0.05, heights=1,
 
     Returns
     -------
-    vtkActor
+    cylinder_actor: Actor
 
     Examples
     --------
@@ -1507,22 +1651,94 @@ def cylinder(centers, directions, colors, radius=0.05, heights=1,
     >>> # window.show(scene)
 
     """
-    src = vtk.vtkCylinderSource() if faces is None else None
-
-    if src is not None:
+    if faces is None:
+        src = CylinderSource()
         src.SetCapping(capped)
         src.SetResolution(resolution)
         src.SetRadius(radius)
+        rotate = np.array([[0, 1, 0, 0],
+                           [-1, 0, 0, 0],
+                           [0, 0, 1, 0],
+                           [0, 0, 0, 1]])
+    else:
+        src = None
+        rotate = None
 
-    actor = repeat_sources(centers=centers, colors=colors,
-                           directions=directions,
-                           active_scalars=heights, source=src,
-                           vertices=vertices, faces=faces)
+    cylinder_actor = repeat_sources(centers=centers, colors=colors,
+                                    directions=directions,
+                                    active_scalars=heights, source=src,
+                                    vertices=vertices, faces=faces,
+                                    orientation=rotate)
 
-    return actor
+    return cylinder_actor
 
 
-def square(centers, directions=(1, 0, 0), colors=(1, 0, 0), scale=1):
+def disk(centers, directions, colors, rinner=0.3,
+         router=0.7, cresolution=6, rresolution=2, vertices=None, faces=None):
+    """Visualize one or many disks with different features.
+
+    Parameters
+    ----------
+    centers : ndarray, shape (N, 3)
+        Disk positions
+    directions : ndarray, shape (N, 3)
+        The orientation vector of the disk.
+    colors : ndarray (N,3) or (N, 4) or tuple (3,) or tuple (4,)
+        RGB or RGBA (for opacity) R, G, B and A should be at the range [0, 1]
+    rinner : float
+        disk inner radius, default: 0.3
+    router : float
+        disk outer radius, default: 0.5
+    cresolution: int, optional
+        Number of facets used to define perimeter of disk, default: 6
+    rresolution: int, optional
+        Number of facets used radially, default: 2
+    vertices : ndarray, shape (N, 3)
+        The point cloud defining the disk.
+    faces : ndarray, shape (M, 3)
+        If faces is None then a disk is created based on theta and phi angles
+        If not then a disk is created with the provided vertices and faces.
+
+    Returns
+    -------
+    disk_actor: Actor
+
+    Examples
+    --------
+    >>> from fury import window, actor
+    >>> import numpy as np
+    >>> scene = window.Scene()
+    >>> centers = np.random.rand(5, 3)
+    >>> dirs = np.random.rand(5, 3)
+    >>> colors = np.random.rand(5, 4)
+    >>> actor = actor.disk(centers, dirs, colors,
+    >>>                    rinner=.1, router=.8, cresolution=30)
+    >>> scene.add(actor)
+    >>> window.show(scene)
+    """
+    if faces is None:
+        src = DiskSource()
+        src.SetCircumferentialResolution(cresolution)
+        src.SetRadialResolution(rresolution)
+        src.SetInnerRadius(rinner)
+        src.SetOuterRadius(router)
+        rotate = np.array([[0, 0, -1, 0],
+                           [0, 1, 0, 0],
+                           [1, 0, 0, 0],
+                           [0, 0, 0, 1]])
+    else:
+        src = None
+        rotate = None
+
+    disk_actor = repeat_sources(centers=centers, colors=colors,
+                                directions=directions, source=src,
+                                vertices=vertices, faces=faces,
+                                orientation=rotate)
+
+    return disk_actor
+
+
+def square(centers, directions=(1, 0, 0), colors=(1, 0, 0), scales=1):
     """Visualize one or many squares with different features.
 
     Parameters
@@ -1533,12 +1749,12 @@ def square(centers, directions=(1, 0, 0), colors=(1, 0, 0), scale=1):
         The orientation vector of the square.
     colors : ndarray (N,3) or (N, 4) or tuple (3,) or tuple (4,), optional
         RGB or RGBA (for opacity) R, G, B and A should be at the range [0, 1]
-    scale : int or ndarray (N,3) or tuple (3,), optional
+    scales : int or ndarray (N,3) or tuple (3,), optional
         Square size on each direction (x, y), default(1)
 
     Returns
     -------
-    vtkActor
+    sq_actor: Actor
 
     Examples
     --------
@@ -1553,7 +1769,7 @@ def square(centers, directions=(1, 0, 0), colors=(1, 0, 0), scale=1):
     """
     verts, faces = fp.prim_square()
     res = fp.repeat_primitive(verts, faces, directions=directions,
-                              centers=centers, colors=colors, scale=scale)
+                              centers=centers, colors=colors, scales=scales)
 
     big_verts, big_faces, big_colors, _ = res
     sq_actor = get_actor_from_primitive(big_verts, big_faces, big_colors)
@@ -1562,7 +1778,7 @@ def square(centers, directions=(1, 0, 0), colors=(1, 0, 0), scale=1):
 
 
 def rectangle(centers, directions=(1, 0, 0), colors=(1, 0, 0),
-              scale=(1, 2, 0)):
+              scales=(1, 2, 0)):
     """Visualize one or many rectangles with different features.
 
     Parameters
@@ -1573,12 +1789,16 @@ def rectangle(centers, directions=(1, 0, 0), colors=(1, 0, 0),
         The orientation vector of the rectangle.
     colors : ndarray (N,3) or (N, 4) or tuple (3,) or tuple (4,), optional
         RGB or RGBA (for opacity) R, G, B and A should be at the range [0, 1]
-    scale : int or ndarray (N,3) or tuple (3,), optional
+    scales : int or ndarray (N,3) or tuple (3,), optional
         Rectangle size on each direction (x, y), default(1)
 
     Returns
     -------
-    vtkActor
+    rect_actor: Actor
+
+    See Also
+    --------
+    :func:`fury.actor.square`
 
     Examples
     --------
@@ -1592,12 +1812,12 @@ def rectangle(centers, directions=(1, 0, 0), colors=(1, 0, 0),
 
     """
     return square(centers=centers, directions=directions, colors=colors,
-                  scale=scale)
+                  scales=scales)
 
 
-@deprecated_params(['size', 'heights'], ['scale', 'scale'],
+@deprecated_params(['size', 'heights'], ['scales', 'scales'],
                    since='0.6', until='0.8')
-def box(centers, directions=(1, 0, 0), colors=(1, 0, 0), scale=(1, 2, 3)):
+def box(centers, directions=(1, 0, 0), colors=(1, 0, 0), scales=(1, 2, 3)):
     """Visualize one or many boxes with different features.
 
     Parameters
@@ -1608,12 +1828,12 @@ def box(centers, directions=(1, 0, 0), colors=(1, 0, 0), scale=(1, 2, 3)):
         The orientation vector of the box.
     colors : ndarray (N,3) or (N, 4) or tuple (3,) or tuple (4,), optional
         RGB or RGBA (for opacity) R, G, B and A should be at the range [0, 1]
-    scale : int or ndarray (N,3) or tuple (3,), optional
+    scales : int or ndarray (N,3) or tuple (3,), optional
         Box size on each direction (x, y), default(1)
 
     Returns
     -------
-    vtkActor
+    box_actor: Actor
 
     Examples
     --------
@@ -1628,15 +1848,15 @@ def box(centers, directions=(1, 0, 0), colors=(1, 0, 0), scale=(1, 2, 3)):
     """
     verts, faces = fp.prim_box()
     res = fp.repeat_primitive(verts, faces, directions=directions,
-                              centers=centers, colors=colors, scale=scale)
+                              centers=centers, colors=colors, scales=scales)
 
     big_verts, big_faces, big_colors, _ = res
     box_actor = get_actor_from_primitive(big_verts, big_faces, big_colors)
     return box_actor
 
 
-@deprecated_params('heights', 'scale', since='0.6', until='0.8')
-def cube(centers, directions=(1, 0, 0), colors=(1, 0, 0), scale=1):
+@deprecated_params('heights', 'scales', since='0.6', until='0.8')
+def cube(centers, directions=(1, 0, 0), colors=(1, 0, 0), scales=1):
     """Visualize one or many cubes with different features.
 
     Parameters
@@ -1647,12 +1867,12 @@ def cube(centers, directions=(1, 0, 0), colors=(1, 0, 0), scale=1):
         The orientation vector of the cube.
     colors : ndarray (N,3) or (N, 4) or tuple (3,) or tuple (4,), optional
         RGB or RGBA (for opacity) R, G, B and A should be at the range [0, 1]
-    scale : int or ndarray (N,3) or tuple (3,), optional
+    scales : int or ndarray (N,3) or tuple (3,), optional
         Cube size, default=1
 
     Returns
     -------
-    vtkActor
+    cube_actor: Actor
 
     Examples
     --------
@@ -1666,12 +1886,12 @@ def cube(centers, directions=(1, 0, 0), colors=(1, 0, 0), scale=1):
 
     """
     return box(centers=centers, directions=directions, colors=colors,
-               scale=scale)
+               scales=scales)
 
 
 def arrow(centers, directions, colors, heights=1., resolution=10,
-          tip_length=0.35, tip_radius=0.1, shaft_radius=0.03,
-          vertices=None, faces=None):
+          tip_length=0.35, tip_radius=0.1, shaft_radius=0.03, scales=1,
+          vertices=None, faces=None, repeat_primitive=True):
     """Visualize one or many arrows with differents features.
 
     Parameters
@@ -1701,7 +1921,7 @@ def arrow(centers, directions, colors, heights=1., resolution=10,
 
     Returns
     -------
-    vtkActor
+    arrow_actor: Actor
 
     Examples
     --------
@@ -1715,7 +1935,15 @@ def arrow(centers, directions, colors, heights=1., resolution=10,
     >>> # window.show(scene)
 
     """
-    src = vtk.vtkArrowSource() if faces is None else None
+    if repeat_primitive:
+        vertices, faces = fp.prim_arrow()
+        res = fp.repeat_primitive(vertices, faces, directions=directions, centers=centers,
+                                  colors=colors, scales=scales)
+        big_vertices, big_faces, big_colors, _ = res
+        arrow_actor = get_actor_from_primitive(big_vertices, big_faces, big_colors)
+        return arrow_actor
+
+    src = ArrowSource() if faces is None else None
 
     if src is not None:
         src.SetTipResolution(resolution)
@@ -1724,14 +1952,14 @@ def arrow(centers, directions, colors, heights=1., resolution=10,
         src.SetTipRadius(tip_radius)
         src.SetShaftRadius(shaft_radius)
 
-    actor = repeat_sources(centers=centers, directions=directions,
-                           colors=colors, active_scalars=heights, source=src,
-                           vertices=vertices, faces=faces)
-    return actor
+    arrow_actor = repeat_sources(centers=centers, directions=directions,
+                                 colors=colors, active_scalars=heights,
+                                 source=src, vertices=vertices, faces=faces)
+    return arrow_actor
 
 
 def cone(centers, directions, colors, heights=1., resolution=10,
-         vertices=None, faces=None):
+         vertices=None, faces=None, use_primitive=True):
     """Visualize one or many cones with different features.
 
     Parameters
@@ -1752,10 +1980,12 @@ def cone(centers, directions, colors, heights=1., resolution=10,
         If faces is None then a cone is created based on directions, heights
         and resolution. If not then a cone is created with the provided
         vertices and faces.
+    use_primitive: boolean, optional
+        If True uses primitives to create the cone actor.
 
     Returns
     -------
-    vtkActor
+    cone_actor: Actor
 
     Examples
     --------
@@ -1769,19 +1999,154 @@ def cone(centers, directions, colors, heights=1., resolution=10,
     >>> # window.show(scene)
 
     """
-    src = vtk.vtkConeSource() if faces is None else None
+    if not use_primitive:
+        src = ConeSource() if faces is None else None
 
-    if src is not None:
-        src.SetResolution(resolution)
+        if src is not None:
+            src.SetResolution(resolution)
 
-    actor = repeat_sources(centers=centers, directions=directions,
-                           colors=colors, active_scalars=heights, source=src,
-                           vertices=vertices, faces=faces)
-    return actor
+        cone_actor = repeat_sources(centers=centers, directions=directions,
+                                    colors=colors, active_scalars=heights,
+                                    source=src, vertices=vertices, faces=faces)
+        return cone_actor
+
+    if faces is None and vertices is None:
+        vertices, faces = fp.prim_cone(sectors=resolution)
+
+    res = fp.repeat_primitive(
+                    vertices, faces, centers,
+                    directions=directions, colors=colors, scales=heights)
+
+    big_verts, big_faces, big_colors, _ = res
+    cone_actor = get_actor_from_primitive(big_verts, big_faces, big_colors)
+
+    return cone_actor
 
 
-def octagonalprism(centers, directions=(1, 0, 0), colors=(255, 0, 0),
-                   scale=1):
+def triangularprism(centers, directions=(1, 0, 0), colors=(1, 0, 0),
+                    scales=1):
+    """Visualize one or many regular triangular prisms with different features.
+
+    Parameters
+    ----------
+    centers : ndarray, shape (N, 3)
+        Triangular prism positions
+    directions : ndarray, shape (N, 3)
+        The orientation vector(s) of the triangular prism(s)
+    colors : ndarray (N,3) or (N, 4) or tuple (3,) or tuple (4,)
+        RGB or RGBA (for opacity) R, G, B and A should be at the range [0, 1]
+    scales : int or ndarray (N,3) or tuple (3,), optional
+        Triangular prism size on each direction (x, y), default(1)
+
+    Returns
+    -------
+    tprism_actor: Actor
+
+    Examples
+    --------
+    >>> from fury import window, actor
+    >>> scene = window.Scene()
+    >>> centers = np.random.rand(3, 3)
+    >>> dirs = np.random.rand(3, 3)
+    >>> colors = np.random.rand(3, 3)
+    >>> scales = np.random.rand(3, 1)
+    >>> actor = actor.triangularprism(centers, dirs, colors, scales)
+    >>> scene.add(actor)
+    >>> # window.show(scene)
+
+    """
+    verts, faces = fp.prim_triangularprism()
+    res = fp.repeat_primitive(verts, faces, directions=directions,
+                              centers=centers, colors=colors, scales=scales)
+    big_verts, big_faces, big_colors, _ = res
+    tprism_actor = get_actor_from_primitive(big_verts, big_faces, big_colors)
+    return tprism_actor
+
+
+def rhombicuboctahedron(centers, directions=(1, 0, 0), colors=(1, 0, 0),
+                        scales=1):
+    """Visualize one or many rhombicuboctahedron with different features.
+
+    Parameters
+    ----------
+    centers : ndarray, shape (N, 3)
+        Rhombicuboctahedron positions
+    directions : ndarray, shape (N, 3)
+        The orientation vector(s) of the Rhombicuboctahedron(s)
+    colors : ndarray (N,3) or (N, 4) or tuple (3,) or tuple (4,)
+        RGB or RGBA (for opacity) R, G, B and A should be at the range [0, 1]
+    scales : int or ndarray (N,3) or tuple (3,), optional
+        Rhombicuboctahedron size on each direction (x, y), default(1)
+
+    Returns
+    -------
+    rcoh_actor: Actor
+
+    Examples
+    --------
+    >>> from fury import window, actor
+    >>> scene = window.Scene()
+    >>> centers = np.random.rand(3, 3)
+    >>> dirs = np.random.rand(3, 3)
+    >>> colors = np.random.rand(3, 3)
+    >>> scales = np.random.rand(3, 1)
+    >>> actor = actor.rhombicuboctahedron(centers, dirs, colors, scales)
+    >>> scene.add(actor)
+    >>> # window.show(scene)
+
+    """
+    verts, faces = fp.prim_rhombicuboctahedron()
+    res = fp.repeat_primitive(verts, faces, directions=directions,
+                              centers=centers, colors=colors, scales=scales)
+    big_verts, big_faces, big_colors, _ = res
+    rcoh_actor = get_actor_from_primitive(big_verts, big_faces, big_colors)
+    return rcoh_actor
+
+
+def pentagonalprism(centers, directions=(1, 0, 0), colors=(1, 0, 0),
+                    scales=1):
+    """Visualize one or many pentagonal prisms with different features.
+
+    Parameters
+    ----------
+    centers : ndarray, shape (N, 3), optional
+        Pentagonal prism positions
+    directions : ndarray, shape (N, 3), optional
+        The orientation vector of the pentagonal prism.
+    colors : ndarray (N,3) or (N, 4) or tuple (3,) or tuple (4,), optional
+        RGB or RGBA (for opacity) R, G, B and A should be at the range [0, 1]
+    scales : int or ndarray (N,3) or tuple (3,), optional
+        Pentagonal prism size on each direction (x, y), default(1)
+
+    Returns
+    -------
+    pent_actor: Actor
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> from fury import window, actor
+    >>> scene = window.Scene()
+    >>> centers = np.random.rand(3, 3)
+    >>> dirs = np.random.rand(3, 3)
+    >>> colors = np.random.rand(3, 3)
+    >>> scales = np.random.rand(3, 1)
+    >>> actor_pentagonal = actor.pentagonalprism(centers, dirs, colors, scales)
+    >>> scene.add(actor_pentagonal)
+    >>> # window.show(scene)
+
+    """
+    verts, faces = fp.prim_pentagonalprism()
+    res = fp.repeat_primitive(verts, faces, directions=directions,
+                              centers=centers, colors=colors, scales=scales)
+
+    big_verts, big_faces, big_colors, _ = res
+    pent_actor = get_actor_from_primitive(big_verts, big_faces, big_colors)
+    return pent_actor
+
+
+def octagonalprism(centers, directions=(1, 0, 0), colors=(1, 0, 0),
+                   scales=1):
     """Visualize one or many octagonal prisms with different features.
 
     Parameters
@@ -1792,12 +2157,12 @@ def octagonalprism(centers, directions=(1, 0, 0), colors=(255, 0, 0),
         The orientation vector of the octagonal prism.
     colors : ndarray (N,3) or (N, 4) or tuple (3,) or tuple (4,)
         RGB or RGBA (for opacity) R, G, B and A should be at the range [0, 1]
-    scale : int or ndarray (N,3) or tuple (3,), optional
+    scales : int or ndarray (N,3) or tuple (3,), optional
         Octagonal prism size on each direction (x, y), default(1)
 
     Returns
     -------
-    vtkActor
+    oct_actor: Actor
 
     Examples
     --------
@@ -1805,7 +2170,7 @@ def octagonalprism(centers, directions=(1, 0, 0), colors=(255, 0, 0),
     >>> scene = window.Scene()
     >>> centers = np.random.rand(3, 3)
     >>> dirs = np.random.rand(3, 3)
-    >>> colors = np.random.rand(3, 3)*255
+    >>> colors = np.random.rand(3, 3)
     >>> scales = np.random.rand(3, 1)
     >>> actor = actor.octagonalprism(centers, dirs, colors, scales)
     >>> scene.add(actor)
@@ -1814,14 +2179,14 @@ def octagonalprism(centers, directions=(1, 0, 0), colors=(255, 0, 0),
     """
     verts, faces = fp.prim_octagonalprism()
     res = fp.repeat_primitive(verts, faces, directions=directions,
-                              centers=centers, colors=colors, scale=scale)
+                              centers=centers, colors=colors, scales=scales)
 
     big_verts, big_faces, big_colors, _ = res
     oct_actor = get_actor_from_primitive(big_verts, big_faces, big_colors)
     return oct_actor
 
 
-def frustum(centers, directions=(1, 0, 0), colors=(0, 255, 0), scale=1):
+def frustum(centers, directions=(1, 0, 0), colors=(0, 1, 0), scales=1):
     """Visualize one or many frustum pyramids with different features.
 
     Parameters
@@ -1832,11 +2197,11 @@ def frustum(centers, directions=(1, 0, 0), colors=(0, 255, 0), scale=1):
         The orientation vector of the frustum pyramid.
     colors : ndarray (N,3) or (N, 4) or tuple (3,) or tuple (4,)
         RGB or RGBA (for opacity) R, G, B and A should be at the range [0, 1]
-    heights : int or ndarray (N,3) or tuple (3,), optional
+    scales : int or ndarray (N,3) or tuple (3,), optional
         Frustum pyramid size on each direction (x, y), default(1)
     Returns
     -------
-    vtkActor
+    frustum_actor: Actor
 
     Examples
     --------
@@ -1844,7 +2209,7 @@ def frustum(centers, directions=(1, 0, 0), colors=(0, 255, 0), scale=1):
     >>> scene = window.Scene()
     >>> centers = np.random.rand(4, 3)
     >>> dirs = np.random.rand(4, 3)
-    >>> colors = np.random.rand(4, 3)*255
+    >>> colors = np.random.rand(4, 3)
     >>> scales = np.random.rand(4, 1)
     >>> actor = actor.frustum(centers, dirs, colors, scales)
     >>> scene.add(actor)
@@ -1853,7 +2218,7 @@ def frustum(centers, directions=(1, 0, 0), colors=(0, 255, 0), scale=1):
     """
     verts, faces = fp.prim_frustum()
     res = fp.repeat_primitive(verts, faces, directions=directions,
-                              centers=centers, colors=colors, scale=scale)
+                              centers=centers, colors=colors, scales=scales)
 
     big_verts, big_faces, big_colors, _ = res
     frustum_actor = get_actor_from_primitive(big_verts, big_faces, big_colors)
@@ -1861,7 +2226,7 @@ def frustum(centers, directions=(1, 0, 0), colors=(0, 255, 0), scale=1):
 
 
 def superquadric(centers, roundness=(1, 1), directions=(1, 0, 0),
-                 colors=(255, 0, 0), scale=1):
+                 colors=(1, 0, 0), scales=1):
     """Visualize one or many superquadrics with different features.
 
     Parameters
@@ -1874,12 +2239,12 @@ def superquadric(centers, roundness=(1, 1), directions=(1, 0, 0),
         The orientation vector of the cone.
     colors : ndarray (N,3) or (N, 4) or tuple (3,) or tuple (4,)
         RGB or RGBA (for opacity) R, G, B and A should be at the range [0, 1]
-    scale : ndarray, shape (N) or (N,3) or float or int, optional
+    scales : ndarray, shape (N) or (N,3) or float or int, optional
         The height of the cone.
 
     Returns
     -------
-    vtkActor
+    spq_actor: Actor
 
     Examples
     --------
@@ -1887,11 +2252,12 @@ def superquadric(centers, roundness=(1, 1), directions=(1, 0, 0),
     >>> scene = window.Scene()
     >>> centers = np.random.rand(3, 3) * 10
     >>> directions = np.random.rand(3, 3)
-    >>> scale = np.random.rand(5)
+    >>> scales = np.random.rand(3)
+    >>> colors = np.random.rand(3, 3)
     >>> roundness = np.array([[1, 1], [1, 2], [2, 1]])
     >>> sq_actor = actor.superquadric(centers, roundness=roundness,
     ...                               directions=directions,
-    ...                               colors=colors, scale=scale)
+    ...                               colors=colors, scales=scales)
     >>> scene.add(sq_actor)
     >>> # window.show(scene)
 
@@ -1912,120 +2278,79 @@ def superquadric(centers, roundness=(1, 1), directions=(1, 0, 0),
                                        centers=centers,
                                        func_args=roundness,
                                        directions=directions,
-                                       colors=colors, scale=scale)
+                                       colors=colors, scales=scales)
 
     big_verts, big_faces, big_colors, _ = res
-    actor = get_actor_from_primitive(big_verts, big_faces, big_colors)
-    return actor
+    spq_actor = get_actor_from_primitive(big_verts, big_faces, big_colors)
+    return spq_actor
 
 
-def billboard(centers, colors=(0, 255, 0), scale=1, vs_dec=None, vs_impl=None,
-              fs_dec=None, fs_impl=None, gs_dec=None, gs_impl=None):
+def billboard(centers, colors=(0, 1, 0), scales=1, vs_dec=None, vs_impl=None,
+              gs_prog=None, fs_dec=None, fs_impl=None):
     """Create a billboard actor.
 
-    Billboards are 2D elements incrusted in a 3D world. It offers you the
-    possibility to draw differents shapes/elements at the shader level.
+    Billboards are 2D elements placed in a 3D world. They offer possibility to
+    draw different shapes/elements at the fragment shader level.
 
     Parameters
     ----------
     centers : ndarray, shape (N, 3)
-        Superquadrics positions
+        Billboard positions.
     colors : ndarray (N,3) or (N, 4) or tuple (3,) or tuple (4,)
-        RGB or RGBA (for opacity) R, G, B and A should be at the range [0, 1]
-    scale : ndarray, shape (N) or (N,3) or float or int, optional
-        The height of the cone.
+        RGB or RGBA (for opacity) R, G, B and A should be at the range [0, 1].
+    scales : ndarray, shape (N) or (N,3) or float or int, optional
+        The scale of the billboards.
     vs_dec : str or list of str, optional
-        vertex shaders code that contains all variable/function delarations
+        Vertex Shader code that contains all variable/function declarations.
     vs_impl : str or list of str, optional
-        vertex shaders code that contains all variable/function implementation
+        Vertex Shaders code that contains all variable/function
+        implementations.
+    gs_prog : str, optional
+        Geometry Shader program.
     fs_dec : str or list of str, optional
-        Fragment shaders code that contains all variable/function delarations
+        Fragment Shaders code that contains all variable/function declarations.
     fs_impl : str or list of str, optional
-        Fragment shaders code that contains all variable/function
-        implementation
-    gs_dec : str or list of str, optional
-        Geometry shaders code that contains all variable/function delarations
-    gs_impl : str or list of str, optional
-        Geometry shaders code that contains all variable/function
-        mplementation
+        Fragment Shaders code that contains all variable/function
+        implementation.
 
     Returns
     -------
-    vtkActor
+    billboard_actor: Actor
 
     """
     verts, faces = fp.prim_square()
     res = fp.repeat_primitive(verts, faces, centers=centers, colors=colors,
-                              scale=scale)
+                              scales=scales)
 
     big_verts, big_faces, big_colors, big_centers = res
 
-    actor = get_actor_from_primitive(big_verts, big_faces, big_colors)
-    actor.GetProperty().BackfaceCullingOff()
-    vtk_centers = numpy_support.numpy_to_vtk(big_centers, deep=True)
-    vtk_centers.SetNumberOfComponents(3)
-    vtk_centers.SetName("center")
-    actor.GetMapper().GetInput().GetPointData().AddArray(vtk_centers)
+    bb_actor = get_actor_from_primitive(big_verts, big_faces, big_colors)
+    bb_actor.GetMapper().SetVBOShiftScaleMethod(False)
+    bb_actor.GetProperty().BackfaceCullingOff()
+    attribute_to_actor(bb_actor, big_centers, 'center')
 
-    def get_code(glsl_code):
-        code = ""
-        if not glsl_code:
-            return code
+    vs_dec_code = compose_shader([import_fury_shader('billboard_dec.vert') +
+                                  compose_shader(vs_dec)])
+    vs_impl_code = compose_shader([compose_shader(vs_impl) +
+                                   import_fury_shader('billboard_impl.vert')])
+    gs_code = compose_shader(gs_prog)
+    fs_dec_code = compose_shader([import_fury_shader('billboard_dec.frag') +
+                                  compose_shader(fs_dec)])
+    fs_impl_code = compose_shader([import_fury_shader('billboard_impl.frag') +
+                                   compose_shader(fs_impl)])
 
-        if not all(isinstance(i, (str)) for i in glsl_code):
-            raise IOError("The only supported format are string or filename,"
-                          "list of string or filename")
+    shader_to_actor(bb_actor, 'vertex', impl_code=vs_impl_code,
+                    decl_code=vs_dec_code)
+    replace_shader_in_actor(bb_actor, 'geometry', gs_code)
+    shader_to_actor(bb_actor, 'fragment', decl_code=fs_dec_code)
+    shader_to_actor(bb_actor, 'fragment', impl_code=fs_impl_code,
+                    block='light')
 
-        if isinstance(glsl_code, str):
-            code += "\n"
-            code += fs.load(glsl_code) if op.isfile(glsl_code) else glsl_code
-            return code
-
-        for content in glsl_code:
-            code += "\n"
-            code += fs.load(content) if op.isfile(content) else content
-        return code
-
-    vs_dec_code = get_code(vs_dec) + "\n" + fs.load("billboard_dec.vert")
-    vs_impl_code = get_code(vs_impl) + "\n" + fs.load("billboard_impl.vert")
-    fs_dec_code = get_code(fs_dec) + "\n" + fs.load("billboard_dec.frag")
-    fs_impl_code = fs.load("billboard_impl.frag") + "\n" + get_code(fs_impl)
-    gs_dec_code = get_code(gs_dec)
-    gs_impl_code = get_code(gs_impl)
-
-    mapper = actor.GetMapper()
-    mapper.MapDataArrayToVertexAttribute(
-        "center", "center", vtk.vtkDataObject.FIELD_ASSOCIATION_POINTS, -1)
-
-    mapper.AddShaderReplacement(
-        vtk.vtkShader.Vertex, "//VTK::ValuePass::Dec", True,
-        vs_dec_code, False)
-
-    mapper.AddShaderReplacement(
-        vtk.vtkShader.Vertex, "//VTK::ValuePass::Impl", True,
-        vs_impl_code, False)
-
-    mapper.AddShaderReplacement(
-        vtk.vtkShader.Fragment, "//VTK::ValuePass::Dec", True,
-        fs_dec_code, False)
-
-    mapper.AddShaderReplacement(
-        vtk.vtkShader.Fragment, "//VTK::Light::Impl", True,
-        fs_impl_code, False)
-
-    mapper.AddShaderReplacement(
-        vtk.vtkShader.Geometry, "//VTK::Output::Dec", True,
-        gs_dec_code, False)
-
-    mapper.AddShaderReplacement(
-        vtk.vtkShader.Geometry, "//VTK::Output::Impl", True,
-        gs_impl_code, False)
-
-    return actor
+    return bb_actor
 
 
-def label(text='Origin', pos=(0, 0, 0), scale=(0.2, 0.2, 0.2),
-          color=(1, 1, 1)):
+def vector_text(text='Origin', pos=(0, 0, 0), scale=(0.2, 0.2, 0.2),
+                color=(1, 1, 1)):
     """Create a label actor.
 
     This actor will always face the camera
@@ -2043,7 +2368,7 @@ def label(text='Origin', pos=(0, 0, 0), scale=(0.2, 0.2, 0.2),
 
     Returns
     -------
-    l : vtkActor object
+    l : Actor object
         Label.
 
     Examples
@@ -2055,13 +2380,13 @@ def label(text='Origin', pos=(0, 0, 0), scale=(0.2, 0.2, 0.2),
     >>> #window.show(scene)
 
     """
-    atext = vtk.vtkVectorText()
+    atext = VectorText()
     atext.SetText(text)
 
-    textm = vtk.vtkPolyDataMapper()
+    textm = PolyDataMapper()
     textm.SetInputConnection(atext.GetOutputPort())
 
-    texta = vtk.vtkFollower()
+    texta = Follower()
     texta.SetMapper(textm)
     texta.SetScale(scale)
 
@@ -2069,6 +2394,12 @@ def label(text='Origin', pos=(0, 0, 0), scale=(0.2, 0.2, 0.2),
     texta.SetPosition(pos)
 
     return texta
+
+
+label = deprecate_with_version(message="Label function has been renamed"
+                                       " vector_text",
+                               since="0.7.1",
+                               until="0.9.0")(vector_text)
 
 
 def text_3d(text, position=(0, 0, 0), color=(1, 1, 1),
@@ -2094,17 +2425,16 @@ def text_3d(text, position=(0, 0, 0), color=(1, 1, 1),
 
     Returns
     -------
-    textActor3D
+    Text3D
     """
 
-    class TextActor3D(vtk.vtkTextActor3D):
+    class Text3D(TextActor3D):
 
         def message(self, text):
             self.set_message(text)
 
         def set_message(self, text):
             self.SetInput(text)
-            self._update_user_matrix()
 
         def get_message(self):
             return self.GetInput()
@@ -2112,11 +2442,9 @@ def text_3d(text, position=(0, 0, 0), color=(1, 1, 1),
         def font_size(self, size):
             self.GetTextProperty().SetFontSize(24)
             text_actor.SetScale((1./24.*size,)*3)
-            self._update_user_matrix()
 
         def font_family(self, _family='Arial'):
             self.GetTextProperty().SetFontFamilyToArial()
-            # self._update_user_matrix()
 
         def justification(self, justification):
             tprop = self.GetTextProperty()
@@ -2130,8 +2458,6 @@ def text_3d(text, position=(0, 0, 0), color=(1, 1, 1),
                 raise ValueError("Unknown justification: '{}'"
                                  .format(justification))
 
-            self._update_user_matrix()
-
         def vertical_justification(self, justification):
             tprop = self.GetTextProperty()
             if justification == 'top':
@@ -2143,8 +2469,6 @@ def text_3d(text, position=(0, 0, 0), color=(1, 1, 1),
             else:
                 raise ValueError("Unknown vertical justification: '{}'"
                                  .format(justification))
-
-            self._update_user_matrix()
 
         def font_style(self, bold=False, italic=False, shadow=False):
             tprop = self.GetTextProperty()
@@ -2161,8 +2485,6 @@ def text_3d(text, position=(0, 0, 0), color=(1, 1, 1),
             else:
                 tprop.ShadowOff()
 
-            self._update_user_matrix()
-
         def color(self, color):
             self.GetTextProperty().SetColor(*color)
 
@@ -2172,36 +2494,8 @@ def text_3d(text, position=(0, 0, 0), color=(1, 1, 1),
         def get_position(self):
             return self.GetPosition()
 
-        def _update_user_matrix(self):
-            """ Text justification of vtkTextActor3D doesn't seem to be
-            working, so we do it manually. Yeah!
-            """
-            user_matrix = np.eye(4)
 
-            text_bounds = [0, 0, 0, 0]
-            self.GetBoundingBox(text_bounds)
-
-            tprop = self.GetTextProperty()
-            if tprop.GetJustification() == vtk.VTK_TEXT_LEFT:
-                user_matrix[:3, -1] += (-text_bounds[0], 0, 0)
-            elif tprop.GetJustification() == vtk.VTK_TEXT_CENTERED:
-                tm = -(text_bounds[0] + (text_bounds[1] - text_bounds[0]) / 2.)
-                user_matrix[:3, -1] += (tm, 0, 0)
-            elif tprop.GetJustification() == vtk.VTK_TEXT_RIGHT:
-                user_matrix[:3, -1] += (-text_bounds[1], 0, 0)
-
-            if tprop.GetVerticalJustification() == vtk.VTK_TEXT_BOTTOM:
-                user_matrix[:3, -1] += (0, -text_bounds[2], 0)
-            elif tprop.GetVerticalJustification() == vtk.VTK_TEXT_CENTERED:
-                tm = -(text_bounds[2] + (text_bounds[3] - text_bounds[2]) / 2.)
-                user_matrix[:3, -1] += (0, tm, 0)
-            elif tprop.GetVerticalJustification() == vtk.VTK_TEXT_TOP:
-                user_matrix[:3, -1] += (0, -text_bounds[3], 0)
-
-            user_matrix[:3, -1] *= self.GetScale()
-            self.SetUserMatrix(numpy_to_vtk_matrix(user_matrix))
-
-    text_actor = TextActor3D()
+    text_actor = Text3D()
     text_actor.message(text)
     text_actor.font_size(font_size)
     text_actor.set_position(position)
@@ -2231,8 +2525,10 @@ class Container(object):
         Default: (0, 0, 0, 0, 0, 0)
 
     """
+
     def __init__(self, layout=layout.Layout()):
         """
+
         Parameters
         ----------
         layout : ``fury.layout.Layout`` object
@@ -2254,7 +2550,7 @@ class Container(object):
         return self._items
 
     def add(self, *items, **kwargs):
-        """ Adds some items to this container.
+        """Adds some items to this container.
 
         Parameters
         ----------
@@ -2284,7 +2580,7 @@ class Container(object):
         self._need_update = False
 
     def add_to_scene(self, ren):
-        """ Adds the items of this container to a given renderer. """
+        """ Adds the items of this container to a given scene. """
         for item in self.items:
             if isinstance(item, Container):
                 item.add_to_scene(ren)
@@ -2426,7 +2722,7 @@ def grid(actors, captions=None, caption_offset=(0, -100, 0), cell_padding=0,
 
 
 def figure(pic, interpolation='nearest'):
-    """ Return a figure as an image actor
+    """Return a figure as an image actor.
 
     Parameters
     ----------
@@ -2445,8 +2741,8 @@ def figure(pic, interpolation='nearest'):
 
         if pic.ndim == 3 and pic.shape[2] == 4:
 
-            vtk_image_data = vtk.vtkImageData()
-            vtk_image_data.AllocateScalars(vtk.VTK_UNSIGNED_CHAR, 4)
+            vtk_image_data = ImageData()
+            vtk_image_data.AllocateScalars(VTK_UNSIGNED_CHAR, 4)
 
             # width, height
             vtk_image_data.SetDimensions(pic.shape[1], pic.shape[0], 1)
@@ -2459,7 +2755,7 @@ def figure(pic, interpolation='nearest'):
             uchar_array = numpy_support.numpy_to_vtk(pic_tmp, deep=True)
             vtk_image_data.GetPointData().SetScalars(uchar_array)
 
-    image_actor = vtk.vtkImageActor()
+    image_actor = ImageActor()
     image_actor.SetInputData(vtk_image_data)
 
     if interpolation == 'nearest':
@@ -2476,7 +2772,7 @@ def figure(pic, interpolation='nearest'):
 
 
 def texture(rgb, interp=True):
-    """ Map an RGB or RGBA texture on a plane
+    """Map an RGB or RGBA texture on a plane.
 
     Parameters
     ----------
@@ -2487,7 +2783,7 @@ def texture(rgb, interp=True):
 
     Returns
     -------
-    vtkActor
+    act: Actor
     """
     arr = rgb
     grid = rgb_to_vtk(np.ascontiguousarray(arr))
@@ -2499,12 +2795,12 @@ def texture(rgb, interp=True):
     vertices *= np.array([[X, Y, 0]])
 
     # Create a polydata
-    my_polydata = vtk.vtkPolyData()
+    my_polydata = PolyData()
     set_polydata_vertices(my_polydata, vertices)
     set_polydata_triangles(my_polydata, triangles)
 
     # Create texture object
-    texture = vtk.vtkTexture()
+    texture = Texture()
     texture.SetInputDataObject(grid)
     # texture.UseSRGBColorSpaceOn()
     # texture.SetPremultipliedAlpha(True)
@@ -2512,24 +2808,50 @@ def texture(rgb, interp=True):
         texture.InterpolateOn()
 
     # Map texture coordinates
-    map_to_sphere = vtk.vtkTextureMapToPlane()
+    map_to_sphere = TextureMapToPlane()
     map_to_sphere.SetInputData(my_polydata)
 
     # Create mapper and set the mapped texture as input
-    mapper = vtk.vtkPolyDataMapper()
+    mapper = PolyDataMapper()
     mapper.SetInputConnection(map_to_sphere.GetOutputPort())
     mapper.Update()
 
     # Create actor and set the mapper and the texture
-    act = vtk.vtkActor()
+    act = Actor()
     act.SetMapper(mapper)
     act.SetTexture(texture)
 
     return act
 
 
+def texture_update(texture_actor, arr):
+    """
+    Updates texture of an actor by updating the vtkImageData
+    assigned to the vtkTexture object.
+
+    Parameters
+    ----------
+    texture_actor: Actor
+        Actor whose texture is to be updated.
+    arr : ndarray
+        Input 2D image in the form of RGB or RGBA array.
+        This is the new image to be rendered on the actor.
+        Dtype should be uint8.
+
+    Implementation
+    --------------
+    Check docs/examples/viz_video_on_plane.py
+    """
+    grid = texture_actor.GetTexture().GetInput()
+    dim = arr.shape[-1]
+    img_data = np.flip(arr.swapaxes(0, 1), axis=1)\
+                 .reshape((-1, dim), order='F')
+    vtkarr = numpy_support.numpy_to_vtk(img_data, deep=False)
+    grid.GetPointData().SetScalars(vtkarr)
+
+
 def _textured_sphere_source(theta=60, phi=60):
-    tss = vtk.vtkTexturedSphereSource()
+    tss = TexturedSphereSource()
     tss.SetThetaResolution(theta)
     tss.SetPhiResolution(phi)
 
@@ -2539,13 +2861,13 @@ def _textured_sphere_source(theta=60, phi=60):
 def texture_on_sphere(rgb, theta=60, phi=60, interpolate=True):
 
     tss = _textured_sphere_source(theta=theta, phi=phi)
-    earthMapper = vtk.vtkPolyDataMapper()
+    earthMapper = PolyDataMapper()
     earthMapper.SetInputConnection(tss.GetOutputPort())
 
-    earthActor = vtk.vtkActor()
+    earthActor = Actor()
     earthActor.SetMapper(earthMapper)
 
-    atext = vtk.vtkTexture()
+    atext = Texture()
     grid = rgb_to_vtk(rgb)
     atext.SetInputDataObject(grid)
     if interpolate:
@@ -2555,65 +2877,121 @@ def texture_on_sphere(rgb, theta=60, phi=60, interpolate=True):
     return earthActor
 
 
-def sdf(centers, directions=(1, 0, 0), colors=(255, 0, 0), primitives='torus',
-        scale=1):
+def texture_2d(rgb, interp=False):
+    """ Create 2D texture from array
+
+    Parameters
+    ----------
+    rgb : ndarray
+        Input 2D RGB or RGBA array. Dtype should be uint8.
+    interp : bool
+        Interpolate between grid centers. Default True.
+
+    Returns
+    -------
+    vtkTexturedActor
+    """
+
+    arr = rgb
+    Y, X = arr.shape[:2]
+    size = (X, Y)
+    grid = rgb_to_vtk(np.ascontiguousarray(arr))
+
+    texture_polydata = PolyData()
+    texture_points = Points()
+    texture_points.SetNumberOfPoints(4)
+
+    polys = CellArray()
+    polys.InsertNextCell(4)
+    polys.InsertCellPoint(0)
+    polys.InsertCellPoint(1)
+    polys.InsertCellPoint(2)
+    polys.InsertCellPoint(3)
+    texture_polydata.SetPolys(polys)
+
+    tc = FloatArray()
+    tc.SetNumberOfComponents(2)
+    tc.SetNumberOfTuples(4)
+    tc.InsertComponent(0, 0, 0.0)
+    tc.InsertComponent(0, 1, 0.0)
+    tc.InsertComponent(1, 0, 1.0)
+    tc.InsertComponent(1, 1, 0.0)
+    tc.InsertComponent(2, 0, 1.0)
+    tc.InsertComponent(2, 1, 1.0)
+    tc.InsertComponent(3, 0, 0.0)
+    tc.InsertComponent(3, 1, 1.0)
+    texture_polydata.GetPointData().SetTCoords(tc)
+
+    texture_points.SetPoint(0, 0, 0, 0.0)
+    texture_points.SetPoint(1, size[0], 0, 0.0)
+    texture_points.SetPoint(2, size[0], size[1], 0.0)
+    texture_points.SetPoint(3, 0, size[1], 0.0)
+    texture_polydata.SetPoints(texture_points)
+
+    texture_mapper = PolyDataMapper2D()
+    texture_mapper = set_input(texture_mapper,
+                               texture_polydata)
+
+    act = TexturedActor2D()
+    act.SetMapper(texture_mapper)
+
+    tex = Texture()
+    tex.SetInputDataObject(grid)
+    if interp:
+        tex.InterpolateOn()
+    tex.Update()
+    act.SetTexture(tex)
+    return act
+
+
+def sdf(centers, directions=(1, 0, 0), colors=(1, 0, 0), primitives='torus',
+        scales=1):
     """Create a SDF primitive based actor
 
     Parameters
     ----------
     centers : ndarray, shape (N, 3)
         SDF primitive positions
-    colors : ndarray (N,3) or (N, 4) or tuple (3,) or tuple (4,)
+    colors : ndarray (N,3) or (N, 4) or tuple (3,) or tuple (4,), optional
         RGB or RGBA (for opacity) R, G, B and A should be at the range [0, 1]
     directions : ndarray, shape (N, 3)
         The orientation vector of the SDF primitive.
-    primitives : str
+    primitives : str, list, tuple, np.ndarray
         The primitive of choice to be rendered.
-        Options are sphere and torus. Default is torus
-    scale : float
+        Options are sphere, torus and ellipsoid. Default is torus.
+    scales : float
         The size of the SDF primitive
-
 
     Returns
     -------
-    vtkActor
+    box_actor: Actor
     """
 
-    prims = {'sphere': 1, 'torus': 2, 'ellipsoid': 3}
+    prims = {'sphere': 1, 'torus': 2, 'ellipsoid': 3, 'capsule': 4}
 
     verts, faces = fp.prim_box()
     repeated = fp.repeat_primitive(verts, faces, centers=centers,
                                    colors=colors, directions=directions,
-                                   scale=scale)
+                                   scales=scales)
 
     rep_verts, rep_faces, rep_colors, rep_centers = repeated
     box_actor = get_actor_from_primitive(rep_verts, rep_faces, rep_colors)
-
-    vtk_center = numpy_support.numpy_to_vtk(rep_centers, deep=True)
-    vtk_center.SetNumberOfComponents(3)
-    vtk_center.SetName("center")
-    box_actor.GetMapper().GetInput().GetPointData().AddArray(vtk_center)
+    box_actor.GetMapper().SetVBOShiftScaleMethod(False)
 
     if isinstance(primitives,  (list, tuple, np.ndarray)):
         primlist = [prims[prim] for prim in primitives]
+        if len(primitives) < len(centers):
+            primlist = primlist + [2] * (len(centers) - len(primitives))
+            warnings.warn("Not enough primitives provided,\
+             defaulting to torus", category=UserWarning)
         rep_prims = np.repeat(primlist, verts.shape[0])
     else:
         rep_prims = np.repeat(prims[primitives], rep_centers.shape[0], axis=0)
 
-    vtk_primitive = numpy_support.numpy_to_vtk(rep_prims, deep=True)
-    vtk_primitive.SetNumberOfComponents(1)
-    vtk_primitive.SetName("primitive")
-    box_actor.GetMapper().GetInput().GetPointData().AddArray(vtk_primitive)
-
-    if isinstance(scale, (list, tuple, np.ndarray)):
-        rep_scales = np.repeat(scale, verts.shape[0])
+    if isinstance(scales, (list, tuple, np.ndarray)):
+        rep_scales = np.repeat(scales, verts.shape[0])
     else:
-        rep_scales = np.repeat(scale, rep_centers.shape[0], axis=0)
-
-    vtk_scale = numpy_support.numpy_to_vtk(rep_scales, deep=True)
-    vtk_scale.SetNumberOfComponents(1)
-    vtk_scale.SetName("scale")
-    box_actor.GetMapper().GetInput().GetPointData().AddArray(vtk_scale)
+        rep_scales = np.repeat(scales, rep_centers.shape[0], axis=0)
 
     if isinstance(directions, (list, tuple, np.ndarray)) and \
             len(directions) == 3:
@@ -2621,45 +2999,122 @@ def sdf(centers, directions=(1, 0, 0), colors=(255, 0, 0), primitives='torus',
     else:
         rep_directions = np.repeat(directions, verts.shape[0], axis=0)
 
-    vtk_direction = numpy_support.numpy_to_vtk(rep_directions, deep=True)
-    vtk_direction.SetNumberOfComponents(3)
-    vtk_direction.SetName("direction")
-    box_actor.GetMapper().GetInput().GetPointData().AddArray(vtk_direction)
+    attribute_to_actor(box_actor, rep_centers, 'center')
+    attribute_to_actor(box_actor, rep_prims, 'primitive')
+    attribute_to_actor(box_actor, rep_scales, 'scale')
+    attribute_to_actor(box_actor, rep_directions, 'direction')
 
-    vs_dec_code = fs.load("sdf_dec.vert")
-    vs_impl_code = fs.load("sdf_impl.vert")
-    fs_dec_code = fs.load("sdf_dec.frag")
-    fs_impl_code = fs.load("sdf_impl.frag")
+    vs_dec_code = import_fury_shader('sdf_dec.vert')
+    vs_impl_code = import_fury_shader('sdf_impl.vert')
+    fs_dec_code = import_fury_shader('sdf_dec.frag')
+    fs_impl_code = import_fury_shader('sdf_impl.frag')
 
-    mapper = box_actor.GetMapper()
-    mapper.MapDataArrayToVertexAttribute(
-        "center", "center", vtk.vtkDataObject.FIELD_ASSOCIATION_POINTS, -1)
-
-    mapper.MapDataArrayToVertexAttribute(
-        "primitive", "primitive", vtk.vtkDataObject.FIELD_ASSOCIATION_POINTS,
-        -1)
-
-    mapper.MapDataArrayToVertexAttribute(
-        "scale", "scale", vtk.vtkDataObject.FIELD_ASSOCIATION_POINTS, -1)
-
-    mapper.MapDataArrayToVertexAttribute(
-        "direction", "direction", vtk.vtkDataObject.FIELD_ASSOCIATION_POINTS,
-        -1)
-
-    mapper.AddShaderReplacement(
-        vtk.vtkShader.Vertex, "//VTK::ValuePass::Dec", True,
-        vs_dec_code, False)
-
-    mapper.AddShaderReplacement(
-        vtk.vtkShader.Vertex, "//VTK::ValuePass::Impl", True,
-        vs_impl_code, False)
-
-    mapper.AddShaderReplacement(
-        vtk.vtkShader.Fragment, "//VTK::ValuePass::Dec", True,
-        fs_dec_code, False)
-
-    mapper.AddShaderReplacement(
-        vtk.vtkShader.Fragment, "//VTK::Light::Impl", True,
-        fs_impl_code, False)
-
+    shader_to_actor(box_actor, "vertex", impl_code=vs_impl_code,
+                    decl_code=vs_dec_code)
+    shader_to_actor(box_actor, "fragment", decl_code=fs_dec_code)
+    shader_to_actor(box_actor, "fragment", impl_code=fs_impl_code,
+                    block="light")
     return box_actor
+
+
+def markers(
+        centers,
+        colors=(0, 1, 0),
+        scales=1,
+        marker='3d',
+        marker_opacity=.8,
+        edge_width=.0,
+        edge_color=(255, 255, 255),
+        edge_opacity=.8
+):
+    """Create a marker actor with different shapes.
+
+    Parameters
+    ----------
+    centers : ndarray, shape (N, 3)
+    colors : ndarray (N,3) or (N, 4) or tuple (3,) or tuple (4,)
+        RGB or RGBA (for opacity) R, G, B and A should be at the range [0, 1]
+    scales : ndarray, shape (N) or (N,3) or float or int, optional
+    marker : str or a list
+        Available markers are: '3d', 'o', 's', 'd', '^', 'p', 'h', 's6',
+        'x', '+', optional
+    marker_opacity : float, optional
+    edge_width : int, optional
+    edge_color : ndarray, shape (3), optional
+
+    Returns
+    -------
+    sq_actor: Actor
+
+    """
+
+    n_markers = centers.shape[0]
+    verts, faces = fp.prim_square()
+    res = fp.repeat_primitive(verts, faces, centers=centers, colors=colors,
+                              scales=scales)
+
+    big_verts, big_faces, big_colors, big_centers = res
+    sq_actor = get_actor_from_primitive(big_verts, big_faces, big_colors)
+    sq_actor.GetMapper().SetVBOShiftScaleMethod(False)
+    sq_actor.GetProperty().BackfaceCullingOff()
+
+    attribute_to_actor(sq_actor, big_centers, 'center')
+    marker2id = {
+        'o': 0, 's': 1, 'd': 2, '^': 3, 'p': 4,
+        'h': 5, 's6': 6, 'x': 7, '+': 8, '3d': 0}
+
+    vs_dec_code = import_fury_shader('billboard_dec.vert')
+    vs_dec_code += f'\n{import_fury_shader("marker_billboard_dec.vert")}'
+    vs_impl_code = import_fury_shader('billboard_impl.vert')
+    vs_impl_code += f'\n{import_fury_shader("marker_billboard_impl.vert")}'
+
+    fs_dec_code = import_fury_shader('billboard_dec.frag')
+    fs_dec_code += f'\n{import_fury_shader("marker_billboard_dec.frag")}'
+    fs_impl_code = import_fury_shader('billboard_impl.frag')
+
+    if marker == '3d':
+        fs_impl_code += f'{import_fury_shader("billboard_spheres_impl.frag")}'
+    else:
+        fs_impl_code += f'{import_fury_shader("marker_billboard_impl.frag")}'
+        if isinstance(marker, str):
+            list_of_markers = np.ones(n_markers)*marker2id[marker]
+        else:
+            list_of_markers = [marker2id[i] for i in marker]
+
+        list_of_markers = np.repeat(list_of_markers, 4).astype('float')
+        attribute_to_actor(
+            sq_actor,
+            list_of_markers, 'marker')
+
+    def callback(
+        _caller, _event, calldata=None,
+            uniform_type='f', uniform_name=None, value=None):
+        program = calldata
+        if program is not None:
+            program.__getattribute__(f'SetUniform{uniform_type}')(
+                uniform_name, value)
+
+    add_shader_callback(
+        sq_actor, partial(
+            callback, uniform_type='f', uniform_name='edgeWidth',
+            value=edge_width))
+    add_shader_callback(
+        sq_actor, partial(
+            callback, uniform_type='f', uniform_name='markerOpacity',
+            value=marker_opacity))
+    add_shader_callback(
+        sq_actor, partial(
+            callback, uniform_type='f', uniform_name='edgeOpacity',
+            value=edge_opacity))
+    add_shader_callback(
+        sq_actor, partial(
+            callback, uniform_type='3f', uniform_name='edgeColor',
+            value=edge_color))
+
+    shader_to_actor(sq_actor, "vertex", impl_code=vs_impl_code,
+                    decl_code=vs_dec_code)
+    shader_to_actor(sq_actor, "fragment", decl_code=fs_dec_code)
+    shader_to_actor(sq_actor, "fragment", impl_code=fs_impl_code,
+                    block="light")
+
+    return sq_actor

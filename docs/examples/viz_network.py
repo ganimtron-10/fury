@@ -19,7 +19,7 @@ import numpy as np
 ###############################################################################
 # Then let's download some available datasets.
 
-from fury.data.fetcher import fetch_viz_wiki_nw
+from fury.data import fetch_viz_wiki_nw
 
 files, folder = fetch_viz_wiki_nw()
 categories_file, edges_file, positions_file = sorted(files.keys())
@@ -29,7 +29,7 @@ categories_file, edges_file, positions_file = sorted(files.keys())
 
 positions = np.loadtxt(pjoin(folder, positions_file))
 categories = np.loadtxt(pjoin(folder, categories_file), dtype=str)
-edges = np.loadtxt(pjoin(folder, edges_file), dtype=np.int)
+edges = np.loadtxt(pjoin(folder, edges_file), dtype=int)
 
 ###############################################################################
 # We attribute a color to each category of our dataset which correspond to our

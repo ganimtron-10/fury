@@ -1,5 +1,4 @@
 /* Billboard  fragment shader declaration */
-//VTK::ValuePass::Dec
+in vec3 centerVertexMCVSOutput;
+in vec3 normalizedVertexMCVSOutput;
 
-in vec3 centeredVertexMC;
-in float scalingFactor;

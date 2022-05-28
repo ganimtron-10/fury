@@ -1,13 +1,9 @@
-"""Read shader files."""
+from fury.shaders.base import (add_shader_callback, attribute_to_actor,
+                               compose_shader, import_fury_shader, load_shader,
+                               load, replace_shader_in_actor,
+                               shader_apply_effects, shader_to_actor)
 
-from os.path import join as pjoin, dirname
-
-SHADERS_DIR = pjoin(dirname(__file__))
-
-
-def load(filename):
-    with open(pjoin(SHADERS_DIR, filename)) as shader_file:
-        return shader_file.read()
-
-
-__all__ = ['SHADERS_DIR', 'load']
+__all__ = ['add_shader_callback', 'attribute_to_actor', 'compose_shader',
+           'import_fury_shader', 'load_shader', 'load',
+           'replace_shader_in_actor', 'shader_apply_effects',
+           'shader_to_actor']

@@ -15,46 +15,73 @@ Core Development Team
 Contributors
 ------------
 
+* Serge Koudoro
+* Eleftherios Garyfallidis
+* Soham Biswas
 * Javier Guaje
-* Ariel Rokem, University of Washington, WA, USA
-* Matthew Brett, Birmingham University, Birmingham, UK
-* Yaroslav Halchenko
-* Kesshi jordan
+* Sajag Swami
+* Bruno Messias
+* Ranveer Aggarwal
+* Lenix Lobo
+* Marc-Alexandre Côté
+* Melina Raglin
+* Antriksh Misri
+* Karan
+* Ariel Rokem
+* David Reagan
+* Vivek Choudhary
 * Prashil
+* Saransh Jain
+* Nasim Anousheh
+* Shreyas Bhujbal
+* Tushar
 * Matthew Brett
-* kesshijordan
-* Kevin Sitek
+* Charles Poirier
+* Naman Bansal
+* Etienne St-Onge
+* Kesshi Jordan
+* Praneeth Shetty
+* ibrahimAnis
 * Bago Amirbekian
 * Omar Ocegueda
-* Gregory R. Lee
-* Stefan van der Walt
-* Enes Albay
-* Shahnawaz Ahmed
+* Amit Chaudhari
+* Meha Bhalodiya
+* Kevin Sitek
+* Sanjay Marreddi
+* ChenCheng0630
 * Jon Haitz Legarreta Gorroño
+* Gregory R. Lee
+* Filipi Nascimento Silva
+* Liam Donohue
+* Anand Shivam
+* Shahnawaz Ahmed
+* Tingyi Wanyan
+* Enes Albay
+* Stefan van der Walt
+* PrayasJ
 * Guillaume Favelier
-* Etienne St-Onge
+* Samuel St-Jean
+* Gottipati Gautam
+* theaverageguy
+* Hariharan Ayappane
 * Bishakh Ghosh
-* Bago Amirbekian
+* Jhalak Gupta
+* Aju100
 * Christopher Nguyen
 * Alexandre Gauvin
-* Jiri Borovec
 * Scott Trinkle
-* Jakob Wasserthal
-* Etienne St-Onge
-* Gauvin Alexandre
+* Jiri Borovec
+* Marssis
+* Adam Rybinski
+* LoopThrough-i-j
 * Ian Nimmo-Smith
-* Yaroslav Halchenko
-* Soham Biswas
-* Lenix Lobo
-* Vivek Choudhary
-* Saransh Jain
-* Shreyas Bhujbal
-* Ibrahim Anis
-* Filipi Nascimento Silva
-* Melina Raglin
-* Tushar
-* Naman Bansal
-* Nasim Anousheh
-* Gottipati Gautam
-* Liam Donohue
+* Aman Soni
+* Gauvin Alexandre
+* Pietro Astolfi
+* Gurdit Siyan
 * Devanshu Modi
+* Daniel S. Katz
+* Jacob Wasserth
+* Yaroslav Halchenko
+* MIHIR
+* Shivam Anand
