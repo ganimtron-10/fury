@@ -3273,10 +3273,9 @@ class DrawPanel(UI):
         Create a Canvas(Panel2D).
         """
         self.canvas = Panel2D(size=self.panel_size)
-        self.canvas.background.on_left_mouse_button_pressed = \
-            self.left_button_pressed
-        self.canvas.background.on_left_mouse_button_dragged = \
-            self.left_button_dragged
+        self.canvas.background.on_left_mouse_button_pressed = self.left_button_pressed
+        self.canvas.background.on_left_mouse_button_dragged = self.left_button_dragged
+        self.canvas.background.on_key_press = self.key_press
 
         # Todo
         # Convert mode_data into a private variable and make it read-only
@@ -3331,6 +3330,8 @@ class DrawPanel(UI):
 
         """
         self.current_scene = scene
+        self.iren = scene.GetRenderWindow().GetInteractor().GetInteractorStyle()
+        self.iren.add_active_prop(self.canvas.actors[0])
         self.canvas.add_to_scene(scene)
 
     def _get_size(self):
@@ -3359,6 +3360,7 @@ class DrawPanel(UI):
     def current_mode(self, mode):
         self.update_button_icons(mode)
         self._current_mode = mode
+        self.update_button_icons(mode)
         if mode is not None:
             self.mode_text.message = f"Mode: {mode}"
 
@@ -3423,6 +3425,17 @@ class DrawPanel(UI):
             elif btn.current_icon_id == 1:
                 btn.next_icon()
 
+    def handle_keys(self, key, key_char):
+        mode_from_key = {
+            "s": "selection",
+            "l": "line",
+            "q": "quad",
+            "c": "circle",
+            "d": "delete",
+        }
+        if key.lower() in mode_from_key.keys():
+            self.current_mode = mode_from_key[key.lower()]
+
     def clamp_mouse_position(self, mouse_position):
         """Restricts the mouse position to the canvas boundary.
 
@@ -3461,3 +3474,6 @@ class DrawPanel(UI):
         mouse_position = self.clamp_mouse_position(i_ren.event.position)
         self.handle_mouse_drag(mouse_position)
         i_ren.force_render()
+
+    def key_press(self,  i_ren, _obj, element):
+        self.handle_keys(i_ren.event.key, i_ren.event.key_char)
