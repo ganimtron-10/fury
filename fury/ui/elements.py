@@ -3099,6 +3099,7 @@ class DrawShape(UI):
 
         self.shape.on_left_mouse_button_pressed = self.left_button_pressed
         self.shape.on_left_mouse_button_dragged = self.left_button_dragged
+        self.shape.on_left_mouse_button_released = self.left_button_released
 
     def _get_actors(self):
         """Get the actors composing this UI component."""
@@ -3130,6 +3131,13 @@ class DrawShape(UI):
             self.shape.center = coords
         else:
             self.shape.position = coords
+
+    def generate_property(self):
+        return {
+            "shape": self.shape_type,
+            "color": self.shape.color,
+            "position": self.shape.position
+        }
 
     def rotate(self, angle):
         """Rotate the vertices of the UI component using specific angle.
@@ -3219,17 +3227,20 @@ class DrawShape(UI):
     def left_button_pressed(self, i_ren, _obj, shape):
         mode = self.drawpanel.current_mode
         if mode == "selection":
+            self.drawpanel.update_properties(self.generate_property(), show_panel=True)
             click_pos = np.array(i_ren.event.position)
             self._drag_offset = click_pos - self.position
             i_ren.event.abort()
         elif mode == "delete":
             self._scene.rm(self.shape.actor)
-            i_ren.force_render()
+            self.drawpanel.property_panel.set_visibility(False)
         else:
             self.drawpanel.left_button_pressed(i_ren, _obj, self.drawpanel)
+        i_ren.force_render()
 
     def left_button_dragged(self, i_ren, _obj, shape):
         if self.drawpanel.current_mode == "selection":
+            self.drawpanel.property_panel.set_visibility(False)
             if self._drag_offset is not None:
                 click_position = i_ren.event.position
                 relative_canvas_position = click_position - \
@@ -3239,6 +3250,11 @@ class DrawShape(UI):
             i_ren.force_render()
         else:
             self.drawpanel.left_button_dragged(i_ren, _obj, self.drawpanel)
+
+    def left_button_released(self, i_ren, _obj, shape):
+        if self.drawpanel.current_mode == "selection":
+            self.drawpanel.update_properties(self.generate_property(), show_panel=True)
+            i_ren.force_render()
 
 
 class DrawPanel(UI):
@@ -3266,6 +3282,7 @@ class DrawPanel(UI):
             self.current_mode = "selection"
 
         self.shape_list = []
+        self.current_shape = None
 
     def _setup(self):
         """Setup this UI component.
@@ -3317,6 +3334,14 @@ class DrawPanel(UI):
 
         self.mode_text = TextBlock2D(text="Select appropriate drawing mode using below icon")
         self.canvas.add_element(self.mode_text, (0.0, 0.95))
+
+        self.property_panel_size = (150, 300)
+        self.property_panel = Panel2D(size=self.property_panel_size, color=(0.8, 0.8, 0.9))
+
+        self.canvas.add_element(self.property_panel, (0.73, 0.2))
+        self.property_panel.set_visibility(False)
+        self.property_panel.background.on_left_mouse_button_pressed = lambda i_ren, obj, ele: None
+        self.property_panel.background.on_left_mouse_button_dragged = lambda i_ren, obj, ele: None
 
     def _get_actors(self):
         """Get the actors composing this UI component."""
@@ -3396,18 +3421,20 @@ class DrawPanel(UI):
             Checks whether in process or not.
         """
         if not in_process:
-            shape = DrawShape(shape_type=shape_type, drawpanel=self,
-                              position=current_position)
+            new_shape = DrawShape(shape_type=shape_type, drawpanel=self,
+                                  position=current_position)
             if shape_type == "circle":
-                shape.max_size = self.cal_min_boundary_distance(current_position)
-            self.shape_list.append(shape)
-            self.current_scene.add(shape)
-            self.canvas.add_element(shape, current_position - self.canvas.position)
+                new_shape.max_size = self.cal_min_boundary_distance(current_position)
+            self.shape_list.insert(0, new_shape)
+
+            self.current_shape = new_shape
+
+            self.current_scene.add(new_shape)
+            self.canvas.add_element(new_shape, current_position - self.canvas.position)
 
         else:
-            current_shape = self.shape_list[-1]
-            size = current_position - current_shape.position
-            current_shape.resize(size)
+            size = current_position - self.current_shape.position
+            self.current_shape.resize(size)
 
     def update_button_icons(self, current_mode):
         """Updates the button icon.
@@ -3422,6 +3449,22 @@ class DrawPanel(UI):
                 btn.next_icon()
             elif btn.current_icon_id == 1:
                 btn.next_icon()
+
+    def update_properties(self, data, show_panel):
+        start_x, start_y = 0.0, 1.0
+        for prop, value in data.items():
+            label = TextBlock2D(text=prop)
+            text_box = TextBox2D(10, 1, text=str(value))
+            self.current_scene.add(label, text_box)
+            start_x += 0.1
+            start_y -= 0.1
+            self.property_panel.add_element(label, (start_x, start_y))
+            start_x += 0.5
+            self.property_panel.add_element(text_box, (start_x, start_y))
+            start_x = 0.0
+
+        if show_panel:
+            self.property_panel.set_visibility(True)
 
     def clamp_mouse_position(self, mouse_position):
         """Restricts the mouse position to the canvas boundary.
