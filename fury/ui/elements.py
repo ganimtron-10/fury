@@ -3130,9 +3130,9 @@ class DrawShape(UI):
 
     def generate_property(self):
         return {
-            "shape": self.shape_type,
-            "color": self.shape.color,
-            "position": self.shape.position
+            "shape": [TextBlock2D(text="Shape"), TextBox2D(10, 1, text=self.shape_type)],
+            "color": [TextBlock2D(text="Color"), TextBox2D(10, 1, text=str(self.shape.color))],
+            "position": [TextBlock2D(text="Position"), TextBox2D(10, 1, text=str(self.shape.position))]
         }
 
     def rotate(self, angle):
@@ -3385,17 +3385,22 @@ class DrawPanel(UI):
                 btn.next_icon()
 
     def update_properties(self, data, show_panel):
-        start_x, start_y = 0.0, 1.0
-        for prop, value in data.items():
-            label = TextBlock2D(text=prop)
-            text_box = TextBox2D(10, 1, text=str(value))
-            self.current_scene.add(label, text_box)
-            start_x += 0.1
-            start_y -= 0.1
-            self.property_panel.add_element(label, (start_x, start_y))
-            start_x += 0.5
-            self.property_panel.add_element(text_box, (start_x, start_y))
-            start_x = 0.0
+        # print(len(self.property_panel._elements))
+        for element in self.property_panel._elements[1:]:
+            self.property_panel.remove_element(element)
+            self.current_scene.rm(*element.actors)
+
+        y_position = 1.0
+        for name, prop_list in data.items():
+
+            self.current_scene.add(*prop_list)
+
+            x_position = 0.1
+            y_position -= 0.2
+            self.property_panel.add_element(prop_list[0], (x_position, y_position))
+
+            x_position += 0.5
+            self.property_panel.add_element(prop_list[1], (x_position, y_position))
 
         if show_panel:
             self.property_panel.set_visibility(True)
