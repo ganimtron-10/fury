@@ -1,26 +1,1529 @@
-"""UI components module."""
-
-__all__ = ["TextBox2D", "LineSlider2D", "LineDoubleSlider2D",
-           "RingSlider2D", "RangeSlider", "Checkbox", "Option", "RadioButton",
-           "ComboBox2D", "ListBox2D", "ListBoxItem2D", "FileMenu2D"]
-
-import os
 from collections import OrderedDict
+from warnings import warn
 from numbers import Number
-from string import printable
-
 
 import numpy as np
+import vtk
+import os
+import abc
 
 from fury.data import read_viz_icons
-from fury.ui.core import UI, Rectangle2D, TextBlock2D, Disk2D
-from fury.ui.containers import Panel2D
-from fury.ui.helpers import TWO_PI, clip_overflow
-from fury.ui.core import Button2D
+from fury.interactor import CustomInteractorStyle
+from fury.io import load_image
+from fury.utils import set_input, rotate
+from fury.actor import grid
+
+
+TWO_PI = 2 * np.pi
+
+
+def clip_overflow(textblock, width):
+    """Clips overflowing text of TextBlock2D with respect to width.
+
+    Parameters
+    ----------
+    textblock : TextBlock2D
+        The textblock object whose text needs to be clipped.
+    width : int
+        Required width of the clipped text.
+
+    Returns
+    -------
+    clipped text : str
+        Clipped version of the text.
+    """
+    original_str = textblock.message
+    start_ptr = 0
+    end_ptr = len(original_str)
+    prev_bg = textblock.have_bg
+    textblock.have_bg = False
+
+    if textblock.size[0] == width or textblock.size[0] <= width:
+        textblock.have_bg = prev_bg
+        return original_str
+
+    while start_ptr < end_ptr:
+        mid_ptr = (start_ptr + end_ptr)//2
+        textblock.message = original_str[:mid_ptr] + "..."
+        if textblock.size[0] < width:
+            start_ptr = mid_ptr
+        elif textblock.size[0] > width:
+            end_ptr = mid_ptr
+
+        if mid_ptr == (start_ptr + end_ptr)//2 or\
+           textblock.size[0] == width:
+            textblock.have_bg = prev_bg
+            return textblock.message
+
+
+class UI(object, metaclass=abc.ABCMeta):
+    """An umbrella class for all UI elements.
+
+    While adding UI elements to the scene, we go over all the sub-elements
+    that come with it and add those to the scene automatically.
+
+    Attributes
+    ----------
+    position : (float, float)
+        Absolute coordinates (x, y) of the lower-left corner of this
+        UI component.
+    center : (float, float)
+        Absolute coordinates (x, y) of the center of this UI component.
+    size : (int, int)
+        Width and height in pixels of this UI component.
+    on_left_mouse_button_pressed: function
+        Callback function for when the left mouse button is pressed.
+    on_left_mouse_button_released: function
+        Callback function for when the left mouse button is released.
+    on_left_mouse_button_clicked: function
+        Callback function for when clicked using the left mouse button
+        (i.e. pressed -> released).
+    on_left_mouse_double_clicked: function
+        Callback function for when left mouse button is double clicked
+        (i.e pressed -> released -> pressed -> released).
+    on_left_mouse_button_dragged: function
+        Callback function for when dragging using the left mouse button.
+    on_right_mouse_button_pressed: function
+        Callback function for when the right mouse button is pressed.
+    on_right_mouse_button_released: function
+        Callback function for when the right mouse button is released.
+    on_right_mouse_button_clicked: function
+        Callback function for when clicking using the right mouse button
+        (i.e. pressed -> released).
+    on_right_mouse_double_clicked: function
+        Callback function for when right mouse button is double clicked
+        (i.e pressed -> released -> pressed -> released).
+    on_right_mouse_button_dragged: function
+        Callback function for when dragging using the right mouse button.
+    on_middle_mouse_button_pressed: function
+        Callback function for when the middle mouse button is pressed.
+    on_middle_mouse_button_released: function
+        Callback function for when the middle mouse button is released.
+    on_middle_mouse_button_clicked: function
+        Callback function for when clicking using the middle mouse button
+        (i.e. pressed -> released).
+    on_middle_mouse_double_clicked: function
+        Callback function for when middle mouse button is double clicked
+        (i.e pressed -> released -> pressed -> released).
+    on_middle_mouse_button_dragged: function
+        Callback function for when dragging using the middle mouse button.
+    on_key_press: function
+        Callback function for when a keyboard key is pressed.
+
+    """
+
+    def __init__(self, position=(0, 0)):
+        """Init scene.
+
+        Parameters
+        ----------
+        position : (float, float)
+            Absolute coordinates (x, y) of the lower-left corner of this
+            UI component.
+
+        """
+        self._scene = object()
+        self._position = np.array([0, 0])
+        self._callbacks = []
+
+        self._setup()  # Setup needed actors and sub UI components.
+        self.position = position
+
+        self.left_button_state = "released"
+        self.right_button_state = "released"
+        self.middle_button_state = "released"
+
+        self.on_left_mouse_button_pressed = lambda i_ren, obj, element: None
+        self.on_left_mouse_button_dragged = lambda i_ren, obj, element: None
+        self.on_left_mouse_button_released = lambda i_ren, obj, element: None
+        self.on_left_mouse_button_clicked = lambda i_ren, obj, element: None
+        self.on_left_mouse_double_clicked = lambda i_ren, obj, element: None
+        self.on_right_mouse_button_pressed = lambda i_ren, obj, element: None
+        self.on_right_mouse_button_released = lambda i_ren, obj, element: None
+        self.on_right_mouse_button_clicked = lambda i_ren, obj, element: None
+        self.on_right_mouse_double_clicked = lambda i_ren, obj, element: None
+        self.on_right_mouse_button_dragged = lambda i_ren, obj, element: None
+        self.on_middle_mouse_button_pressed = lambda i_ren, obj, element: None
+        self.on_middle_mouse_button_released = lambda i_ren, obj, element: None
+        self.on_middle_mouse_button_clicked = lambda i_ren, obj, element: None
+        self.on_middle_mouse_double_clicked = lambda i_ren, obj, element: None
+        self.on_middle_mouse_button_dragged = lambda i_ren, obj, element: None
+        self.on_key_press = lambda i_ren, obj, element: None
+
+    @abc.abstractmethod
+    def _setup(self):
+        """Set up this UI component.
+
+        This is where you should create all your needed actors and sub UI
+        components.
+
+        """
+        msg = "Subclasses of UI must implement `_setup(self)`."
+        raise NotImplementedError(msg)
+
+    @abc.abstractmethod
+    def _get_actors(self):
+        """Get the actors composing this UI component."""
+        msg = "Subclasses of UI must implement `_get_actors(self)`."
+        raise NotImplementedError(msg)
+
+    @property
+    def actors(self):
+        """Actors composing this UI component."""
+        return self._get_actors()
+
+    @abc.abstractmethod
+    def _add_to_scene(self, _scene):
+        """Add all subcomponents or VTK props that compose this UI component.
+
+        Parameters
+        ----------
+        _scene : scene
+
+        """
+        msg = "Subclasses of UI must implement `_add_to_scene(self, scene)`."
+        raise NotImplementedError(msg)
+
+    def add_to_scene(self, scene):
+        """Allow UI objects to add their own props to the scene.
+
+        Parameters
+        ----------
+        scene : scene
+
+        """
+        self._add_to_scene(scene)
+
+        # Get a hold on the current interactor style.
+        iren = scene.GetRenderWindow().GetInteractor().GetInteractorStyle()
+
+        for callback in self._callbacks:
+            if not isinstance(iren, CustomInteractorStyle):
+                msg = ("The ShowManager requires `CustomInteractorStyle` in"
+                       " order to use callbacks.")
+                raise TypeError(msg)
+
+            if callback[0] == self._scene:
+
+                iren.add_callback(iren, callback[1], callback[2], args=[self])
+            else:
+                iren.add_callback(*callback, args=[self])
+
+    def add_callback(self, prop, event_type, callback, priority=0):
+        """Add a callback to a specific event for this UI component.
+
+        Parameters
+        ----------
+        prop : vtkProp
+            The prop on which is callback is to be added.
+        event_type : string
+            The event code.
+        callback : function
+            The callback function.
+        priority : int
+            Higher number is higher priority.
+
+        """
+        # Actually since we need an interactor style we will add the callback
+        # only when this UI component is added to the scene.
+        self._callbacks.append((prop, event_type, callback, priority))
+
+    @property
+    def position(self):
+        return self._position
+
+    @position.setter
+    def position(self, coords):
+        coords = np.asarray(coords)
+        self._set_position(coords)
+        self._position = coords
+
+    @abc.abstractmethod
+    def _set_position(self, _coords):
+        """Position the lower-left corner of this UI component.
+
+        Parameters
+        ----------
+        _coords: (float, float)
+            Absolute pixel coordinates (x, y).
+
+        """
+        msg = "Subclasses of UI must implement `_set_position(self, coords)`."
+        raise NotImplementedError(msg)
+
+    @property
+    def size(self):
+        return np.asarray(self._get_size(), dtype=int)
+
+    @abc.abstractmethod
+    def _get_size(self):
+        msg = "Subclasses of UI must implement property `size`."
+        raise NotImplementedError(msg)
+
+    @property
+    def center(self):
+        return self.position + self.size / 2.
+
+    @center.setter
+    def center(self, coords):
+        """Position the center of this UI component.
+
+        Parameters
+        ----------
+        coords: (float, float)
+            Absolute pixel coordinates (x, y).
+
+        """
+        if not hasattr(self, "size"):
+            msg = "Subclasses of UI must implement the `size` property."
+            raise NotImplementedError(msg)
+
+        new_center = np.array(coords)
+        size = np.array(self.size)
+        new_lower_left_corner = new_center - size / 2.
+        self.position = new_lower_left_corner
+
+    def set_visibility(self, visibility):
+        """Set visibility of this UI component."""
+        for actor in self.actors:
+            actor.SetVisibility(visibility)
+
+    def handle_events(self, actor):
+        self.add_callback(actor, "LeftButtonPressEvent",
+                          self.left_button_click_callback)
+        self.add_callback(actor, "LeftButtonReleaseEvent",
+                          self.left_button_release_callback)
+        self.add_callback(actor, "RightButtonPressEvent",
+                          self.right_button_click_callback)
+        self.add_callback(actor, "RightButtonReleaseEvent",
+                          self.right_button_release_callback)
+        self.add_callback(actor, "MiddleButtonPressEvent",
+                          self.middle_button_click_callback)
+        self.add_callback(actor, "MiddleButtonReleaseEvent",
+                          self.middle_button_release_callback)
+        self.add_callback(actor, "MouseMoveEvent", self.mouse_move_callback)
+        self.add_callback(actor, "KeyPressEvent", self.key_press_callback)
+
+    @staticmethod
+    def left_button_click_callback(i_ren, obj, self):
+        self.left_button_state = "pressing"
+        self.on_left_mouse_button_pressed(i_ren, obj, self)
+        i_ren.event.abort()
+
+    @staticmethod
+    def left_button_release_callback(i_ren, obj, self):
+        if self.left_button_state == "pressing":
+            self.on_left_mouse_button_clicked(i_ren, obj, self)
+        self.left_button_state = "released"
+        self.on_left_mouse_button_released(i_ren, obj, self)
+
+    @staticmethod
+    def right_button_click_callback(i_ren, obj, self):
+        self.right_button_state = "pressing"
+        self.on_right_mouse_button_pressed(i_ren, obj, self)
+        i_ren.event.abort()
+
+    @staticmethod
+    def right_button_release_callback(i_ren, obj, self):
+        if self.right_button_state == "pressing":
+            self.on_right_mouse_button_clicked(i_ren, obj, self)
+        self.right_button_state = "released"
+        self.on_right_mouse_button_released(i_ren, obj, self)
+
+    @staticmethod
+    def middle_button_click_callback(i_ren, obj, self):
+        self.middle_button_state = "pressing"
+        self.on_middle_mouse_button_pressed(i_ren, obj, self)
+        i_ren.event.abort()
+
+    @staticmethod
+    def middle_button_release_callback(i_ren, obj, self):
+        if self.middle_button_state == "pressing":
+            self.on_middle_mouse_button_clicked(i_ren, obj, self)
+        self.middle_button_state = "released"
+        self.on_middle_mouse_button_released(i_ren, obj, self)
+
+    @staticmethod
+    def mouse_move_callback(i_ren, obj, self):
+        left_pressing_or_dragging = (self.left_button_state == "pressing" or
+                                     self.left_button_state == "dragging")
+
+        right_pressing_or_dragging = (self.right_button_state == "pressing" or
+                                      self.right_button_state == "dragging")
+
+        middle_pressing_or_dragging = \
+            (self.middle_button_state == "pressing" or
+             self.middle_button_state == "dragging")
+
+        if left_pressing_or_dragging:
+            self.left_button_state = "dragging"
+            self.on_left_mouse_button_dragged(i_ren, obj, self)
+        elif right_pressing_or_dragging:
+            self.right_button_state = "dragging"
+            self.on_right_mouse_button_dragged(i_ren, obj, self)
+        elif middle_pressing_or_dragging:
+            self.middle_button_state = "dragging"
+            self.on_middle_mouse_button_dragged(i_ren, obj, self)
+
+    @staticmethod
+    def key_press_callback(i_ren, obj, self):
+        self.on_key_press(i_ren, obj, self)
+
+
+class Button2D(UI):
+    """A 2D overlay button and is of type vtkTexturedActor2D.
+
+    Currently supports::
+
+        - Multiple icons.
+        - Switching between icons.
+
+    """
+
+    def __init__(self, icon_fnames, position=(0, 0), size=(30, 30)):
+        """Init class instance.
+
+        Parameters
+        ----------
+        icon_fnames : List(string, string)
+            ((iconname, filename), (iconname, filename), ....)
+        position : (float, float), optional
+            Absolute coordinates (x, y) of the lower-left corner of the button.
+        size : (int, int), optional
+            Width and height in pixels of the button.
+
+        """
+        super(Button2D, self).__init__(position)
+
+        self.icon_extents = dict()
+        self.icons = self._build_icons(icon_fnames)
+        self.icon_names = [icon[0] for icon in self.icons]
+        self.current_icon_id = 0
+        self.current_icon_name = self.icon_names[self.current_icon_id]
+        self.set_icon(self.icons[self.current_icon_id][1])
+        self.resize(size)
+
+    def _get_size(self):
+        lower_left_corner = self.texture_points.GetPoint(0)
+        upper_right_corner = self.texture_points.GetPoint(2)
+        size = np.array(upper_right_corner) - np.array(lower_left_corner)
+        return abs(size[:2])
+
+    def _build_icons(self, icon_fnames):
+        """Convert file names to vtkImageDataGeometryFilters.
+
+        A pre-processing step to prevent re-read of file names during every
+        state change.
+
+        Parameters
+        ----------
+        icon_fnames : List(string, string)
+            ((iconname, filename), (iconname, filename), ....)
+
+        Returns
+        -------
+        icons : List
+            A list of corresponding vtkImageDataGeometryFilters.
+
+        """
+        icons = []
+        for icon_name, icon_fname in icon_fnames:
+            icons.append((icon_name, load_image(icon_fname, as_vtktype=True)))
+
+        return icons
+
+    def _setup(self):
+        """Set up this UI component.
+
+        Creating the button actor used internally.
+
+        """
+        # This is highly inspired by
+        # https://github.com/Kitware/VTK/blob/c3ec2495b183e3327820e927af7f8f90d34c3474/Interaction/Widgets/vtkBalloonRepresentation.cxx#L47
+
+        self.texture_polydata = vtk.vtkPolyData()
+        self.texture_points = vtk.vtkPoints()
+        self.texture_points.SetNumberOfPoints(4)
+
+        polys = vtk.vtkCellArray()
+        polys.InsertNextCell(4)
+        polys.InsertCellPoint(0)
+        polys.InsertCellPoint(1)
+        polys.InsertCellPoint(2)
+        polys.InsertCellPoint(3)
+        self.texture_polydata.SetPolys(polys)
+
+        tc = vtk.vtkFloatArray()
+        tc.SetNumberOfComponents(2)
+        tc.SetNumberOfTuples(4)
+        tc.InsertComponent(0, 0, 0.0)
+        tc.InsertComponent(0, 1, 0.0)
+        tc.InsertComponent(1, 0, 1.0)
+        tc.InsertComponent(1, 1, 0.0)
+        tc.InsertComponent(2, 0, 1.0)
+        tc.InsertComponent(2, 1, 1.0)
+        tc.InsertComponent(3, 0, 0.0)
+        tc.InsertComponent(3, 1, 1.0)
+        self.texture_polydata.GetPointData().SetTCoords(tc)
+
+        texture_mapper = vtk.vtkPolyDataMapper2D()
+        texture_mapper = set_input(texture_mapper, self.texture_polydata)
+
+        button = vtk.vtkTexturedActor2D()
+        button.SetMapper(texture_mapper)
+
+        self.texture = vtk.vtkTexture()
+        button.SetTexture(self.texture)
+
+        button_property = vtk.vtkProperty2D()
+        button_property.SetOpacity(1.0)
+        button.SetProperty(button_property)
+        self.actor = button
+
+        # Add default events listener to the VTK actor.
+        self.handle_events(self.actor)
+
+    def _get_actors(self):
+        """Get the actors composing this UI component."""
+        return [self.actor]
+
+    def _add_to_scene(self, scene):
+        """Add all subcomponents or VTK props that compose this UI component.
+
+        Parameters
+        ----------
+        scene : scene
+
+        """
+        scene.add(self.actor)
+
+    def resize(self, size):
+        """Resize the button.
+
+        Parameters
+        ----------
+        size : (float, float)
+            Button size (width, height) in pixels.
+
+        """
+        # Update actor.
+        self.texture_points.SetPoint(0, 0, 0, 0.0)
+        self.texture_points.SetPoint(1, size[0], 0, 0.0)
+        self.texture_points.SetPoint(2, size[0], size[1], 0.0)
+        self.texture_points.SetPoint(3, 0, size[1], 0.0)
+        self.texture_polydata.SetPoints(self.texture_points)
+
+    def _set_position(self, coords):
+        """ Position the lower-left corner of this UI component.
+
+        Parameters
+        ----------
+        coords: (float, float)
+            Absolute pixel coordinates (x, y).
+        """
+        self.actor.SetPosition(*coords)
+
+    @property
+    def color(self):
+        """ Gets the button's color.
+        """
+        color = self.actor.GetProperty().GetColor()
+        return np.asarray(color)
+
+    @color.setter
+    def color(self, color):
+        """ Sets the button's color.
+
+        Parameters
+        ----------
+        color : (float, float, float)
+            RGB. Must take values in [0, 1].
+        """
+        self.actor.GetProperty().SetColor(*color)
+
+    def scale(self, factor):
+        """ Scales the button.
+
+        Parameters
+        ----------
+        factor : (float, float)
+            Scaling factor (width, height) in pixels.
+        """
+        self.resize(self.size * factor)
+
+    def set_icon_by_name(self, icon_name):
+        """ Set the button icon using its name.
+
+        Parameters
+        ----------
+        icon_name : str
+        """
+        icon_id = self.icon_names.index(icon_name)
+        self.set_icon(self.icons[icon_id][1])
+
+    def set_icon(self, icon):
+        """ Modifies the icon used by the vtkTexturedActor2D.
+
+        Parameters
+        ----------
+        icon : imageDataGeometryFilter
+        """
+        self.texture = set_input(self.texture, icon)
+
+    def next_icon_id(self):
+        """ Sets the next icon ID while cycling through icons.
+        """
+        self.current_icon_id += 1
+        if self.current_icon_id == len(self.icons):
+            self.current_icon_id = 0
+        self.current_icon_name = self.icon_names[self.current_icon_id]
+
+    def next_icon(self):
+        """ Increments the state of the Button.
+
+            Also changes the icon.
+        """
+        self.next_icon_id()
+        self.set_icon(self.icons[self.current_icon_id][1])
+
+
+class Rectangle2D(UI):
+    """ A 2D rectangle sub-classed from UI.
+    """
+
+    def __init__(self, size=(0, 0), position=(0, 0), color=(1, 1, 1),
+                 opacity=1.0):
+        """ Initializes a rectangle.
+
+        Parameters
+        ----------
+        size : (int, int)
+            The size of the rectangle (width, height) in pixels.
+        position : (float, float)
+            Coordinates (x, y) of the lower-left corner of the rectangle.
+        color : (float, float, float)
+            Must take values in [0, 1].
+        opacity : float
+            Must take values in [0, 1].
+        """
+        super(Rectangle2D, self).__init__(position)
+        self.color = color
+        self.opacity = opacity
+        self.resize(size)
+
+    def _setup(self):
+        """ Setup this UI component.
+
+        Creating the polygon actor used internally.
+        """
+        # Setup four points
+        size = (1, 1)
+        self._points = vtk.vtkPoints()
+        self._points.InsertNextPoint(0, 0, 0)
+        self._points.InsertNextPoint(size[0], 0, 0)
+        self._points.InsertNextPoint(size[0], size[1], 0)
+        self._points.InsertNextPoint(0, size[1], 0)
+
+        # Create the polygon
+        polygon = vtk.vtkPolygon()
+        polygon.GetPointIds().SetNumberOfIds(4)  # make a quad
+        polygon.GetPointIds().SetId(0, 0)
+        polygon.GetPointIds().SetId(1, 1)
+        polygon.GetPointIds().SetId(2, 2)
+        polygon.GetPointIds().SetId(3, 3)
+
+        # Add the polygon to a list of polygons
+        polygons = vtk.vtkCellArray()
+        polygons.InsertNextCell(polygon)
+
+        # Create a PolyData
+        self._polygonPolyData = vtk.vtkPolyData()
+        self._polygonPolyData.SetPoints(self._points)
+        self._polygonPolyData.SetPolys(polygons)
+
+        # Create a mapper and actor
+        mapper = vtk.vtkPolyDataMapper2D()
+        mapper = set_input(mapper, self._polygonPolyData)
+
+        self.actor = vtk.vtkActor2D()
+        self.actor.SetMapper(mapper)
+
+        # Add default events listener to the VTK actor.
+        self.handle_events(self.actor)
+
+    def _get_actors(self):
+        """ Get the actors composing this UI component.
+        """
+        return [self.actor]
+
+    def _add_to_scene(self, scene):
+        """ Add all subcomponents or VTK props that compose this UI component.
+
+        Parameters
+        ----------
+        scene : scene
+        """
+        scene.add(self.actor)
+
+    def _get_size(self):
+        # Get 2D coordinates of two opposed corners of the rectangle.
+        lower_left_corner = np.array(self._points.GetPoint(0)[:2])
+        upper_right_corner = np.array(self._points.GetPoint(2)[:2])
+        size = abs(upper_right_corner - lower_left_corner)
+        return size
+
+    @property
+    def width(self):
+        return self._points.GetPoint(2)[0]
+
+    @width.setter
+    def width(self, width):
+        self.resize((width, self.height))
+
+    @property
+    def height(self):
+        return self._points.GetPoint(2)[1]
+
+    @height.setter
+    def height(self, height):
+        self.resize((self.width, height))
+
+    def resize(self, size):
+        """ Sets the button size.
+
+        Parameters
+        ----------
+        size : (float, float)
+            Button size (width, height) in pixels.
+        """
+        self._points.SetPoint(0, 0, 0, 0.0)
+        self._points.SetPoint(1, size[0], 0, 0.0)
+        self._points.SetPoint(2, size[0], size[1], 0.0)
+        self._points.SetPoint(3, 0, size[1], 0.0)
+        self._polygonPolyData.SetPoints(self._points)
+        mapper = vtk.vtkPolyDataMapper2D()
+        mapper = set_input(mapper, self._polygonPolyData)
+
+        self.actor.SetMapper(mapper)
+
+    def _set_position(self, coords):
+        """ Position the lower-left corner of this UI component.
+
+        Parameters
+        ----------
+        coords: (float, float)
+            Absolute pixel coordinates (x, y).
+        """
+        self.actor.SetPosition(*coords)
+
+    @property
+    def color(self):
+        """ Gets the rectangle's color.
+        """
+        color = self.actor.GetProperty().GetColor()
+        return np.asarray(color)
+
+    @color.setter
+    def color(self, color):
+        """ Sets the rectangle's color.
+
+        Parameters
+        ----------
+        color : (float, float, float)
+            RGB. Must take values in [0, 1].
+        """
+        self.actor.GetProperty().SetColor(*color)
+
+    @property
+    def opacity(self):
+        """ Gets the rectangle's opacity.
+        """
+        return self.actor.GetProperty().GetOpacity()
+
+    @opacity.setter
+    def opacity(self, opacity):
+        """ Sets the rectangle's opacity.
+
+        Parameters
+        ----------
+        opacity : float
+            Degree of transparency. Must be between [0, 1].
+        """
+        self.actor.GetProperty().SetOpacity(opacity)
+
+
+class Disk2D(UI):
+    """ A 2D disk UI component.
+    """
+
+    def __init__(self, outer_radius, inner_radius=0, center=(0, 0),
+                 color=(1, 1, 1), opacity=1.0):
+        """ Initializes a 2D Disk.
+
+        Parameters
+        ----------
+        outer_radius : int
+            Outer radius of the disk.
+        inner_radius : int, optional
+            Inner radius of the disk. A value > 0, makes a ring.
+        center : (float, float), optional
+            Coordinates (x, y) of the center of the disk.
+        color : (float, float, float), optional
+            Must take values in [0, 1].
+        opacity : float, optional
+            Must take values in [0, 1].
+        """
+        super(Disk2D, self).__init__()
+        self.outer_radius = outer_radius
+        self.inner_radius = inner_radius
+        self.color = color
+        self.opacity = opacity
+        self.center = center
+
+    def _setup(self):
+        """ Setup this UI component.
+
+        Creating the disk actor used internally.
+        """
+        # Setting up disk actor.
+        self._disk = vtk.vtkDiskSource()
+        self._disk.SetRadialResolution(10)
+        self._disk.SetCircumferentialResolution(50)
+        self._disk.Update()
+
+        # Mapper
+        mapper = vtk.vtkPolyDataMapper2D()
+        mapper = set_input(mapper, self._disk.GetOutputPort())
+
+        # Actor
+        self.actor = vtk.vtkActor2D()
+        self.actor.SetMapper(mapper)
+
+        # Add default events listener to the VTK actor.
+        self.handle_events(self.actor)
+
+    def _get_actors(self):
+        """ Get the actors composing this UI component.
+        """
+        return [self.actor]
+
+    def _add_to_scene(self, scene):
+        """ Add all subcomponents or VTK props that compose this UI component.
+
+        Parameters
+        ----------
+        scene : scene
+        """
+        scene.add(self.actor)
+
+    def _get_size(self):
+        diameter = 2 * self.outer_radius
+        size = (diameter, diameter)
+        return size
+
+    def _set_position(self, coords):
+        """ Position the lower-left corner of this UI component's bounding box.
+
+        Parameters
+        ----------
+        coords: (float, float)
+            Absolute pixel coordinates (x, y).
+        """
+        # Disk actor are positioned with respect to their center.
+        self.actor.SetPosition(*coords + self.outer_radius)
+
+    @property
+    def color(self):
+        """ Gets the color of this UI component.
+        """
+        color = self.actor.GetProperty().GetColor()
+        return np.asarray(color)
+
+    @color.setter
+    def color(self, color):
+        """ Sets the color of this UI component.
+
+        Parameters
+        ----------
+        color : (float, float, float)
+            RGB. Must take values in [0, 1].
+        """
+        self.actor.GetProperty().SetColor(*color)
+
+    @property
+    def opacity(self):
+        """ Gets the opacity of this UI component.
+        """
+        return self.actor.GetProperty().GetOpacity()
+
+    @opacity.setter
+    def opacity(self, opacity):
+        """ Sets the opacity of this UI component.
+
+        Parameters
+        ----------
+        opacity : float
+            Degree of transparency. Must be between [0, 1].
+        """
+        self.actor.GetProperty().SetOpacity(opacity)
+
+    @property
+    def inner_radius(self):
+        return self._disk.GetInnerRadius()
+
+    @inner_radius.setter
+    def inner_radius(self, radius):
+        self._disk.SetInnerRadius(radius)
+        self._disk.Update()
+
+    @property
+    def outer_radius(self):
+        return self._disk.GetOuterRadius()
+
+    @outer_radius.setter
+    def outer_radius(self, radius):
+        self._disk.SetOuterRadius(radius)
+        self._disk.Update()
+
+
+class Panel2D(UI):
+    """ A 2D UI Panel.
+
+    Can contain one or more UI elements.
+
+    Attributes
+    ----------
+    alignment : [left, right]
+        Alignment of the panel with respect to the overall screen.
+    """
+
+    def __init__(self, size, position=(0, 0), color=(0.1, 0.1, 0.1),
+                 opacity=0.7, align="left"):
+        """
+        Parameters
+        ----------
+        size : (int, int)
+            Size (width, height) in pixels of the panel.
+        position : (float, float)
+            Absolute coordinates (x, y) of the lower-left corner of the panel.
+        color : (float, float, float)
+            Must take values in [0, 1].
+        opacity : float
+            Must take values in [0, 1].
+        align : [left, right]
+            Alignment of the panel with respect to the overall screen.
+        """
+        super(Panel2D, self).__init__(position)
+        self.resize(size)
+        self.alignment = align
+        self.color = color
+        self.opacity = opacity
+        self.position = position
+        self._drag_offset = None
+
+    def _setup(self):
+        """ Setup this UI component.
+
+        Create the background (Rectangle2D) of the panel.
+        """
+        self._elements = []
+        self.element_offsets = []
+        self.background = Rectangle2D()
+        self.add_element(self.background, (0, 0))
+
+        # Add default events listener for this UI component.
+        self.background.on_left_mouse_button_pressed = self.left_button_pressed
+        self.background.on_left_mouse_button_dragged = self.left_button_dragged
+
+    def _get_actors(self):
+        """ Get the actors composing this UI component.
+        """
+        actors = []
+        for element in self._elements:
+            actors += element.actors
+
+        return actors
+
+    def _add_to_scene(self, scene):
+        """ Add all subcomponents or VTK props that compose this UI component.
+
+        Parameters
+        ----------
+        scene : scene
+        """
+        for element in self._elements:
+            element.add_to_scene(scene)
+
+    def _get_size(self):
+        return self.background.size
+
+    def resize(self, size):
+        """ Sets the panel size.
+
+        Parameters
+        ----------
+        size : (float, float)
+            Panel size (width, height) in pixels.
+        """
+        self.background.resize(size)
+
+    def _set_position(self, coords):
+        """ Position the lower-left corner of this UI component.
+
+        Parameters
+        ----------
+        coords: (float, float)
+            Absolute pixel coordinates (x, y).
+        """
+        coords = np.array(coords)
+        for element, offset in self.element_offsets:
+            element.position = coords + offset
+
+    @property
+    def color(self):
+        return self.background.color
+
+    @color.setter
+    def color(self, color):
+        self.background.color = color
+
+    @property
+    def opacity(self):
+        return self.background.opacity
+
+    @opacity.setter
+    def opacity(self, opacity):
+        self.background.opacity = opacity
+
+    def add_element(self, element, coords, anchor="position"):
+        """ Adds a UI component to the panel.
+
+        The coordinates represent an offset from the lower left corner of the
+        panel.
+
+        Parameters
+        ----------
+        element : UI
+            The UI item to be added.
+        coords : (float, float) or (int, int)
+            If float, normalized coordinates are assumed and they must be
+            between [0,1].
+            If int, pixels coordinates are assumed and it must fit within the
+            panel's size.
+        """
+        coords = np.array(coords)
+
+        if np.issubdtype(coords.dtype, np.floating):
+            if np.any(coords < 0) or np.any(coords > 1):
+                raise ValueError("Normalized coordinates must be in [0,1].")
+
+            coords = coords * self.size
+
+        if anchor == "center":
+            element.center = self.position + coords
+        elif anchor == "position":
+            element.position = self.position + coords
+        else:
+            msg = ("Unknown anchor {}. Supported anchors are 'position'"
+                   " and 'center'.")
+            raise ValueError(msg)
+
+        self._elements.append(element)
+        offset = element.position - self.position
+        self.element_offsets.append((element, offset))
+
+    def remove_element(self, element):
+        """ Removes a UI component from the panel.
+
+        Parameters
+        ----------
+        element : UI
+            The UI item to be removed.
+        """
+        idx = self._elements.index(element)
+        del self._elements[idx]
+        del self.element_offsets[idx]
+
+    def update_element(self, element, coords, anchor="position"):
+        """ Updates the position of a UI component in the panel.
+
+        Parameters
+        ----------
+        element : UI
+            The UI item to be updated.
+        coords : (float, float) or (int, int)
+            New coordinates.
+            If float, normalized coordinates are assumed and they must be
+            between [0,1].
+            If int, pixels coordinates are assumed and it must fit within the
+            panel's size.
+        """
+        self.remove_element(element)
+        self.add_element(element, coords, anchor)
+
+    def left_button_pressed(self, i_ren, _obj, panel2d_object):
+        click_pos = np.array(i_ren.event.position)
+        self._drag_offset = click_pos - panel2d_object.position
+        i_ren.event.abort()  # Stop propagating the event.
+
+    def left_button_dragged(self, i_ren, _obj, _panel2d_object):
+        if self._drag_offset is not None:
+            click_position = np.array(i_ren.event.position)
+            new_position = click_position - self._drag_offset
+            self.position = new_position
+        i_ren.force_render()
+
+    def re_align(self, window_size_change):
+        """ Re-organises the elements in case the window size is changed.
+
+        Parameters
+        ----------
+        window_size_change : (int, int)
+            New window size (width, height) in pixels.
+        """
+        if self.alignment == "left":
+            pass
+        elif self.alignment == "right":
+            self.position += np.array(window_size_change)
+        else:
+            msg = "You can only left-align or right-align objects in a panel."
+            raise ValueError(msg)
+
+
+class TextBlock2D(UI):
+    """ Wraps over the default vtkTextActor and helps setting the text.
+
+    Contains member functions for text formatting.
+
+    Attributes
+    ----------
+    actor : :class:`vtkTextActor`
+        The text actor.
+    message : str
+        The initial text while building the actor.
+    position : (float, float)
+        (x, y) in pixels.
+    color : (float, float, float)
+        RGB: Values must be between 0-1.
+    bg_color : (float, float, float)
+        RGB: Values must be between 0-1.
+    font_size : int
+        Size of the text font.
+    font_family : str
+        Currently only supports Arial.
+    justification : str
+        left, right or center.
+    vertical_justification : str
+        bottom, middle or top.
+    bold : bool
+        Makes text bold.
+    italic : bool
+        Makes text italicised.
+    shadow : bool
+        Adds text shadow.
+    size : (int, int)
+        Size (width, height) in pixels of the text bounding box.
+    """
+
+    def __init__(self, text="Text Block", font_size=18, font_family='Arial',
+                 justification='left', vertical_justification="bottom",
+                 bold=False, italic=False, shadow=False, size=None,
+                 color=(1, 1, 1), bg_color=None, position=(0, 0)):
+        """
+        Parameters
+        ----------
+        text : str
+            The initial text while building the actor.
+        position : (float, float)
+            (x, y) in pixels.
+        color : (float, float, float)
+            RGB: Values must be between 0-1.
+        bg_color : (float, float, float)
+            RGB: Values must be between 0-1.
+        font_size : int
+            Size of the text font.
+        font_family : str
+            Currently only supports Arial.
+        justification : str
+            left, right or center.
+        vertical_justification : str
+            bottom, middle or top.
+        bold : bool
+            Makes text bold.
+        italic : bool
+            Makes text italicised.
+        shadow : bool
+            Adds text shadow.
+        size : (int, int)
+            Size (width, height) in pixels of the text bounding box.
+        """
+        super(TextBlock2D, self).__init__(position=position)
+        self.scene = None
+        self.have_bg = bool(bg_color)
+        if size is not None:
+            self.resize(size)
+        else:
+            self.font_size = font_size
+        self.color = color
+        self.background_color = bg_color
+        self.font_family = font_family
+        self.justification = justification
+        self.bold = bold
+        self.italic = italic
+        self.shadow = shadow
+        self.vertical_justification = vertical_justification
+        self.message = text
+
+    def _setup(self):
+        self.actor = vtk.vtkTextActor()
+        self.actor.GetPosition2Coordinate().SetCoordinateSystemToViewport()
+        self.background = Rectangle2D()
+        self.handle_events(self.actor)
+
+    def resize(self, size):
+        """Resize TextBlock2D.
+
+        Parameters
+        ----------
+        size : (int, int)
+            Text bounding box size(width, height) in pixels.
+        """
+        if self.have_bg:
+            self.background.resize(size)
+        self.actor.SetTextScaleModeToProp()
+        self.actor.SetPosition2(*size)
+
+    def _get_actors(self):
+        """ Get the actors composing this UI component.
+        """
+        return [self.actor] + self.background.actors
+
+    def _add_to_scene(self, scene):
+        """ Add all subcomponents or VTK props that compose this UI component.
+
+        Parameters
+        ----------
+        scene : scene
+        """
+        self.scene = scene
+        if self.have_bg and not self.actor.GetTextScaleMode():
+            size = np.zeros(2)
+            self.actor.GetSize(scene, size)
+            self.background.resize(size)
+        scene.add(self.background, self.actor)
+
+    @property
+    def message(self):
+        """ Gets message from the text.
+
+        Returns
+        -------
+        str
+            The current text message.
+        """
+        return self.actor.GetInput()
+
+    @message.setter
+    def message(self, text):
+        """ Sets the text message.
+
+        Parameters
+        ----------
+        text : str
+            The message to be set.
+        """
+        self.actor.SetInput(text)
+
+    @property
+    def font_size(self):
+        """ Gets text font size.
+
+        Returns
+        ----------
+        int
+            Text font size.
+        """
+        return self.actor.GetTextProperty().GetFontSize()
+
+    @font_size.setter
+    def font_size(self, size):
+        """ Sets font size.
+
+        Parameters
+        ----------
+        size : int
+            Text font size.
+        """
+        self.actor.SetTextScaleModeToNone()
+        self.actor.GetTextProperty().SetFontSize(size)
+
+        if self.scene is not None and self.have_bg:
+            bb_size = np.zeros(2)
+            self.actor.GetSize(self.scene, bb_size)
+            bg_size = self.background.size
+            if bb_size[0] > bg_size[0] or bb_size[1] > bg_size[1]:
+                warn("Font size exceeds background bounding box."
+                     " Font Size will not be updated.", RuntimeWarning)
+                self.actor.SetTextScaleModeToProp()
+                self.actor.SetPosition2(*bg_size)
+
+    @property
+    def font_family(self):
+        """ Gets font family.
+
+        Returns
+        ----------
+        str
+            Text font family.
+        """
+        return self.actor.GetTextProperty().GetFontFamilyAsString()
+
+    @font_family.setter
+    def font_family(self, family='Arial'):
+        """ Sets font family.
+
+        Currently Arial and Courier are supported.
+
+        Parameters
+        ----------
+        family : str
+            The font family.
+        """
+        if family == 'Arial':
+            self.actor.GetTextProperty().SetFontFamilyToArial()
+        elif family == 'Courier':
+            self.actor.GetTextProperty().SetFontFamilyToCourier()
+        else:
+            raise ValueError("Font not supported yet: {}.".format(family))
+
+    @property
+    def justification(self):
+        """ Gets text justification.
+
+        Returns
+        -------
+        str
+            Text justification.
+        """
+        justification = self.actor.GetTextProperty().GetJustificationAsString()
+        if justification == 'Left':
+            return "left"
+        elif justification == 'Centered':
+            return "center"
+        elif justification == 'Right':
+            return "right"
+
+    @justification.setter
+    def justification(self, justification):
+        """ Justifies text.
+
+        Parameters
+        ----------
+        justification : str
+            Possible values are left, right, center.
+        """
+        text_property = self.actor.GetTextProperty()
+        if justification == 'left':
+            text_property.SetJustificationToLeft()
+        elif justification == 'center':
+            text_property.SetJustificationToCentered()
+        elif justification == 'right':
+            text_property.SetJustificationToRight()
+        else:
+            msg = "Text can only be justified left, right and center."
+            raise ValueError(msg)
+
+    @property
+    def vertical_justification(self):
+        """ Gets text vertical justification.
+
+        Returns
+        -------
+        str
+            Text vertical justification.
+        """
+        text_property = self.actor.GetTextProperty()
+        vjustification = text_property.GetVerticalJustificationAsString()
+        if vjustification == 'Bottom':
+            return "bottom"
+        elif vjustification == 'Centered':
+            return "middle"
+        elif vjustification == 'Top':
+            return "top"
+
+    @vertical_justification.setter
+    def vertical_justification(self, vertical_justification):
+        """ Justifies text vertically.
+
+        Parameters
+        ----------
+        vertical_justification : str
+            Possible values are bottom, middle, top.
+        """
+        text_property = self.actor.GetTextProperty()
+        if vertical_justification == 'bottom':
+            text_property.SetVerticalJustificationToBottom()
+        elif vertical_justification == 'middle':
+            text_property.SetVerticalJustificationToCentered()
+        elif vertical_justification == 'top':
+            text_property.SetVerticalJustificationToTop()
+        else:
+            msg = "Vertical justification must be: bottom, middle or top."
+            raise ValueError(msg)
+
+    @property
+    def bold(self):
+        """ Returns whether the text is bold.
+
+        Returns
+        -------
+        bool
+            Text is bold if True.
+        """
+        return self.actor.GetTextProperty().GetBold()
+
+    @bold.setter
+    def bold(self, flag):
+        """ Bolds/un-bolds text.
+
+        Parameters
+        ----------
+        flag : bool
+            Sets text bold if True.
+        """
+        self.actor.GetTextProperty().SetBold(flag)
+
+    @property
+    def italic(self):
+        """ Returns whether the text is italicised.
+
+        Returns
+        -------
+        bool
+            Text is italicised if True.
+        """
+        return self.actor.GetTextProperty().GetItalic()
+
+    @italic.setter
+    def italic(self, flag):
+        """ Italicises/un-italicises text.
+
+        Parameters
+        ----------
+        flag : bool
+            Italicises text if True.
+        """
+        self.actor.GetTextProperty().SetItalic(flag)
+
+    @property
+    def shadow(self):
+        """ Returns whether the text has shadow.
+
+        Returns
+        -------
+        bool
+            Text is shadowed if True.
+        """
+        return self.actor.GetTextProperty().GetShadow()
+
+    @shadow.setter
+    def shadow(self, flag):
+        """ Adds/removes text shadow.
+
+        Parameters
+        ----------
+        flag : bool
+            Shadows text if True.
+        """
+        self.actor.GetTextProperty().SetShadow(flag)
+
+    @property
+    def color(self):
+        """ Gets text color.
+
+        Returns
+        -------
+        (float, float, float)
+            Returns text color in RGB.
+        """
+        return self.actor.GetTextProperty().GetColor()
+
+    @color.setter
+    def color(self, color=(1, 0, 0)):
+        """ Set text color.
+
+        Parameters
+        ----------
+        color : (float, float, float)
+            RGB: Values must be between 0-1.
+        """
+        self.actor.GetTextProperty().SetColor(*color)
+
+    @property
+    def background_color(self):
+        """ Gets background color.
+
+        Returns
+        -------
+        (float, float, float) or None
+            If None, there no background color.
+            Otherwise, background color in RGB.
+        """
+        if not self.have_bg:
+            return None
+
+        return self.background.color
+
+    @background_color.setter
+    def background_color(self, color):
+        """ Set text color.
+
+        Parameters
+        ----------
+        color : (float, float, float) or None
+            If None, remove background.
+            Otherwise, RGB values (must be between 0-1).
+        """
+        if color is None:
+            # Remove background.
+            self.have_bg = False
+            self.background.set_visibility(False)
+
+        else:
+            self.have_bg = True
+            self.background.set_visibility(True)
+            self.background.color = color
+
+    def _set_position(self, position):
+        """ Set text actor position.
+
+        Parameters
+        ----------
+        position : (float, float)
+            The new position. (x, y) in pixels.
+        """
+        self.actor.SetPosition(*position)
+        self.background.position = position
+
+    def _get_size(self):
+        if self.have_bg:
+            return self.background.size
+
+        if not self.actor.GetTextScaleMode():
+            if self.scene is not None:
+                size = np.zeros(2)
+                self.actor.GetSize(self.scene, size)
+                return size
+            else:
+                warn("TextBlock2D must be added to the scene before "
+                     "querying its size while TextScaleMode is set to None.",
+                     RuntimeWarning)
+
+        return self.actor.GetPosition2()
 
 
 class TextBox2D(UI):
-    """An editable 2D text box that behaves as a UI component.
+    """ An editable 2D text box that behaves as a UI component.
 
     Currently supports:
     - Basic text editing.
@@ -47,13 +1550,11 @@ class TextBox2D(UI):
     init : bool
         Flag which says whether the textbox has just been initialized.
     """
-
     def __init__(self, width, height, text="Enter Text", position=(100, 10),
                  color=(0, 0, 0), font_size=18, font_family='Arial',
                  justification='left', bold=False,
                  italic=False, shadow=False):
-        """Init this UI element.
-
+        """
         Parameters
         ----------
         width : int
@@ -78,7 +1579,6 @@ class TextBox2D(UI):
             Makes text italicised.
         shadow : bool
             Adds text shadow.
-
         """
         super(TextBox2D, self).__init__(position=position)
 
@@ -101,7 +1601,7 @@ class TextBox2D(UI):
         self.init = True
 
     def _setup(self):
-        """Setup this UI component.
+        """ Setup this UI component.
 
         Create the TextBlock2D component used for the textbox.
         """
@@ -112,11 +1612,12 @@ class TextBox2D(UI):
         self.text.on_key_press = self.key_press
 
     def _get_actors(self):
-        """Get the actors composing this UI component."""
+        """ Get the actors composing this UI component.
+        """
         return self.text.actors
 
     def _add_to_scene(self, scene):
-        """Add all subcomponents or VTK props that compose this UI component.
+        """ Add all subcomponents or VTK props that compose this UI component.
 
         Parameters
         ----------
@@ -125,13 +1626,12 @@ class TextBox2D(UI):
         self.text.add_to_scene(scene)
 
     def _set_position(self, coords):
-        """Set the lower-left corner position of this UI component.
+        """ Position the lower-left corner of this UI component.
 
         Parameters
         ----------
         coords: (float, float)
             Absolute pixel coordinates (x, y).
-
         """
         self.text.position = coords
 
@@ -139,13 +1639,12 @@ class TextBox2D(UI):
         return self.text.size
 
     def set_message(self, message):
-        """Set custom text to textbox.
+        """ Set custom text to textbox.
 
         Parameters
         ----------
         message: str
             The custom message to be set.
-
         """
         self.message = message
         self.text.message = message
@@ -155,7 +1654,7 @@ class TextBox2D(UI):
         self.caret_pos = self.window_right
 
     def width_set_text(self, text):
-        """Add newlines to text where necessary.
+        """ Adds newlines to text where necessary.
 
         This is needed for multi-line text boxes.
 
@@ -168,7 +1667,6 @@ class TextBox2D(UI):
         -------
         str
             A multi line formatted text.
-
         """
         multi_line_text = ""
         for i, t in enumerate(text):
@@ -177,8 +1675,8 @@ class TextBox2D(UI):
                 multi_line_text += "\n"
         return multi_line_text.rstrip("\n")
 
-    def handle_character(self, key, key_char):
-        """Handle button events.
+    def handle_character(self, character):
+        """ Main driving function that handles button events.
 
         # TODO: Need to handle all kinds of characters like !, +, etc.
 
@@ -186,56 +1684,60 @@ class TextBox2D(UI):
         ----------
         character : str
         """
-        if key_char != '' and key_char in printable:
-            self.add_character(key_char)
-        elif key.lower() == "return":
+        if character.lower() == "return":
             self.render_text(False)
             return True
-        if key.lower() == "backspace":
+        if character.lower() == "backspace":
             self.remove_character()
-        elif key.lower() == "left":
+        elif character.lower() == "left":
             self.move_left()
-        elif key.lower() == "right":
+        elif character.lower() == "right":
             self.move_right()
-
+        else:
+            self.add_character(character)
         self.render_text()
         return False
 
     def move_caret_right(self):
-        """Move the caret towards right."""
+        """ Moves the caret towards right.
+        """
         self.caret_pos = min(self.caret_pos + 1, len(self.message))
 
     def move_caret_left(self):
-        """Move the caret towards left."""
+        """ Moves the caret towards left.
+        """
         self.caret_pos = max(self.caret_pos - 1, 0)
 
     def right_move_right(self):
-        """Move right boundary of the text window right-wards."""
+        """ Moves right boundary of the text window right-wards.
+        """
         if self.window_right <= len(self.message):
             self.window_right += 1
 
     def right_move_left(self):
-        """Move right boundary of the text window left-wards."""
+        """ Moves right boundary of the text window left-wards.
+        """
         if self.window_right > 0:
             self.window_right -= 1
 
     def left_move_right(self):
-        """Move left boundary of the text window right-wards."""
+        """ Moves left boundary of the text window right-wards.
+        """
         if self.window_left <= len(self.message):
             self.window_left += 1
 
     def left_move_left(self):
-        """Move left boundary of the text window left-wards."""
+        """ Moves left boundary of the text window left-wards.
+        """
         if self.window_left > 0:
             self.window_left -= 1
 
     def add_character(self, character):
-        """Insert a character into the text and moves window and caret.
+        """ Inserts a character into the text and moves window and caret.
 
         Parameters
         ----------
         character : str
-
         """
         if len(character) > 1 and character.lower() != "space":
             return
@@ -251,7 +1753,8 @@ class TextBox2D(UI):
         self.right_move_right()
 
     def remove_character(self):
-        """Remove a character and moves window and caret accordingly."""
+        """ Removes a character and moves window and caret accordingly.
+        """
         if self.caret_pos == 0:
             return
         self.message = (self.message[:self.caret_pos - 1] +
@@ -266,7 +1769,8 @@ class TextBox2D(UI):
                 self.right_move_left()
 
     def move_left(self):
-        """Handle left button press."""
+        """ Handles left button press.
+        """
         self.move_caret_left()
         if self.caret_pos == self.window_left - 1:
             if (self.window_right -
@@ -275,7 +1779,8 @@ class TextBox2D(UI):
                 self.right_move_left()
 
     def move_right(self):
-        """Handle right button press."""
+        """ Handles right button press.
+        """
         self.move_caret_right()
         if self.caret_pos == self.window_right + 1:
             if (self.window_right -
@@ -284,13 +1789,12 @@ class TextBox2D(UI):
                 self.right_move_right()
 
     def showable_text(self, show_caret):
-        """Chop out text to be shown on the screen.
+        """ Chops out text to be shown on the screen.
 
         Parameters
         ----------
         show_caret : bool
             Whether or not to show the caret.
-
         """
         if show_caret:
             ret_text = (self.message[:self.caret_pos] +
@@ -302,13 +1806,12 @@ class TextBox2D(UI):
         return ret_text
 
     def render_text(self, show_caret=True):
-        """Render text after processing.
+        """ Renders text after processing.
 
         Parameters
         ----------
         show_caret : bool
             Whether or not to show the caret.
-
         """
         text = self.showable_text(show_caret)
         if text == "":
@@ -316,7 +1819,8 @@ class TextBox2D(UI):
         self.text.message = self.width_set_text(text)
 
     def edit_mode(self):
-        """Turn on edit mode."""
+        """ Turns on edit mode.
+        """
         if self.init:
             self.message = ""
             self.init = False
@@ -324,7 +1828,7 @@ class TextBox2D(UI):
         self.render_text()
 
     def left_button_press(self, i_ren, _obj, _textbox_object):
-        """Handle left button press for textbox.
+        """ Left button press handler for textbox
 
         Parameters
         ----------
@@ -338,7 +1842,7 @@ class TextBox2D(UI):
         i_ren.force_render()
 
     def key_press(self, i_ren, _obj, _textbox_object):
-        """Handle Key press for textboxself.
+        """ Key press handler for textbox
 
         Parameters
         ----------
@@ -346,11 +1850,9 @@ class TextBox2D(UI):
         obj: :class:`vtkActor`
             The picked actor
         _textbox_object: :class:`TextBox2D`
-
         """
         key = i_ren.event.key
-        key_char = i_ren.event.key_char
-        is_done = self.handle_character(key, key_char)
+        is_done = self.handle_character(key)
         if is_done:
             i_ren.remove_active_prop(self.text.actor)
 
@@ -358,7 +1860,7 @@ class TextBox2D(UI):
 
 
 class LineSlider2D(UI):
-    """A 2D Line Slider.
+    """ A 2D Line Slider.
 
     A sliding handle on a line with a percentage indicator.
 
@@ -382,15 +1884,13 @@ class LineSlider2D(UI):
     active_color : (float, float, float)
         Color of the handle when it is pressed.
     """
-
     def __init__(self, center=(0, 0),
                  initial_value=50, min_value=0, max_value=100,
                  length=200, line_width=5,
                  inner_radius=0, outer_radius=10, handle_side=20,
                  font_size=16, orientation="horizontal", text_alignment='',
                  text_template="{value:.1f} ({ratio:.0%})", shape="disk"):
-        """Init this UI element.
-
+        """
         Parameters
         ----------
         center : (float, float)
@@ -426,7 +1926,6 @@ class LineSlider2D(UI):
         shape : string
             Describes the shape of the handle.
             Currently supports 'disk' and 'square'.
-
         """
         self.shape = shape
         self.orientation = orientation.lower().strip()
@@ -472,7 +1971,7 @@ class LineSlider2D(UI):
         self.update()
 
     def _setup(self):
-        """Setup this UI component.
+        """ Setup this UI component.
 
         Create the slider's track (Rectangle2D), the handle (Disk2D) and
         the text (TextBlock2D).
@@ -502,16 +2001,16 @@ class LineSlider2D(UI):
             self.handle_release_callback
 
     def _get_actors(self):
-        """Get the actors composing this UI component."""
+        """ Get the actors composing this UI component.
+        """
         return self.track.actors + self.handle.actors + self.text.actors
 
     def _add_to_scene(self, scene):
-        """Add all subcomponents or VTK props that compose this UI component.
+        """ Add all subcomponents or VTK props that compose this UI component.
 
         Parameters
         ----------
         scene : scene
-
         """
         self.track.add_to_scene(scene)
         self.handle.add_to_scene(scene)
@@ -531,7 +2030,7 @@ class LineSlider2D(UI):
         return np.array([width, height])
 
     def _set_position(self, coords):
-        """Set the lower-left corner position of this UI component.
+        """ Position the lower-left corner of this UI component.
 
         Parameters
         ----------
@@ -548,7 +2047,7 @@ class LineSlider2D(UI):
             track_position[0] += self.track.size[0] / 2.
 
         self.track.position = track_position
-        self.handle.position = self.handle.position.astype(float)
+        self.handle.position = self.handle.position.astype('float64')
         self.handle.position += coords - self.position
         # Position the text below the handle.
         if self.orientation == "horizontal":
@@ -577,7 +2076,7 @@ class LineSlider2D(UI):
         return self.track.position[0] + self.track.size[0]
 
     def set_position(self, position):
-        """Set the disk's position.
+        """ Sets the disk's position.
 
         Parameters
         ----------
@@ -618,20 +2117,19 @@ class LineSlider2D(UI):
         self.set_position((position_x, position_y))
 
     def format_text(self):
-        """Return formatted text to display along the slider."""
+        """ Returns formatted text to display along the slider. """
         if callable(self.text_template):
             return self.text_template(self)
         return self.text_template.format(ratio=self.ratio, value=self.value)
 
     def update(self):
-        """Update the slider."""
+        """ Updates the slider. """
         # Compute the ratio determined by the position of the slider disk.
         disk_position_x = None
         disk_position_y = None
 
         if self.orientation == "horizontal":
             length = float(self.right_x_position - self.left_x_position)
-            length = np.round(length, decimals=6)
             if length != self.track.width:
                 raise ValueError("Disk position outside the slider line")
             disk_position_x = self.handle.center[0]
@@ -660,7 +2158,7 @@ class LineSlider2D(UI):
         self.on_change(self)
 
     def track_click_callback(self, i_ren, _vtkactor, _slider):
-        """Update disk position and grab the focus.
+        """ Update disk position and grab the focus.
 
         Parameters
         ----------
@@ -668,15 +2166,15 @@ class LineSlider2D(UI):
         vtkactor : :class:`vtkActor`
             The picked actor
         _slider : :class:`LineSlider2D`
-
         """
+
         position = i_ren.event.position
         self.set_position(position)
         i_ren.force_render()
         i_ren.event.abort()  # Stop propagating the event.
 
     def handle_move_callback(self, i_ren, _vtkactor, _slider):
-        """Handle movement.
+        """ Actual handle movement.
 
         Parameters
         ----------
@@ -684,8 +2182,8 @@ class LineSlider2D(UI):
         vtkactor : :class:`vtkActor`
             The picked actor
         slider : :class:`LineSlider2D`
-
         """
+
         self.handle.color = self.active_color
         position = i_ren.event.position
         self.set_position(position)
@@ -693,7 +2191,7 @@ class LineSlider2D(UI):
         i_ren.event.abort()  # Stop propagating the event.
 
     def handle_release_callback(self, i_ren, _vtkactor, _slider):
-        """Change color when handle is released.
+        """ Change color when handle is released.
 
         Parameters
         ----------
@@ -701,15 +2199,13 @@ class LineSlider2D(UI):
         vtkactor : :class:`vtkActor`
             The picked actor
         slider : :class:`LineSlider2D`
-
         """
         self.handle.color = self.default_color
         i_ren.force_render()
 
 
 class LineDoubleSlider2D(UI):
-    """A 2D Line Slider with two sliding rings.
-
+    """ A 2D Line Slider with two sliding rings.
     Useful for setting min and max values for something.
 
     Currently supports:
@@ -734,15 +2230,14 @@ class LineDoubleSlider2D(UI):
         Color of the handles when in unpressed state.
     active_color : (float, float, float)
         Color of the handles when they are pressed.
-    """
 
+    """
     def __init__(self, line_width=5, inner_radius=0, outer_radius=10,
                  handle_side=20, center=(450, 300), length=200,
                  initial_values=(0, 100), min_value=0, max_value=100,
                  font_size=16, text_template="{value:.1f}",
                  orientation="horizontal", shape="disk"):
-        """Init this UI element.
-
+        """
         Parameters
         ----------
         line_width : int
@@ -819,11 +2314,10 @@ class LineDoubleSlider2D(UI):
         self.top_disk_value = initial_values[1]
 
     def _setup(self):
-        """Setup this UI component.
+        """ Setup this UI component.
 
         Create the slider's track (Rectangle2D), the handles (Disk2D) and
         the text (TextBlock2D).
-
         """
         # Slider's track
         self.track = Rectangle2D()
@@ -859,18 +2353,18 @@ class LineDoubleSlider2D(UI):
             self.handle_release_callback
 
     def _get_actors(self):
-        """Get the actors composing this UI component."""
+        """ Get the actors composing this UI component.
+        """
         return (self.track.actors + self.handles[0].actors +
                 self.handles[1].actors + self.text[0].actors +
                 self.text[1].actors)
 
     def _add_to_scene(self, scene):
-        """Add all subcomponents or VTK props that compose this UI component.
+        """ Add all subcomponents or VTK props that compose this UI component.
 
         Parameters
         ----------
         scene : scene
-
         """
         self.track.add_to_scene(scene)
         self.handles[0].add_to_scene(scene)
@@ -892,13 +2386,12 @@ class LineDoubleSlider2D(UI):
         return np.array([width, height])
 
     def _set_position(self, coords):
-        """Set the lower-left corner position of this UI component.
+        """ Position the lower-left corner of this UI component.
 
         Parameters
         ----------
         coords: (float, float)
             Absolute pixel coordinates (x, y).
-
         """
         # Offset the slider line by the handle's radius.
         track_position = coords + self.handles[0].size / 2.
@@ -910,8 +2403,8 @@ class LineDoubleSlider2D(UI):
             track_position[0] -= self.track.size[0] / 2.
         self.track.position = track_position
 
-        self.handles[0].position = self.handles[0].position.astype(float)
-        self.handles[1].position = self.handles[1].position.astype(float)
+        self.handles[0].position = self.handles[0].position.astype('float64')
+        self.handles[1].position = self.handles[1].position.astype('float64')
 
         self.handles[0].position += coords - self.position
         self.handles[1].position += coords - self.position
@@ -946,18 +2439,17 @@ class LineDoubleSlider2D(UI):
         return self.track.position[0] + self.track.size[0]
 
     def value_to_ratio(self, value):
-        """Convert the value of a disk to the ratio.
+        """ Converts the value of a disk to the ratio
 
         Parameters
         ----------
         value : float
-
         """
         value_range = self.max_value - self.min_value
         return (value - self.min_value) / value_range
 
     def ratio_to_coord(self, ratio):
-        """Convert the ratio to the absolute coordinate.
+        """ Converts the ratio to the absolute coordinate.
 
         Parameters
         ----------
@@ -968,7 +2460,7 @@ class LineDoubleSlider2D(UI):
         return self.bottom_y_position + ratio * self.track.height
 
     def coord_to_ratio(self, coord):
-        """Convert the x coordinate of a disk to the ratio.
+        """ Converts the x coordinate of a disk to the ratio
 
         Parameters
         ----------
@@ -979,18 +2471,17 @@ class LineDoubleSlider2D(UI):
         return (coord - self.bottom_y_position) / float(self.track.height)
 
     def ratio_to_value(self, ratio):
-        """Convert the ratio to the value of the disk.
+        """ Converts the ratio to the value of the disk.
 
         Parameters
         ----------
         ratio : float
-
         """
         value_range = self.max_value - self.min_value
         return self.min_value + ratio * value_range
 
     def set_position(self, position, disk_number):
-        """Set the disk's position.
+        """ Sets the disk's position.
 
         Parameters
         ----------
@@ -998,8 +2489,8 @@ class LineDoubleSlider2D(UI):
             The absolute position of the disk (x, y).
         disk_number : int
             The index of disk being moved.
-
         """
+
         if self.orientation == "horizontal":
             x_position = position[0]
 
@@ -1036,85 +2527,79 @@ class LineDoubleSlider2D(UI):
 
     @property
     def bottom_disk_value(self):
-        """Return the value of the bottom disk."""
+        """ Returns the value of the bottom disk. """
         return self._values[0]
 
     @bottom_disk_value.setter
     def bottom_disk_value(self, bottom_disk_value):
-        """Set the value of the bottom disk.
+        """ Sets the value of the bottom disk.
 
         Parameters
         ----------
         bottom_disk_value : float
             New value for the bottom disk.
-
         """
         self.bottom_disk_ratio = self.value_to_ratio(bottom_disk_value)
 
     @property
     def top_disk_value(self):
-        """Return the value of the top disk."""
+        """ Returns the value of the top disk. """
         return self._values[1]
 
     @top_disk_value.setter
     def top_disk_value(self, top_disk_value):
-        """Set the value of the top disk.
+        """ Sets the value of the top disk.
 
         Parameters
         ----------
         top_disk_value : float
             New value for the top disk.
-
         """
         self.top_disk_ratio = self.value_to_ratio(top_disk_value)
 
     @property
     def left_disk_value(self):
-        """Return the value of the left disk."""
+        """ Returns the value of the left disk. """
         return self._values[0]
 
     @left_disk_value.setter
     def left_disk_value(self, left_disk_value):
-        """Set the value of the left disk.
+        """ Sets the value of the left disk.
 
         Parameters
         ----------
-        left_disk_value : float
-            New value for the left disk.
-
+        left_disk_value : New value for the left disk.
         """
         self.left_disk_ratio = self.value_to_ratio(left_disk_value)
 
     @property
     def right_disk_value(self):
-        """Return the value of the right disk."""
+        """ Returns the value of the right disk. """
         return self._values[1]
 
     @right_disk_value.setter
     def right_disk_value(self, right_disk_value):
-        """Set the value of the right disk.
+        """ Sets the value of the right disk.
 
         Parameters
         ----------
-        right_disk_value : float
-            New value for the right disk.
+        right_disk_value : New value for the right disk.
         """
         self.right_disk_ratio = self.value_to_ratio(right_disk_value)
 
     @property
     def bottom_disk_ratio(self):
-        """Return the ratio of the bottom disk."""
+        """ Returns the ratio of the bottom disk. """
         return self._ratio[0]
 
     @bottom_disk_ratio.setter
     def bottom_disk_ratio(self, bottom_disk_ratio):
-        """Set the ratio of the bottom disk.
+        """ Sets the ratio of the bottom disk.
 
         Parameters
         ----------
         bottom_disk_ratio : float
             New ratio for the bottom disk.
-
         """
         position_x = self.ratio_to_coord(bottom_disk_ratio)
         position_y = self.ratio_to_coord(bottom_disk_ratio)
@@ -1122,12 +2607,12 @@ class LineDoubleSlider2D(UI):
 
     @property
     def top_disk_ratio(self):
-        """Return the ratio of the top disk."""
+        """ Returns the ratio of the top disk. """
         return self._ratio[1]
 
     @top_disk_ratio.setter
     def top_disk_ratio(self, top_disk_ratio):
-        """Set the ratio of the top disk.
+        """ Sets the ratio of the top disk.
 
         Parameters
         ----------
@@ -1140,17 +2625,16 @@ class LineDoubleSlider2D(UI):
 
     @property
     def left_disk_ratio(self):
-        """Return the ratio of the left disk."""
+        """ Returns the ratio of the left disk. """
         return self._ratio[0]
 
     @left_disk_ratio.setter
     def left_disk_ratio(self, left_disk_ratio):
-        """Set the ratio of the left disk.
+        """ Sets the ratio of the left disk.
 
         Parameters
         ----------
-        left_disk_ratio : float
-            New ratio for the left disk.
+        left_disk_ratio : New ratio for the left disk.
         """
         position_x = self.ratio_to_coord(left_disk_ratio)
         position_y = self.ratio_to_coord(left_disk_ratio)
@@ -1158,29 +2642,27 @@ class LineDoubleSlider2D(UI):
 
     @property
     def right_disk_ratio(self):
-        """Return the ratio of the right disk."""
+        """ Returns the ratio of the right disk. """
         return self._ratio[1]
 
     @right_disk_ratio.setter
     def right_disk_ratio(self, right_disk_ratio):
-        """Set the ratio of the right disk.
+        """ Sets the ratio of the right disk.
 
         Parameters
         ----------
-        right_disk_ratio : float
-            New ratio for the right disk.
+        right_disk_ratio : New ratio for the right disk.
         """
         position_x = self.ratio_to_coord(right_disk_ratio)
         position_y = self.ratio_to_coord(right_disk_ratio)
         self.set_position((position_x, position_y), 1)
 
     def format_text(self, disk_number):
-        """Return formatted text to display along the slider.
+        """ Returns formatted text to display along the slider.
 
         Parameters
         ----------
-        disk_number : int
-            Index of the disk.
+        disk_number : Index of the disk.
         """
         if callable(self.text_template):
             return self.text_template(self)
@@ -1191,14 +2673,13 @@ class LineDoubleSlider2D(UI):
         pass
 
     def update(self, disk_number):
-        """Update the slider.
+        """ Updates the slider.
 
         Parameters
         ----------
-        disk_number : int
-            Index of the disk to be updated.
-
+        disk_number : Index of the disk to be updated.
         """
+
         # Compute the ratio determined by the position of the slider disk.
         if self.orientation == "horizontal":
             self._ratio[disk_number] = self.coord_to_ratio(
@@ -1226,7 +2707,7 @@ class LineDoubleSlider2D(UI):
         self.on_change(self)
 
     def handle_move_callback(self, i_ren, vtkactor, _slider):
-        """Handle movement.
+        """ Actual handle movement.
 
         Parameters
         ----------
@@ -1234,8 +2715,8 @@ class LineDoubleSlider2D(UI):
         vtkactor : :class:`vtkActor`
             The picked actor
         _slider : :class:`LineDoubleSlider2D`
-
         """
+
         position = i_ren.event.position
         if vtkactor == self.handles[0].actors[0]:
             self.set_position(position, 0)
@@ -1247,7 +2728,7 @@ class LineDoubleSlider2D(UI):
         i_ren.event.abort()  # Stop propagating the event.
 
     def handle_release_callback(self, i_ren, vtkactor, _slider):
-        """Change color when handle is released.
+        """ Change color when handle is released.
 
         Parameters
         ----------
@@ -1255,7 +2736,6 @@ class LineDoubleSlider2D(UI):
         vtkactor : :class:`vtkActor`
             The picked actor
         _slider : :class:`LineDoubleSlider2D`
-
         """
         if vtkactor == self.handles[0].actors[0]:
             self.handles[0].color = self.default_color
@@ -1265,7 +2745,7 @@ class LineDoubleSlider2D(UI):
 
 
 class RingSlider2D(UI):
-    """A disk slider.
+    """ A disk slider.
 
     A disk moves along the boundary of a ring.
     Goes from 0-360 degrees.
@@ -1287,15 +2767,13 @@ class RingSlider2D(UI):
     active_color : (float, float, float)
         Color of the handle when it is pressed.
     """
-
     def __init__(self, center=(0, 0),
                  initial_value=180, min_value=0, max_value=360,
                  slider_inner_radius=40, slider_outer_radius=44,
                  handle_inner_radius=0, handle_outer_radius=10,
                  font_size=16,
                  text_template="{ratio:.0%}"):
-        """Init this UI element.
-
+        """
         Parameters
         ----------
         center : (float, float)
@@ -1347,11 +2825,10 @@ class RingSlider2D(UI):
         self._ratio = self.angle / TWO_PI
 
     def _setup(self):
-        """Setup this UI component.
+        """ Setup this UI component.
 
         Create the slider's circle (Disk2D), the handle (Disk2D) and
         the text (TextBlock2D).
-
         """
         # Slider's track.
         self.track = Disk2D(outer_radius=1)
@@ -1375,11 +2852,12 @@ class RingSlider2D(UI):
             self.handle_release_callback
 
     def _get_actors(self):
-        """Get the actors composing this UI component."""
+        """ Get the actors composing this UI component.
+        """
         return self.track.actors + self.handle.actors + self.text.actors
 
     def _add_to_scene(self, scene):
-        """Add all subcomponents or VTK props that compose this UI component.
+        """ Add all subcomponents or VTK props that compose this UI component.
 
         Parameters
         ----------
@@ -1393,7 +2871,7 @@ class RingSlider2D(UI):
         return self.track.size + self.handle.size
 
     def _set_position(self, coords):
-        """Set the lower-left corner position of this UI component.
+        """ Position the lower-left corner of this UI component.
 
         Parameters
         ----------
@@ -1432,7 +2910,7 @@ class RingSlider2D(UI):
 
     @property
     def angle(self):
-        """Return Angle (in rad) the handle makes with x-axis."""
+        """ Angle (in rad) the handle makes with x-axis """
         return self._angle
 
     @angle.setter
@@ -1441,7 +2919,7 @@ class RingSlider2D(UI):
         self.update()
 
     def format_text(self):
-        """Return formatted text to display along the slider. """
+        """ Returns formatted text to display along the slider. """
         if callable(self.text_template):
             return self.text_template(self)
 
@@ -1449,7 +2927,7 @@ class RingSlider2D(UI):
                                          angle=np.rad2deg(self.angle))
 
     def update(self):
-        """Update the slider. """
+        """ Updates the slider. """
 
         # Compute the ratio determined by the position of the slider disk.
         self._ratio = self.angle / TWO_PI
@@ -1471,13 +2949,12 @@ class RingSlider2D(UI):
         self.on_change(self)  # Call hook.
 
     def move_handle(self, click_position):
-        """Move the slider's handle.
+        """Moves the slider's handle.
 
         Parameters
         ----------
         click_position: (float, float)
             Position of the mouse click.
-
         """
         x, y = np.array(click_position) - self.center
         angle = np.arctan2(y, x)
@@ -1487,7 +2964,7 @@ class RingSlider2D(UI):
         self.angle = angle
 
     def track_click_callback(self, i_ren, _obj, _slider):
-        """Update disk position and grab the focus.
+        """ Update disk position and grab the focus.
 
         Parameters
         ----------
@@ -1495,7 +2972,6 @@ class RingSlider2D(UI):
         obj : :class:`vtkActor`
             The picked actor
         _slider : :class:`RingSlider2D`
-
         """
         click_position = i_ren.event.position
         self.move_handle(click_position=click_position)
@@ -1503,7 +2979,7 @@ class RingSlider2D(UI):
         i_ren.event.abort()  # Stop propagating the event.
 
     def handle_move_callback(self, i_ren, _obj, _slider):
-        """Move the slider's handle.
+        """ Move the slider's handle.
 
         Parameters
         ----------
@@ -1511,7 +2987,6 @@ class RingSlider2D(UI):
         obj : :class:`vtkActor`
             The picked actor
         _slider : :class:`RingSlider2D`
-
         """
         click_position = i_ren.event.position
         self.handle.color = self.active_color
@@ -1520,7 +2995,7 @@ class RingSlider2D(UI):
         i_ren.event.abort()  # Stop propagating the event.
 
     def handle_release_callback(self, i_ren, _obj, _slider):
-        """Change color when handle is released.
+        """ Change color when handle is released.
 
         Parameters
         ----------
@@ -1528,7 +3003,6 @@ class RingSlider2D(UI):
         vtkactor : :class:`vtkActor`
             The picked actor
         _slider : :class:`RingSlider2D`
-
         """
         self.handle.color = self.default_color
         i_ren.force_render()
@@ -1536,7 +3010,7 @@ class RingSlider2D(UI):
 
 class RangeSlider(UI):
 
-    """A set of a LineSlider2D and a LineDoubleSlider2D.
+    """ A set of a LineSlider2D and a LineDoubleSlider2D.
     The double slider is used to set the min and max value
     for the LineSlider2D
 
@@ -1550,15 +3024,14 @@ class RangeSlider(UI):
         The line slider which sets the min and max values
     value_slider : :class:`LineSlider2D`
         The line slider which sets the value
-    """
 
+    """
     def __init__(self, line_width=5, inner_radius=0, outer_radius=10,
                  handle_side=20, range_slider_center=(450, 400),
                  value_slider_center=(450, 300), length=200, min_value=0,
                  max_value=100, font_size=16, range_precision=1,
                  orientation="horizontal", value_precision=2, shape="disk"):
-        """Init this class instance.
-
+        """
         Parameters
         ----------
         line_width : int
@@ -1590,7 +3063,6 @@ class RangeSlider(UI):
         shape : string
             Describes the shape of the handle.
             Currently supports 'disk' and 'square'.
-
         """
         self.min_value = min_value
         self.max_value = max_value
@@ -1613,7 +3085,8 @@ class RangeSlider(UI):
         super(RangeSlider, self).__init__()
 
     def _setup(self):
-        """Setup this UI component."""
+        """ Setup this UI component.
+        """
         self.range_slider = \
             LineDoubleSlider2D(line_width=self.line_width,
                                inner_radius=self.inner_radius,
@@ -1647,11 +3120,12 @@ class RangeSlider(UI):
             self.range_slider_handle_move_callback
 
     def _get_actors(self):
-        """Get the actors composing this UI component."""
+        """ Get the actors composing this UI component.
+        """
         return self.range_slider.actors + self.value_slider.actors
 
     def _add_to_scene(self, scene):
-        """Add all subcomponents or VTK props that compose this UI component.
+        """ Add all subcomponents or VTK props that compose this UI component.
 
         Parameters
         ----------
@@ -1667,7 +3141,7 @@ class RangeSlider(UI):
         pass
 
     def range_slider_handle_move_callback(self, i_ren, obj, _slider):
-        """Update range_slider's handles.
+        """ Actual movement of range_slider's handles.
 
         Parameters
         ----------
@@ -1694,9 +3168,156 @@ class RangeSlider(UI):
         i_ren.event.abort()  # Stop propagating the event.
 
 
+class ImageContainer2D(UI):
+    """ A 2D container to hold an image.
+    Currently Supports:
+    - png and jpg/jpeg images
+
+    Attributes
+    ----------
+    size: (float, float)
+        Image size (width, height) in pixels.
+    img : vtkImageDataGeometryFilters
+        The image loaded from the specified path.
+
+    """
+
+    def __init__(self, img_path, position=(0, 0), size=(100, 100)):
+        """
+        Parameters
+        ----------
+        img_path : string
+            Path of the image
+        position : (float, float), optional
+            Absolute coordinates (x, y) of the lower-left corner of the image.
+        size : (int, int), optional
+            Width and height in pixels of the image.
+        """
+        super(ImageContainer2D, self).__init__(position)
+        self.img = load_image(img_path, as_vtktype=True)
+        self.set_img(self.img)
+        self.resize(size)
+
+    def _get_size(self):
+        lower_left_corner = self.texture_points.GetPoint(0)
+        upper_right_corner = self.texture_points.GetPoint(2)
+        size = np.array(upper_right_corner) - np.array(lower_left_corner)
+        return abs(size[:2])
+
+    def _setup(self):
+        """ Setup this UI Component.
+        Return an image as a 2D actor with a specific position.
+
+        Returns
+        -------
+        :class:`vtkTexturedActor2D`
+        """
+        self.texture_polydata = vtk.vtkPolyData()
+        self.texture_points = vtk.vtkPoints()
+        self.texture_points.SetNumberOfPoints(4)
+
+        polys = vtk.vtkCellArray()
+        polys.InsertNextCell(4)
+        polys.InsertCellPoint(0)
+        polys.InsertCellPoint(1)
+        polys.InsertCellPoint(2)
+        polys.InsertCellPoint(3)
+        self.texture_polydata.SetPolys(polys)
+
+        tc = vtk.vtkFloatArray()
+        tc.SetNumberOfComponents(2)
+        tc.SetNumberOfTuples(4)
+        tc.InsertComponent(0, 0, 0.0)
+        tc.InsertComponent(0, 1, 0.0)
+        tc.InsertComponent(1, 0, 1.0)
+        tc.InsertComponent(1, 1, 0.0)
+        tc.InsertComponent(2, 0, 1.0)
+        tc.InsertComponent(2, 1, 1.0)
+        tc.InsertComponent(3, 0, 0.0)
+        tc.InsertComponent(3, 1, 1.0)
+        self.texture_polydata.GetPointData().SetTCoords(tc)
+
+        texture_mapper = vtk.vtkPolyDataMapper2D()
+        texture_mapper = set_input(texture_mapper, self.texture_polydata)
+
+        image = vtk.vtkTexturedActor2D()
+        image.SetMapper(texture_mapper)
+
+        self.texture = vtk.vtkTexture()
+        image.SetTexture(self.texture)
+
+        image_property = vtk.vtkProperty2D()
+        image_property.SetOpacity(1.0)
+        image.SetProperty(image_property)
+        self.actor = image
+
+        # Add default events listener to the VTK actor.
+        self.handle_events(self.actor)
+
+    def _get_actors(self):
+        """ Returns the actors that compose this UI component.
+        """
+        return [self.actor]
+
+    def _add_to_scene(self, scene):
+        """ Add all subcomponents or VTK props that compose this UI component.
+
+        Parameters
+        ----------
+        scene : scene
+        """
+        scene.add(self.actor)
+
+    def resize(self, size):
+        """ Resize the image.
+
+        Parameters
+        ----------
+        size : (float, float)
+            image size (width, height) in pixels.
+        """
+        # Update actor.
+        self.texture_points.SetPoint(0, 0, 0, 0.0)
+        self.texture_points.SetPoint(1, size[0], 0, 0.0)
+        self.texture_points.SetPoint(2, size[0], size[1], 0.0)
+        self.texture_points.SetPoint(3, 0, size[1], 0.0)
+        self.texture_polydata.SetPoints(self.texture_points)
+
+    def _set_position(self, coords):
+        """ Position the lower-left corner of this UI component.
+
+        Parameters
+        ----------
+        coords: (float, float)
+            Absolute pixel coordinates (x, y).
+        """
+        self.actor.SetPosition(*coords)
+
+    def scale(self, factor):
+        """ Scales the image.
+
+        Parameters
+        ----------
+        factor : (float, float)
+            Scaling factor (width, height) in pixels.
+        """
+        self.resize(self.size * factor)
+
+    def set_img(self, img):
+        """ Modifies the image used by the vtkTexturedActor2D.
+
+        Parameters
+        ----------
+        img : imageDataGeometryFilter
+
+        """
+        self.texture = set_input(self.texture, img)
+
+
 class Option(UI):
 
-    """A set of a Button2D and a TextBlock2D to act as a single option
+    """
+    A set of a Button2D and a TextBlock2D to act as a single option
     for checkboxes and radio buttons.
     Clicking the button toggles its checked/unchecked status.
 
@@ -1706,12 +3327,10 @@ class Option(UI):
         The label for the option.
     font_size : int
             Font Size of the label.
-
     """
 
     def __init__(self, label, position=(0, 0), font_size=18, checked=False):
-        """Init this class instance.
-
+        """
         Parameters
         ----------
         label : str
@@ -1723,7 +3342,6 @@ class Option(UI):
             Font size of the label.
         checked : bool, optional
             Boolean value indicates the initial state of the option
-
         """
         self.label = label
         self.font_size = font_size
@@ -1736,7 +3354,8 @@ class Option(UI):
         self.on_change = lambda obj: None
 
     def _setup(self):
-        """Setup this UI component."""
+        """ Setup this UI component.
+        """
         # Option's button
         self.button_icons = []
         self.button_icons.append(('unchecked',
@@ -1757,16 +3376,16 @@ class Option(UI):
         self.text.on_left_mouse_button_clicked = self.toggle
 
     def _get_actors(self):
-        """Get the actors composing this UI component."""
+        """ Get the actors composing this UI component.
+        """
         return self.button.actors + self.text.actors
 
     def _add_to_scene(self, scene):
-        """Add all subcomponents or VTK props that compose this UI component.
+        """ Add all subcomponents or VTK props that compose this UI component.
 
         Parameters
         ----------
         scene : scene
-
         """
         self.button.add_to_scene(scene)
         self.text.add_to_scene(scene)
@@ -1777,13 +3396,12 @@ class Option(UI):
         return np.array([width, height])
 
     def _set_position(self, coords):
-        """Set the lower-left corner position of this UI component.
+        """ Position the lower-left corner of this UI component.
 
         Parameters
         ----------
         coords: (float, float)
             Absolute pixel coordinates (x, y).
-
         """
         num_newlines = self.label.count('\n')
         self.button.position = coords + \
@@ -1811,7 +3429,7 @@ class Option(UI):
 
 class Checkbox(UI):
 
-    """A 2D set of :class:'Option' objects.
+    """ A 2D set of :class:'Option' objects.
     Multiple options can be selected.
 
     Attributes
@@ -1826,8 +3444,7 @@ class Checkbox(UI):
 
     def __init__(self, labels, checked_labels=(), padding=1, font_size=18,
                  font_family='Arial', position=(0, 0)):
-        """Init this class instance.
-
+        """
         Parameters
         ----------
         labels : list(str)
@@ -1845,7 +3462,7 @@ class Checkbox(UI):
             the button of the first option.
         """
 
-        self.labels = list(reversed(list(labels)))
+        self.labels = list(reversed(labels))
         self._padding = padding
         self._font_size = font_size
         self.font_family = font_family
@@ -1854,7 +3471,8 @@ class Checkbox(UI):
         self.on_change = lambda checkbox: None
 
     def _setup(self):
-        """Setup this UI component."""
+        """ Setup this UI component.
+        """
         self.options = OrderedDict()
         button_y = self.position[1]
         for label in self.labels:
@@ -1873,19 +3491,19 @@ class Checkbox(UI):
             option.on_change = self._handle_option_change
 
     def _get_actors(self):
-        """Get the actors composing this UI component."""
+        """ Get the actors composing this UI component.
+        """
         actors = []
         for option in self.options.values():
             actors = actors + option.actors
         return actors
 
     def _add_to_scene(self, scene):
-        """Add all subcomponents or VTK props that compose this UI component.
+        """ Add all subcomponents or VTK props that compose this UI component.
 
         Parameters
         ----------
         scene : scene
-
         """
         for option in self.options.values():
             option.add_to_scene(scene)
@@ -1897,7 +3515,7 @@ class Checkbox(UI):
         return np.asarray([option_width, height])
 
     def _handle_option_change(self, option):
-        """Update whenever an option changes.
+        """ Reacts whenever an option changes.
 
         Parameters
         ----------
@@ -1911,13 +3529,12 @@ class Checkbox(UI):
         self.on_change(self)
 
     def _set_position(self, coords):
-        """Set the lower-left corner position of this UI component.
+        """ Position the lower-left corner of this UI component.
 
         Parameters
         ----------
         coords: (float, float)
             Absolute pixel coordinates (x, y).
-
         """
         button_y = coords[1]
         for option_no, option in enumerate(self.options.values()):
@@ -1935,12 +3552,13 @@ class Checkbox(UI):
 
     @property
     def padding(self):
-        """Get the padding between options."""
+        """ Gets the padding between options.
+        """
         return self._padding
 
 
 class RadioButton(Checkbox):
-    """A 2D set of :class:'Option' objects.
+    """ A 2D set of :class:'Option' objects.
     Only one option can be selected.
 
     Attributes
@@ -1951,13 +3569,11 @@ class RadioButton(Checkbox):
         Dictionary of all the options in the checkbox set.
     padding : float
         Distance between two adjacent options
-
     """
 
     def __init__(self, labels, checked_labels, padding=1, font_size=18,
                  font_family='Arial', position=(0, 0)):
-        """Init class instance.
-
+        """
         Parameters
         ----------
         labels : list(str)
@@ -1993,8 +3609,786 @@ class RadioButton(Checkbox):
         self.on_change(self)
 
 
+class ScrollBar(UI):
+    """ UI component that allows the user to add scroll bar to a list.
+
+    Attributes
+    ----------
+    on_change: function
+        Callback function for when the viewed items have changed.
+    """
+
+    def __init__(self, size, content_span, view_span, track_color=(1, 1, 1),
+                 reverse_scrolling=False, active_color=(0.9, 0.2, 0.2),
+                 inactive_color=(0.6, 0.0, 0.0), orientation="vertical",
+                 track_opacity=1., position=(0, 0)):
+
+        """
+        Parameters
+        ----------
+        size : (int, int)
+            Size of the scrollbar in height & width.
+        content_span : int
+            Span of the entire content.
+        view_span : int
+            Span of the viewable area to display the content.
+        track_color : tuple of 3 floats
+            Color of the scrollbar track.
+        reverse_scrolling : {True, False}
+            If True, scrolling up will move the list of files down.
+        active_color : tuple of 3 floats
+            Color of the scrollbar when in use.
+        inactive_color : tuple of 3 floats
+            Color of the scrollbar when not in use.
+        orientation : {"vertical", "horizontal"}
+            The orientation of the scrollbar.
+        opacity : float
+            Opacity of scrollbar.
+        position : (int, int, int)
+            Lower-left position of the UI component.
+        """
+        self._scroll_ratio = content_span/view_span
+        self.orientation = orientation.lower()
+        self.reverse_scrolling = reverse_scrolling
+
+        self.track_size = size
+
+        super(ScrollBar, self).__init__(position)
+
+        self.track_color = track_color
+        self.active_color = active_color
+        self.inactive_color = inactive_color
+        self.track_opacity = track_opacity
+        self.bar.color = self.inactive_color
+
+        # Hooks for user to update content.
+        self.on_scroll = lambda ui: None
+
+    def _setup(self):
+        self.track = Rectangle2D()
+        self.bar = Rectangle2D()
+        self.track.resize(self.track_size)
+        if self.orientation == "vertical":
+            bar_size = np.array((self.track_size[0],
+                                self._scroll_ratio*self.track_size[1]))
+            self.bar.resize(bar_size)
+        else:
+            bar_size = np.array((self._scroll_ratio*self.track_size[0],
+                                 self.track_size[1]))
+            self.bar.resize(bar_size)
+
+        self.track.on_left_mouse_button_pressed = self.track_click_callback
+        self.track.on_left_mouse_button_dragged = self.scrolling_callback
+        self.track.on_left_mouse_button_released = self.release_callback
+
+        self.bar.on_left_mouse_button_dragged = self.scrolling_callback
+        self.bar.on_left_mouse_button_released = self.release_callback
+
+    def set_position(self, position):
+        if self.orientation == "horizontal":
+            x_position = position[0]
+            x_position = max(x_position, self.track.position[0]
+                             + self.bar.size[0]//2)
+            x_position = min(x_position, self.track.position[0]
+                             + self.track.size[0] - self.bar.size[0]//2)
+            self.bar.center = (x_position, self.track.center[1])
+        else:
+            y_position = position[1]
+            y_position = max(y_position, self.track.position[1]
+                             + self.bar.size[1]//2)
+            y_position = min(y_position, self.track.position[1]
+                             + self.track.size[1] - self.bar.size[1]//2)
+            self.bar.center = (self.track.center[0], y_position)
+
+    def scrolling_callback(self, i_ren, _obj, _rect_obj):
+        """ Callback to change the color of the bar when it is clicked.
+
+        Parameters
+        ----------
+        i_ren: :class:`CustomInteractorStyle`
+        obj: :class:`vtkActor`
+            The picked actor
+        _rect_obj: :class:`Rectangle2D`
+
+        """
+        self.bar.color = self.active_color
+        position = i_ren.event.position
+        self.set_position(position)
+        self.on_scroll(self)
+        i_ren.force_render()
+        i_ren.event.abort()
+
+    def release_callback(self, i_ren, _obj, _rect_obj):
+        """ Callback to change the color of the bar when it is released.
+
+        Parameters
+        ----------
+        i_ren: :class:`CustomInteractorStyle`
+        obj: :class:`vtkActor`
+            The picked actor
+        rect_obj: :class:`Rectangle2D`
+
+        """
+        self.bar.color = self.inactive_color
+        i_ren.force_render()
+
+    def track_click_callback(self, i_ren, _obj, _rec_obj):
+        position = i_ren.event.position
+        self.set_position(position)
+        i_ren.force_render()
+        i_ren.event.abort()
+
+    def resize(self, size):
+        """ Resize scrollbar.
+        """
+        self.track.resize(size)
+        self.bar.resize(self._scroll_ratio*size)
+
+    def _get_actors(self):
+        """ Get the actors composing this UI component.
+        """
+        return self.track.actors + self.bar.actors
+
+    def _add_to_scene(self, scene):
+        """ Add all subcomponents or VTK props that compose this UI component.
+
+        Parameters
+        ----------
+        scene : scene
+        """
+        scene.add(self.track, self.bar)
+
+    def _get_size(self):
+        return self.track.size
+
+    def _set_position(self, coords):
+        """ Position the lower-left corner of this UI component.
+
+        Parameters
+        ----------
+        coords: (float, float)
+            Absolute pixel coordinates (x, y).
+        """
+        self.track.position = coords
+        if self.orientation == "vertical":
+            self.bar.position = coords + self.track.size - self.bar.size
+        else:
+            self.bar.position = coords
+
+    @property
+    def scroll_ratio(self):
+        return self._scroll_ratio
+
+    @scroll_ratio.setter
+    def scroll_ratio(self, ratio):
+        self._scroll_ratio = ratio
+        self.bar.resize(ratio*self.size)
+
+    @property
+    def track_color(self):
+        return self.track.color
+
+    @track_color.setter
+    def track_color(self, color):
+        self.track.color = color
+
+    @property
+    def track_opacity(self):
+        return self.track.opacity
+
+    @track_opacity.setter
+    def track_opacity(self, opacity):
+        self.track.opacity = opacity
+
+
+class ListBox2D(UI):
+    """ UI component that allows the user to select items from a list.
+
+    Attributes
+    ----------
+    on_change: function
+        Callback function for when the selected items have changed.
+    """
+
+    def __init__(self, values, position=(0, 0), size=(100, 300),
+                 multiselection=True, reverse_scrolling=False,
+                 font_size=20, line_spacing=1.4,
+                 text_color=(0.2, 0.2, 0.2),
+                 selected_color=(0.9, 0.6, 0.6),
+                 unselected_color=(0.6, 0.6, 0.6),
+                 scroll_bar_active_color=(0.6, 0.2, 0.2),
+                 scroll_bar_inactive_color=(0.9, 0.0, 0.0),
+                 background_opacity=1.):
+        """
+
+        Parameters
+        ----------
+        values: list of objects
+            Values used to populate this listbox. Objects must be castable
+            to string.
+        position : (float, float)
+            Absolute coordinates (x, y) of the lower-left corner of this
+            UI component.
+        size : (int, int)
+            Width and height in pixels of this UI component.
+        multiselection: {True, False}
+            Whether multiple values can be selected at once.
+        reverse_scrolling: {True, False}
+            If True, scrolling up will move the list of files down.
+        font_size: int
+            The font size in pixels.
+        line_spacing: float
+            Distance between listbox's items in pixels.
+        text_color : tuple of 3 floats
+        selected_color : tuple of 3 floats
+        unselected_color : tuple of 3 floats
+        scroll_bar_active_color : tuple of 3 floats
+        scroll_bar_inactive_color : tuple of 3 floats
+        background_opacity : float
+        """
+        self.view_offset = 0
+        self.slots = []
+        self.selected = []
+
+        self.panel_size = size
+        self.font_size = font_size
+        self.line_spacing = line_spacing
+        self.slot_height = int(self.font_size * self.line_spacing)
+
+        self.text_color = text_color
+        self.selected_color = selected_color
+        self.unselected_color = unselected_color
+        self.background_opacity = background_opacity
+
+        # self.panel.resize(size)
+        self.values = values
+        self.multiselection = multiselection
+        self.last_selection_idx = 0
+        self.reverse_scrolling = reverse_scrolling
+        self.scroll_bar_active_color = scroll_bar_active_color
+        self.scroll_bar_inactive_color = scroll_bar_inactive_color
+
+        super(ListBox2D, self).__init__()
+        self.position = position
+        self.update()
+
+        # Offer some standard hooks to the user.
+        self.on_change = lambda: None
+
+    def _setup(self):
+        """ Setup this UI component.
+
+        Create the ListBox (Panel2D) filled with empty slots (ListBoxItem2D).
+        """
+        self.margin = 10
+        size = self.panel_size
+        font_size = self.font_size
+        # Calculating the number of slots.
+        self.nb_slots = int((size[1] - 2 * self.margin) // self.slot_height)
+
+        # This panel facilitates adding slots at the right position.
+        self.panel = Panel2D(size=size, color=(1, 1, 1))
+
+        # Initialisation of empty text actors
+        self.slot_width = size[0] - int(size[0]/20) - \
+            2 * self.margin - self.margin
+        x = self.margin
+        y = size[1] - self.margin
+        for _ in range(self.nb_slots):
+            y -= self.slot_height
+            item = ListBoxItem2D(list_box=self,
+                                 size=(self.slot_width, self.slot_height),
+                                 text_color=self.text_color,
+                                 selected_color=self.selected_color,
+                                 unselected_color=self.unselected_color,
+                                 background_opacity=self.background_opacity)
+            item.textblock.font_size = font_size
+            self.slots.append(item)
+            self.panel.add_element(item, (x, y + self.margin))
+
+        # Handle mouse wheel events on the panel.
+        up_event = "MouseWheelForwardEvent"
+        down_event = "MouseWheelBackwardEvent"
+        if self.reverse_scrolling:
+            up_event, down_event = down_event, up_event  # Swap events
+
+        self.add_callback(self.panel.background.actor, up_event,
+                          self.up_button_callback)
+        self.add_callback(self.panel.background.actor, down_event,
+                          self.down_button_callback)
+
+        # Handle mouse wheel events on the slots.
+        for slot in self.slots:
+            self.add_callback(slot.background.actor, up_event,
+                              self.up_button_callback)
+            self.add_callback(slot.background.actor, down_event,
+                              self.down_button_callback)
+            self.add_callback(slot.textblock.actor, up_event,
+                              self.up_button_callback)
+            self.add_callback(slot.textblock.actor, down_event,
+                              self.down_button_callback)
+
+    def resize(self, size):
+        pass
+
+    def _get_actors(self):
+        """ Get the actors composing this UI component.
+        """
+        return self.panel.actors
+
+    def _add_to_scene(self, scene):
+        """ Add all subcomponents or VTK props that compose this UI component.
+
+        Parameters
+        ----------
+        scene : scene
+        """
+        self.panel.add_to_scene(scene)
+        for slot in self.slots:
+            clip_overflow(slot.textblock, self.slot_width)
+
+    def _get_size(self):
+        return self.panel.size
+
+    def _set_position(self, coords):
+        """ Position the lower-left corner of this UI component.
+
+        Parameters
+        ----------
+        coords: (float, float)
+            Absolute pixel coordinates (x, y).
+        """
+        self.panel.position = coords
+
+    def up_button_callback(self, i_ren, _obj, _list_box):
+        """ Pressing up button scrolls up in the combo box.
+
+        Parameters
+        ----------
+        i_ren: :class:`CustomInteractorStyle`
+        obj: :class:`vtkActor`
+            The picked actor
+        _list_box: :class:`ListBox2D`
+
+        """
+
+        i_ren.force_render()
+        i_ren.event.abort()  # Stop propagating the event.
+
+    def down_button_callback(self, i_ren, _obj, _list_box):
+        """ Pressing down button scrolls down in the combo box.
+
+        Parameters
+        ----------
+        i_ren: :class:`CustomInteractorStyle`
+        obj: :class:`vtkActor`
+            The picked actor
+        _list_box: :class:`ListBox2D`
+
+        """
+
+        i_ren.force_render()
+        i_ren.event.abort()  # Stop propagating the event.
+
+    def update(self):
+        """ Refresh listbox's content. """
+        view_end = view_start + self.nb_slots
+        values_to_show = self.values[view_start:view_end]
+
+        # Populate slots according to the view.
+        for i, choice in enumerate(values_to_show):
+            slot = self.slots[i]
+            slot.element = choice
+            if slot.textblock.scene is not None:
+                clip_overflow(slot.textblock, self.slot_width)
+            slot.set_visibility(True)
+            if slot.element in self.selected:
+                slot.select()
+            else:
+                slot.deselect()
+
+        # Flush remaining slots.
+        for slot in self.slots[len(values_to_show):]:
+            slot.element = None
+            slot.set_visibility(False)
+            slot.deselect()
+
+    def clear_selection(self):
+        del self.selected[:]
+
+    def select(self, item, multiselect=False, range_select=False):
+        """ Select the item.
+
+        Parameters
+        ----------
+        item: ListBoxItem2D's object
+            Item to select.
+        multiselect: {True, False}
+            If True and multiselection is allowed, the item is added to the
+            selection.
+            Otherwise, the selection will only contain the provided item unless
+            range_select is True.
+        range_select: {True, False}
+            If True and multiselection is allowed, all items between the last
+            selected item and the current one will be added to the selection.
+            Otherwise, the selection will only contain the provided item unless
+            multi_select is True.
+
+        """
+        selection_idx = self.values.index(item.element)
+        if self.multiselection and range_select:
+            self.clear_selection()
+            step = 1 if selection_idx >= self.last_selection_idx else -1
+            for i in range(self.last_selection_idx,
+                           selection_idx + step,
+                           step):
+                self.selected.append(self.values[i])
+
+        elif self.multiselection and multiselect:
+            if item.element in self.selected:
+                self.selected.remove(item.element)
+            else:
+                self.selected.append(item.element)
+            self.last_selection_idx = selection_idx
+
+        else:
+            self.clear_selection()
+            self.selected.append(item.element)
+            self.last_selection_idx = selection_idx
+
+        self.on_change()  # Call hook.
+        self.update()
+
+
+class ListBoxItem2D(UI):
+    """ The text displayed in a listbox. """
+
+    def __init__(self, list_box, size,
+                 text_color=(1.0, 0.0, 0.0),
+                 selected_color=(0.4, 0.4, 0.4),
+                 unselected_color=(0.9, 0.9, 0.9),
+                 background_opacity=1.):
+        """ Single ListBox Item
+
+        Parameters
+        ----------
+        list_box : :class:`ListBox`
+            The ListBox reference this text belongs to.
+        size : tuple of 2 ints
+            The size of the listbox item.
+        text_color : tuple of 3 floats
+        unselected_color : tuple of 3 floats
+        selected_color : tuple of 3 floats
+        background_opacity : float
+        """
+        super(ListBoxItem2D, self).__init__()
+        self._element = None
+        self.list_box = list_box
+        self.background.resize(size)
+        self.background_opacity = background_opacity
+        self.selected = False
+        self.text_color = text_color
+        self.textblock.color = self.text_color
+        self.selected_color = selected_color
+        self.unselected_color = unselected_color
+        self.background.opacity = self.background_opacity
+        self.deselect()
+
+    def _setup(self):
+        """ Setup this UI component.
+
+        Create the ListBoxItem2D with its background (Rectangle2D) and its
+        label (TextBlock2D).
+        """
+        self.background = Rectangle2D()
+        self.textblock = TextBlock2D(justification="left",
+                                     vertical_justification="middle")
+
+        # Add default events listener for this UI component.
+        self.add_callback(self.textblock.actor, "LeftButtonPressEvent",
+                          self.left_button_clicked)
+        self.add_callback(self.background.actor, "LeftButtonPressEvent",
+                          self.left_button_clicked)
+
+    def _get_actors(self):
+        """ Get the actors composing this UI component.
+        """
+        return self.background.actors + self.textblock.actors
+
+    def _add_to_scene(self, scene):
+        """ Add all subcomponents or VTK props that compose this UI component.
+
+        Parameters
+        ----------
+        scene : scene
+        """
+        self.background.add_to_scene(scene)
+        self.textblock.add_to_scene(scene)
+
+    def _get_size(self):
+        return self.background.size
+
+    def _set_position(self, coords):
+        """ Position the lower-left corner of this UI component.
+
+        Parameters
+        ----------
+        coords: (float, float)
+            Absolute pixel coordinates (x, y).
+        """
+        self.textblock.position = coords
+        # Center background underneath the text.
+        position = coords
+        self.background.position = (position[0],
+                                    position[1] - self.background.size[1] / 2.)
+
+    def deselect(self):
+        self.background.color = self.unselected_color
+        self.textblock.bold = False
+        self.selected = False
+
+    def select(self):
+        self.textblock.bold = True
+        self.background.color = self.selected_color
+        self.selected = True
+
+    @property
+    def element(self):
+        return self._element
+
+    @element.setter
+    def element(self, element):
+        self._element = element
+        self.textblock.message = "" if self._element is None else str(element)
+
+    def left_button_clicked(self, i_ren, _obj, _list_box_item):
+        """ A callback to handle left click for this UI element.
+
+        Parameters
+        ----------
+        i_ren: :class:`CustomInteractorStyle`
+        obj: :class:`vtkActor`
+            The picked actor
+        _list_box_item: :class:`ListBoxItem2D`
+
+        """
+        multiselect = i_ren.event.ctrl_key
+        range_select = i_ren.event.shift_key
+        self.list_box.select(self, multiselect, range_select)
+        i_ren.force_render()
+
+
+class FileMenu2D(UI):
+    """ A menu to select files in the current folder.
+    Can go to new folder, previous folder and select multiple files.
+
+    Attributes
+    ----------
+    extensions: ['extension1', 'extension2', ....]
+        To show all files, extensions=["*"] or [""]
+        List of extensions to be shown as files.
+    listbox : :class: 'ListBox2D'
+        Container for the menu.
+
+    """
+
+    def __init__(self, directory_path, extensions=None, position=(0, 0),
+                 size=(100, 300), multiselection=True, reverse_scrolling=False,
+                 font_size=20, line_spacing=1.4):
+        """
+
+        Parameters
+        ----------
+        extensions: list(string)
+            List of extensions to be shown as files.
+        directory_path: string
+            Path of the directory where this dialog should open.
+        position : (float, float)
+            Absolute coordinates (x, y) of the lower-left corner of this
+            UI component.
+        size : (int, int)
+            Width and height in pixels of this UI component.
+        multiselection: {True, False}
+            Whether multiple values can be selected at once.
+        reverse_scrolling: {True, False}
+            If True, scrolling up will move the list of files down.
+        font_size: int
+            The font size in pixels.
+        line_spacing: float
+            Distance between listbox's items in pixels.
+        """
+        self.font_size = font_size
+        self.multiselection = multiselection
+        self.reverse_scrolling = reverse_scrolling
+        self.line_spacing = line_spacing
+        self.extensions = extensions or ["*"]
+        self.current_directory = directory_path
+        self.menu_size = size
+        self.directory_contents = []
+
+        super(FileMenu2D, self).__init__()
+        self.position = position
+        self.set_slot_colors()
+
+        # Offer some standard hooks to the user.
+        self.on_change = lambda: None
+
+    def _setup(self):
+        """ Setup this UI component.
+        Create the ListBox (Panel2D) filled with empty slots (ListBoxItem2D).
+        """
+        self.directory_contents = self.get_all_file_names()
+        content_names = [x[0] for x in self.directory_contents]
+        self.listbox = ListBox2D(
+            values=content_names, multiselection=self.multiselection,
+            font_size=self.font_size, line_spacing=self.line_spacing,
+            reverse_scrolling=self.reverse_scrolling, size=self.menu_size)
+
+        # Leverage ListBox2D callback to detect when directory
+        # has been selected.
+        self.listbox.on_change = self.directory_click_callback
+
+    def _get_actors(self):
+        """ Get the actors composing this UI component.
+        """
+        return self.listbox.actors
+
+    def resize(self, size):
+        pass
+
+    def _set_position(self, coords):
+        """ Position the lower-left corner of this UI component.
+
+        Parameters
+        ----------
+        coords: (float, float)
+            Absolute pixel coordinates (x, y).
+        """
+        self.listbox.position = coords
+
+    def _add_to_scene(self, scene):
+        """ Add all subcomponents or VTK props that compose this UI component.
+
+        Parameters
+        ----------
+        scene : scene
+        """
+        self.listbox.add_to_scene(scene)
+
+    def _get_size(self):
+        return self.listbox.size
+
+    def get_all_file_names(self):
+        """ Gets file and directory names.
+
+        Returns
+        -------
+        all_file_names: list((string, {"directory", "file"}))
+            List of all file and directory names as string.
+        """
+        all_file_names = []
+
+        directory_names = self.get_directory_names()
+        for directory_name in directory_names:
+            all_file_names.append((directory_name, "directory"))
+
+        file_names = self.get_file_names()
+        for file_name in file_names:
+            all_file_names.append((file_name, "file"))
+
+        return all_file_names
+
+    def get_directory_names(self):
+        """ Finds names of all directories in the current_directory
+
+        Returns
+        -------
+        directory_names: list(string)
+            List of all directory names as string.
+        """
+        # A list of directory names in the current directory
+        directory_names = []
+        for (_, dirnames, _) in os.walk(self.current_directory):
+            directory_names += dirnames
+            break
+        directory_names.sort(key=lambda s: s.lower())
+        directory_names.insert(0, "../")
+        return directory_names
+
+    def get_file_names(self):
+        """ Finds names of all files in the current_directory
+
+        Returns
+        -------
+        file_names: list(string)
+            List of all file names as string.
+        """
+        # A list of file names with extension in the current directory
+        for (_, _, files) in os.walk(self.current_directory):
+            break
+
+        file_names = []
+        if "*" in self.extensions or "" in self.extensions:
+            file_names = files
+        else:
+            for ext in self.extensions:
+                for file in files:
+                    if file.endswith("." + ext):
+                        file_names.append(file)
+        file_names.sort(key=lambda s: s.lower())
+        return file_names
+
+    def set_slot_colors(self):
+        """ Sets the text color of the slots based on the type of element
+        they show. Blue for directories and green for files.
+        """
+        for idx, slot in enumerate(self.listbox.slots):
+            list_idx = min(self.listbox.view_offset + idx,
+                           len(self.directory_contents)-1)
+            if self.directory_contents[list_idx][1] == "directory":
+                slot.textblock.color = (0, 0.6, 0)
+            elif self.directory_contents[list_idx][1] == "file":
+                slot.textblock.color = (0, 0, 0.7)
+
+    def directory_click_callback(self):
+        """ A callback to move into a directory if it has been clicked.
+
+        Parameters
+        ----------
+        i_ren: :class:`CustomInteractorStyle`
+        obj: :class:`vtkActor`
+            The picked actor
+        listboxitem: :class:`ListBoxItem2D`
+        """
+        # TODO: In this callback, the content of `listbox.selected`
+        # is before changing directory (if that happens).
+        #       Is this what we want?
+        self.on_change()
+
+        if len(self.listbox.selected) == 0:
+            return
+
+        # TODO: Make it easier to access selected slots/listitem in ListBox2D.
+        listboxitem = [slot for slot in self.listbox.slots
+                       if slot.element == self.listbox.selected[0]][0]
+
+        if (listboxitem.element, "directory") in self.directory_contents:
+            new_directory_path = os.path.join(self.current_directory,
+                                              listboxitem.element)
+            if os.access(new_directory_path, os.R_OK):
+                self.current_directory = new_directory_path
+                self.directory_contents = self.get_all_file_names()
+                content_names = [x[0] for x in self.directory_contents]
+                self.listbox.clear_selection()
+                self.listbox.values = content_names
+                self.listbox.view_offset = 0
+                self.listbox.update()
+                self.listbox.Scrollbar.update_scrollbar()
+                self.set_slot_colors()
+
+
 class ComboBox2D(UI):
-    """UI element to create drop-down menus.
+    """ UI element to create drop-down menus.
 
     Attributes
     ----------
@@ -2015,7 +4409,7 @@ class ComboBox2D(UI):
                  scroll_bar_active_color=(0.6, 0.2, 0.2),
                  scroll_bar_inactive_color=(0.9, 0.0, 0.0), menu_opacity=1.,
                  reverse_scrolling=False, font_size=20, line_spacing=1.4):
-        """Init class Instance.
+        """
 
         Parameters
         ----------
@@ -2082,8 +4476,7 @@ class ComboBox2D(UI):
         self.position = position
 
     def _setup(self):
-        """Setup this UI component.
-
+        """ Setup this UI component.
         Create the ListBox filled with empty slots (ListBoxItem2D).
         Create TextBox with placeholder text.
         Create Button for toggling drop down menu.
@@ -2153,11 +4546,12 @@ class ComboBox2D(UI):
         self.on_change = lambda ui: None
 
     def _get_actors(self):
-        """Get the actors composing this UI component."""
+        """ Get the actors composing this UI component.
+        """
         return self.panel.actors
 
     def resize(self, size):
-        """Resize ComboBox2D.
+        """ Resizes ComboBox2D.
 
         Parameters
         ----------
@@ -2179,23 +4573,21 @@ class ComboBox2D(UI):
         self.selection_box.resize(self.text_block_size)
 
     def _set_position(self, coords):
-        """Set the lower-left corner position of this UI component.
+        """ Position the lower-left corner of this UI component.
 
         Parameters
         ----------
         coords: (float, float)
             Absolute pixel coordinates (x, y).
-
         """
         self.panel.position = coords
 
     def _add_to_scene(self, scene):
-        """Add all subcomponents or VTK props that compose this UI component.
+        """ Add all subcomponents or VTK props that compose this UI component.
 
         Parameters
         ----------
         scene : scene
-
         """
         self.panel.add_to_scene(scene)
         self.selection_box.font_size = self.font_size
@@ -2212,13 +4604,12 @@ class ComboBox2D(UI):
         return self._selection_ID
 
     def append_item(self, *items):
-        """Append additional options to the menu.
+        """ Append additional options to the menu.
 
         Parameters
         ----------
         items : n-d list, n-d tuple, Number or str
             Additional options.
-
         """
         for item in items:
             if isinstance(item, (list, tuple)):
@@ -2234,7 +4625,7 @@ class ComboBox2D(UI):
             self.drop_down_menu.scroll_bar.set_visibility(False)
 
     def select_option_callback(self, i_ren, _obj, listboxitem):
-        """Select the appropriate option
+        """ Callback to select the appropriate option
 
         Parameters
         ----------
@@ -2242,7 +4633,6 @@ class ComboBox2D(UI):
         obj: :class:`vtkActor`
             The picked actor
         listboxitem: :class:`ListBoxItem2D`
-
         """
 
         # Set the Text of TextBlock2D to the text of listboxitem
@@ -2263,7 +4653,7 @@ class ComboBox2D(UI):
         i_ren.event.abort()
 
     def menu_toggle_callback(self, i_ren, _vtkactor, _combobox):
-        """Toggle visibility of drop down menu list.
+        """ Callback to toggle visibility of drop down menu list.
 
         Parameters
         ----------
@@ -2271,8 +4661,8 @@ class ComboBox2D(UI):
         vtkactor : :class:`vtkActor`
             The picked actor
         combobox : :class:`ComboBox2D`
-
         """
+
         self._menu_visibility = not self._menu_visibility
         self.drop_down_menu.set_visibility(self._menu_visibility)
 
@@ -2294,634 +4684,542 @@ class ComboBox2D(UI):
         i_ren.force_render()
 
 
-class ListBox2D(UI):
-    """UI component that allows the user to select items from a list.
+class TabUI(UI):
+    """ UI element to add multiple panels within a single window.
 
     Attributes
     ----------
-    on_change: function
-        Callback function for when the selected items have changed.
+    tabs: :class: List of 'TabPanel2D'
+        Stores all the instances of 'TabPanel2D' that renderes the contents.
     """
 
-    def __init__(self, values, position=(0, 0), size=(100, 300),
-                 multiselection=True, reverse_scrolling=False,
-                 font_size=20, line_spacing=1.4,
-                 text_color=(0.2, 0.2, 0.2),
-                 selected_color=(0.9, 0.6, 0.6),
-                 unselected_color=(0.6, 0.6, 0.6),
-                 scroll_bar_active_color=(0.6, 0.2, 0.2),
-                 scroll_bar_inactive_color=(0.9, 0.0, 0.0),
-                 background_opacity=1.):
-        """Init class instance.
+    def __init__(self, position=(0, 0), size=(100, 100), nb_tabs=1,
+                 active_color=(1, 1, 1), inactive_color=(0.5, 0.5, 0.5),
+                 draggable=False):
+        """
 
         Parameters
         ----------
-        values: list of objects
-            Values used to populate this listbox. Objects must be castable
-            to string.
         position : (float, float)
             Absolute coordinates (x, y) of the lower-left corner of this
             UI component.
         size : (int, int)
             Width and height in pixels of this UI component.
-        multiselection: {True, False}
-            Whether multiple values can be selected at once.
-        reverse_scrolling: {True, False}
-            If True, scrolling up will move the list of files down.
-        font_size: int
-            The font size in pixels.
-        line_spacing: float
-            Distance between listbox's items in pixels.
-        text_color : tuple of 3 floats
-        selected_color : tuple of 3 floats
-        unselected_color : tuple of 3 floats
-        scroll_bar_active_color : tuple of 3 floats
-        scroll_bar_inactive_color : tuple of 3 floats
-        background_opacity : float
+        nb_tabs : int
+            Number of tabs to be renders.
+        active_color : tuple of 3 floats.
+            Background color of active tab panel.
+        inactive_color : tuple of 3 floats.
+            Background color of inactive tab panels.
+        draggable : bool
+            Whether the UI element is draggable or not.
         """
-        self.view_offset = 0
-        self.slots = []
-        self.selected = []
+        self.tabs = []
+        self.nb_tabs = nb_tabs
+        self.parent_size = size
+        self.content_size = (size[0], int(0.9 * size[1]))
+        self.draggable = draggable
+        self.active_color = active_color
+        self.inactive_color = inactive_color
+        self.active_tab_idx = None
+        self.collapsed = True
 
-        self.panel_size = size
-        self.font_size = font_size
-        self.line_spacing = line_spacing
-        self.slot_height = int(self.font_size * self.line_spacing)
-
-        self.text_color = text_color
-        self.selected_color = selected_color
-        self.unselected_color = unselected_color
-        self.background_opacity = background_opacity
-
-        # self.panel.resize(size)
-        self.values = values
-        self.multiselection = multiselection
-        self.last_selection_idx = 0
-        self.reverse_scrolling = reverse_scrolling
-        super(ListBox2D, self).__init__()
-
-        denom = len(self.values) - self.nb_slots
-        if not denom:
-            denom += 1
-        self.scroll_step_size = (self.slot_height * self.nb_slots -
-                                 self.scroll_bar.height) / denom
-
-        self.scroll_bar_active_color = scroll_bar_active_color
-        self.scroll_bar_inactive_color = scroll_bar_inactive_color
-        self.scroll_bar.color = self.scroll_bar_inactive_color
-        self.scroll_bar.opacity = self.background_opacity
-
+        super(TabUI, self).__init__()
         self.position = position
-        self.scroll_init_position = 0
-        self.update()
+
+    def _setup(self):
+        """ Setup this UI component.
+        Create parent panel.
+        Create tab panels.
+        """
+        self.parent_panel = Panel2D(self.parent_size, opacity=0.0)
 
         # Offer some standard hooks to the user.
-        self.on_change = lambda: None
+        self.on_change = lambda ui: None
+        self.on_collapse = lambda ui: None
 
-    def _setup(self):
-        """Setup this UI component.
-
-        Create the ListBox (Panel2D) filled with empty slots (ListBoxItem2D).
-        """
-        self.margin = 10
-        size = self.panel_size
-        font_size = self.font_size
-        # Calculating the number of slots.
-        self.nb_slots = int((size[1] - 2 * self.margin) // self.slot_height)
-
-        # This panel facilitates adding slots at the right position.
-        self.panel = Panel2D(size=size, color=(1, 1, 1))
-
-        # Add a scroll bar
-        scroll_bar_height = self.nb_slots * (size[1] - 2 * self.margin) \
-            / len(self.values)
-        self.scroll_bar = Rectangle2D(size=(int(size[0]/20),
-                                      scroll_bar_height))
-        if len(self.values) <= self.nb_slots:
-            self.scroll_bar.set_visibility(False)
-        self.panel.add_element(
-            self.scroll_bar, size - self.scroll_bar.size - self.margin)
-
-        # Initialisation of empty text actors
-        self.slot_width = size[0] - self.scroll_bar.size[0] - \
-            2 * self.margin - self.margin
-        x = self.margin
-        y = size[1] - self.margin
-        for _ in range(self.nb_slots):
-            y -= self.slot_height
-            item = ListBoxItem2D(list_box=self,
-                                 size=(self.slot_width, self.slot_height),
-                                 text_color=self.text_color,
-                                 selected_color=self.selected_color,
-                                 unselected_color=self.unselected_color,
-                                 background_opacity=self.background_opacity)
-            item.textblock.font_size = font_size
-            self.slots.append(item)
-            self.panel.add_element(item, (x, y + self.margin))
-
-        # Add default events listener for this UI component.
-        self.scroll_bar.on_left_mouse_button_pressed = \
-            self.scroll_click_callback
-        self.scroll_bar.on_left_mouse_button_released = \
-            self.scroll_release_callback
-        self.scroll_bar.on_left_mouse_button_dragged = \
-            self.scroll_drag_callback
-
-        # Handle mouse wheel events on the panel.
-        up_event = "MouseWheelForwardEvent"
-        down_event = "MouseWheelBackwardEvent"
-        if self.reverse_scrolling:
-            up_event, down_event = down_event, up_event  # Swap events
-
-        self.add_callback(self.panel.background.actor, up_event,
-                          self.up_button_callback)
-        self.add_callback(self.panel.background.actor, down_event,
-                          self.down_button_callback)
-
-        # Handle mouse wheel events on the slots.
-        for slot in self.slots:
-            self.add_callback(slot.background.actor, up_event,
-                              self.up_button_callback)
-            self.add_callback(slot.background.actor, down_event,
-                              self.down_button_callback)
-            self.add_callback(slot.textblock.actor, up_event,
-                              self.up_button_callback)
-            self.add_callback(slot.textblock.actor, down_event,
-                              self.down_button_callback)
-
-    def resize(self, size):
-        pass
+        for _ in range(self.nb_tabs):
+            content_panel = Panel2D(size=self.content_size)
+            content_panel.set_visibility(False)
+            tab_panel = TabPanel2D(content_panel=content_panel)
+            self.tabs.append(tab_panel)
+        self.update_tabs()
 
     def _get_actors(self):
-        """Get the actors composing this UI component."""
-        return self.panel.actors
-
-    def _add_to_scene(self, scene):
-        """Add all subcomponents or VTK props that compose this UI component.
-
-        Parameters
-        ----------
-        scene : scene
-
+        """ Get the actors composing this UI component.
         """
-        self.panel.add_to_scene(scene)
-        for slot in self.slots:
-            clip_overflow(slot.textblock, self.slot_width)
+        actors = []
+        actors += self.parent_panel.actors
+        for tab_panel in self.tabs:
+            actors += tab_panel.actors
 
-    def _get_size(self):
-        return self.panel.size
+        return actors
 
-    def _set_position(self, coords):
-        """Position the lower-left corner of this UI component.
-
-        Parameters
-        ----------
-        coords: (float, float)
-            Absolute pixel coordinates (x, y).
-
-        """
-        self.panel.position = coords
-
-    def up_button_callback(self, i_ren, _obj, _list_box):
-        """Pressing up button scrolls up in the combo box.
-
-        Parameters
-        ----------
-        i_ren: :class:`CustomInteractorStyle`
-        obj: :class:`vtkActor`
-            The picked actor
-        _list_box: :class:`ListBox2D`
-
-        """
-        if self.view_offset > 0:
-            self.view_offset -= 1
-            self.update()
-            scroll_bar_idx = self.panel._elements.index(self.scroll_bar)
-            self.scroll_bar.center = (self.scroll_bar.center[0],
-                                      self.scroll_bar.center[1] +
-                                      self.scroll_step_size)
-            self.panel.element_offsets[scroll_bar_idx] = (
-                self.scroll_bar,
-                (self.scroll_bar.position - self.panel.position))
-
-        i_ren.force_render()
-        i_ren.event.abort()  # Stop propagating the event.
-
-    def down_button_callback(self, i_ren, _obj, _list_box):
-        """Pressing down button scrolls down in the combo box.
-
-        Parameters
-        ----------
-        i_ren: :class:`CustomInteractorStyle`
-        obj: :class:`vtkActor`
-            The picked actor
-        _list_box: :class:`ListBox2D`
-
-        """
-        view_end = self.view_offset + self.nb_slots
-        if view_end < len(self.values):
-            self.view_offset += 1
-            self.update()
-            scroll_bar_idx = self.panel._elements.index(self.scroll_bar)
-            self.scroll_bar.center = (self.scroll_bar.center[0],
-                                      self.scroll_bar.center[1] -
-                                      self.scroll_step_size)
-            self.panel.element_offsets[scroll_bar_idx] = (
-                self.scroll_bar,
-                (self.scroll_bar.position - self.panel.position))
-
-        i_ren.force_render()
-        i_ren.event.abort()  # Stop propagating the event.
-
-    def scroll_click_callback(self, i_ren, _obj, _rect_obj):
-        """ Callback to change the color of the bar when it is clicked.
-
-        Parameters
-        ----------
-        i_ren: :class:`CustomInteractorStyle`
-        obj: :class:`vtkActor`
-            The picked actor
-        _rect_obj: :class:`Rectangle2D`
-
-        """
-        self.scroll_bar.color = self.scroll_bar_active_color
-        self.scroll_init_position = i_ren.event.position[1]
-        i_ren.force_render()
-        i_ren.event.abort()
-
-    def scroll_release_callback(self, i_ren, _obj, _rect_obj):
-        """Callback to change the color of the bar when it is released.
-
-        Parameters
-        ----------
-        i_ren: :class:`CustomInteractorStyle`
-        obj: :class:`vtkActor`
-            The picked actor
-        rect_obj: :class:`Rectangle2D`
-
-        """
-        self.scroll_bar.color = self.scroll_bar_inactive_color
-        i_ren.force_render()
-
-    def scroll_drag_callback(self, i_ren, _obj, _rect_obj):
-        """Drag scroll bar in the combo box.
-
-        Parameters
-        ----------
-        i_ren: :class:`CustomInteractorStyle`
-        obj: :class:`vtkActor`
-            The picked actor
-        rect_obj: :class:`Rectangle2D`
-
-        """
-        position = i_ren.event.position
-        offset = int((position[1] - self.scroll_init_position) /
-                     self.scroll_step_size)
-        if offset > 0 and self.view_offset > 0:
-            offset = min(offset, self.view_offset)
-
-        elif offset < 0 and (
-                self.view_offset + self.nb_slots < len(self.values)):
-            offset = min(-offset,
-                         len(self.values) - self.nb_slots - self.view_offset)
-            offset = - offset
-        else:
-            return
-
-        self.view_offset -= offset
-        self.update()
-        scroll_bar_idx = self.panel._elements.index(self.scroll_bar)
-        self.scroll_bar.center = (self.scroll_bar.center[0],
-                                  self.scroll_bar.center[1] +
-                                  offset * self.scroll_step_size)
-
-        self.scroll_init_position += offset * self.scroll_step_size
-
-        self.panel.element_offsets[scroll_bar_idx] = (
-            self.scroll_bar, (self.scroll_bar.position - self.panel.position))
-        i_ren.force_render()
-        i_ren.event.abort()
-
-    def update(self):
-        """Refresh listbox's content. """
-        view_start = self.view_offset
-        view_end = view_start + self.nb_slots
-        values_to_show = self.values[view_start:view_end]
-
-        # Populate slots according to the view.
-        for i, choice in enumerate(values_to_show):
-            slot = self.slots[i]
-            slot.element = choice
-            if slot.textblock.scene is not None:
-                clip_overflow(slot.textblock, self.slot_width)
-            slot.set_visibility(True)
-            if slot.element in self.selected:
-                slot.select()
-            else:
-                slot.deselect()
-
-        # Flush remaining slots.
-        for slot in self.slots[len(values_to_show):]:
-            slot.element = None
-            slot.set_visibility(False)
-            slot.deselect()
-
-    def update_scrollbar(self):
-        """Change the scroll-bar height when the values
-        in the listbox change
-        """
-        self.scroll_bar.set_visibility(True)
-
-        self.scroll_bar.height = self.nb_slots * \
-            (self.panel_size[1] - 2 * self.margin) / len(self.values)
-
-        self.scroll_step_size = (self.slot_height * self.nb_slots -
-                                 self.scroll_bar.height) \
-            / (len(self.values) - self.nb_slots)
-
-        self.panel.update_element(
-            self.scroll_bar, self.panel_size - self.scroll_bar.size -
-            self.margin)
-
-        if len(self.values) <= self.nb_slots:
-            self.scroll_bar.set_visibility(False)
-
-    def clear_selection(self):
-        del self.selected[:]
-
-    def select(self, item, multiselect=False, range_select=False):
-        """Select the item.
-
-        Parameters
-        ----------
-        item: ListBoxItem2D's object
-            Item to select.
-        multiselect: {True, False}
-            If True and multiselection is allowed, the item is added to the
-            selection.
-            Otherwise, the selection will only contain the provided item unless
-            range_select is True.
-        range_select: {True, False}
-            If True and multiselection is allowed, all items between the last
-            selected item and the current one will be added to the selection.
-            Otherwise, the selection will only contain the provided item unless
-            multi_select is True.
-
-        """
-        selection_idx = self.values.index(item.element)
-        if self.multiselection and range_select:
-            self.clear_selection()
-            step = 1 if selection_idx >= self.last_selection_idx else -1
-            for i in range(self.last_selection_idx,
-                           selection_idx + step,
-                           step):
-                self.selected.append(self.values[i])
-
-        elif self.multiselection and multiselect:
-            if item.element in self.selected:
-                self.selected.remove(item.element)
-            else:
-                self.selected.append(item.element)
-            self.last_selection_idx = selection_idx
-
-        else:
-            self.clear_selection()
-            self.selected.append(item.element)
-            self.last_selection_idx = selection_idx
-
-        self.on_change()  # Call hook.
-        self.update()
-
-
-class ListBoxItem2D(UI):
-    """The text displayed in a listbox."""
-
-    def __init__(self, list_box, size,
-                 text_color=(1.0, 0.0, 0.0),
-                 selected_color=(0.4, 0.4, 0.4),
-                 unselected_color=(0.9, 0.9, 0.9),
-                 background_opacity=1.):
-        """Init ListBox Item instance.
-
-        Parameters
-        ----------
-        list_box : :class:`ListBox`
-            The ListBox reference this text belongs to.
-        size : tuple of 2 ints
-            The size of the listbox item.
-        text_color : tuple of 3 floats
-        unselected_color : tuple of 3 floats
-        selected_color : tuple of 3 floats
-        background_opacity : float
-        """
-        super(ListBoxItem2D, self).__init__()
-        self._element = None
-        self.list_box = list_box
-        self.background.resize(size)
-        self.background_opacity = background_opacity
-        self.selected = False
-        self.text_color = text_color
-        self.textblock.color = self.text_color
-        self.selected_color = selected_color
-        self.unselected_color = unselected_color
-        self.background.opacity = self.background_opacity
-        self.deselect()
-
-    def _setup(self):
-        """Setup this UI component.
-
-        Create the ListBoxItem2D with its background (Rectangle2D) and its
-        label (TextBlock2D).
-        """
-        self.background = Rectangle2D()
-        self.textblock = TextBlock2D(justification="left",
-                                     vertical_justification="middle")
-
-        # Add default events listener for this UI component.
-        self.add_callback(self.textblock.actor, "LeftButtonPressEvent",
-                          self.left_button_clicked)
-        self.add_callback(self.background.actor, "LeftButtonPressEvent",
-                          self.left_button_clicked)
-
-    def _get_actors(self):
-        """Get the actors composing this UI component."""
-        return self.background.actors + self.textblock.actors
-
-    def _add_to_scene(self, scene):
-        """Add all subcomponents or VTK props that compose this UI component.
+    def _add_to_scene(self, _scene):
+        """ Add all subcomponents or VTK props that compose this UI component.
 
         Parameters
         ----------
         scene : scene
         """
-        self.background.add_to_scene(scene)
-        self.textblock.add_to_scene(scene)
+        self.parent_panel.add_to_scene(_scene)
+        for tab_panel in self.tabs:
+            tab_panel.add_to_scene(_scene)
 
-    def _get_size(self):
-        return self.background.size
-
-    def _set_position(self, coords):
-        """Set the lower-left corner position of this UI component.
+    def _set_position(self, _coords):
+        """ Position the lower-left corner of this UI component.
 
         Parameters
         ----------
         coords: (float, float)
             Absolute pixel coordinates (x, y).
         """
-        self.textblock.position = coords
-        # Center background underneath the text.
-        position = coords
-        self.background.position = (position[0],
-                                    position[1] - self.background.size[1] / 2.)
+        self.parent_panel.position = _coords
 
-    def deselect(self):
-        self.background.color = self.unselected_color
-        self.textblock.bold = False
-        self.selected = False
+    def _get_size(self):
+        return self.parent_panel.size
 
-    def select(self):
-        self.textblock.bold = True
-        self.background.color = self.selected_color
-        self.selected = True
-
-    @property
-    def element(self):
-        return self._element
-
-    @element.setter
-    def element(self, element):
-        self._element = element
-        self.textblock.message = "" if self._element is None else str(element)
-
-    def left_button_clicked(self, i_ren, _obj, _list_box_item):
-        """Handle left click for this UI element.
-
-        Parameters
-        ----------
-        i_ren: :class:`CustomInteractorStyle`
-        obj: :class:`vtkActor`
-            The picked actor
-        _list_box_item: :class:`ListBoxItem2D`
-
+    def update_tabs(self):
+        """ Update position, size and callbacks for tab panels.
         """
-        multiselect = i_ren.event.ctrl_key
-        range_select = i_ren.event.shift_key
-        self.list_box.select(self, multiselect, range_select)
+        self.tab_panel_size =\
+            (self.size[0] // self.nb_tabs, int(0.1*self.size[1]))
+
+        tab_panel_pos = [0.0, 0.9]
+        for tab_panel in self.tabs:
+            tab_panel.resize(self.tab_panel_size)
+            tab_panel.content_panel.position = self.position
+
+            content_panel = tab_panel.content_panel
+            if self.draggable:
+                tab_panel.panel.background.on_left_mouse_button_pressed =\
+                    self.left_button_pressed
+                content_panel.background.on_left_mouse_button_pressed =\
+                    self.left_button_pressed
+                tab_panel.text_block.on_left_mouse_button_pressed =\
+                    self.left_button_pressed
+
+                tab_panel.panel.background.on_left_mouse_button_dragged =\
+                    self.left_button_dragged
+                content_panel.background.on_left_mouse_button_dragged =\
+                    self.left_button_dragged
+                tab_panel.text_block.on_left_mouse_button_dragged =\
+                    self.left_button_dragged
+            else:
+                tab_panel.panel.background.on_left_mouse_button_dragged =\
+                    lambda i_ren, _obj, _comp: i_ren.force_render
+                content_panel.background.on_left_mouse_button_dragged =\
+                    lambda i_ren, _obj, _comp: i_ren.force_render
+
+            tab_panel.text_block.on_left_mouse_button_clicked =\
+                self.select_tab_callback
+            tab_panel.panel.background.on_left_mouse_button_clicked =\
+                self.select_tab_callback
+
+            tab_panel.text_block.on_right_mouse_button_clicked =\
+                self.collapse_tab_ui
+            tab_panel.panel.background.on_right_mouse_button_clicked =\
+                self.collapse_tab_ui
+
+            tab_panel.content_panel.resize(self.content_size)
+            self.parent_panel.add_element(tab_panel, tab_panel_pos)
+            self.parent_panel.add_element(tab_panel.content_panel, (0.0, 0.0))
+            tab_panel_pos[0] += 1/self.nb_tabs
+
+    def select_tab_callback(self, iren, _obj, _tab_comp):
+        """ Handles events when a tab is selected.
+        """
+        for idx, tab_panel in enumerate(self.tabs):
+            if tab_panel.text_block is not _tab_comp and\
+               tab_panel.panel.background is not _tab_comp:
+                tab_panel.color = self.inactive_color
+                tab_panel.content_panel.set_visibility(False)
+            else:
+                tab_panel.color = self.active_color
+                tab_panel.content_panel.set_visibility(True)
+                self.active_tab_idx = idx
+
+        self.collapsed = False
+        self.on_change(self)
+        iren.force_render()
+        iren.event.abort()
+
+    def collapse_tab_ui(self, iren, _obj, _tab_comp):
+        """ Handles events when Tab UI is collapsed.
+        """
+        if self.active_tab_idx is not None:
+            active_tab_panel = self.tabs[self.active_tab_idx]
+            active_tab_panel.color = self.inactive_color
+            active_tab_panel.content_panel.set_visibility(False)
+        self.active_tab_idx = None
+        self.collapsed = True
+        self.on_collapse(self)
+        iren.force_render()
+        iren.event.abort()
+
+    def add_element(self, tab_idx, element, coords, anchor="position"):
+        """ Adds element to content panel after checking its existence.
+        """
+        if tab_idx < self.nb_tabs and tab_idx >= 0:
+            self.tabs[tab_idx].add_element(element, coords, anchor)
+        else:
+            raise IndexError(
+        "Tab with index {} does not exist".format(tab_idx))
+
+    def remove_element(self, tab_idx, element):
+        """ Removes element from content panel after checking its existence.
+        """
+        if tab_idx < self.nb_tabs and tab_idx >= 0:
+            self.tabs[tab_idx].remove_element(element)
+        else:
+            raise IndexError(
+        "Tab with index {} does not exist".format(tab_idx))
+
+    def update_element(self, tab_idx, element, coords, anchor="position"):
+        """ Updates element on content panel after checking its existence.
+        """
+        if tab_idx < self.nb_tabs and tab_idx >= 0:
+            self.tabs[tab_idx].update_element(element, coords, anchor)
+        else:
+            raise IndexError(
+        "Tab with index {} does not exist".format(tab_idx))
+
+    def left_button_pressed(self, i_ren, _obj, _sub_component):
+        click_pos = np.array(i_ren.event.position)
+        self._click_position = click_pos
+        i_ren.event.abort()  # Stop propagating the event.
+
+    def left_button_dragged(self, i_ren, _obj, _sub_component):
+        click_position = np.array(i_ren.event.position)
+        change = click_position - self._click_position
+        self.parent_panel.position += change
+        self._click_position = click_position
         i_ren.force_render()
 
 
-class FileMenu2D(UI):
-    """A menu to select files in the current folder.
-
-    Can go to new folder, previous folder and select multiple files.
+class TabPanel2D(UI):
+    """ Renders content within a Tab.
 
     Attributes
     ----------
-    extensions: ['extension1', 'extension2', ....]
-        To show all files, extensions=["*"] or [""]
-        List of extensions to be shown as files.
-    listbox : :class: 'ListBox2D'
-        Container for the menu.
-
+    content_panel: :class: 'Panel2D'
+        Holds all the content UI components.
+    text_block: :class: 'TextBlock2D'
+        Renders the title of the tab.
     """
 
-    def __init__(self, directory_path, extensions=None, position=(0, 0),
-                 size=(100, 300), multiselection=True, reverse_scrolling=False,
-                 font_size=20, line_spacing=1.4):
-        """Init class instance.
+    def __init__(self, position=(0, 0), size=(100, 100),
+                 title="New Tab", color=(0.5, 0.5, 0.5), content_panel=None):
+        """
 
         Parameters
         ----------
-        extensions: list(string)
-            List of extensions to be shown as files.
-        directory_path: string
-            Path of the directory where this dialog should open.
         position : (float, float)
-            Absolute coordinates (x, y) of the lower-left corner of this
-            UI component.
+            Absolute coordinates (x, y) of the lower-left corner of the
+            UI component
         size : (int, int)
-            Width and height in pixels of this UI component.
-        multiselection: {True, False}
-            Whether multiple values can be selected at once.
-        reverse_scrolling: {True, False}
-            If True, scrolling up will move the list of files down.
-        font_size: int
-            The font size in pixels.
-        line_spacing: float
-            Distance between listbox's items in pixels.
+            Width and height of the pixels of this UI component.
+        title : str
+            Renders the title for Tab panel.
+        color : list of 3 floats
+            Background color of tab panel.
+        content_panel : Panel2D
+            Panel consisting of the content UI elements.
         """
-        self.font_size = font_size
-        self.multiselection = multiselection
-        self.reverse_scrolling = reverse_scrolling
-        self.line_spacing = line_spacing
-        self.extensions = extensions or ["*"]
-        self.current_directory = directory_path
-        self.menu_size = size
-        self.directory_contents = []
+        self.content_panel = content_panel
+        self.panel_size = size
+        self._text_size = (int(1.0 * size[0]), size[1])
 
-        super(FileMenu2D, self).__init__()
-        self.position = position
-        self.set_slot_colors()
+        super(TabPanel2D, self).__init__()
+        self.title = title
+        self.panel.position = position
+        self.color = color
 
     def _setup(self):
-        """Setup this UI component.
-
-        Create the ListBox (Panel2D) filled with empty slots (ListBoxItem2D).
-
+        """ Setup this UI component.
+        Create parent panel.
+        Create Text to hold tab information.
+        Create Button to close tab.
         """
-        self.directory_contents = self.get_all_file_names()
-        content_names = [x[0] for x in self.directory_contents]
-        self.listbox = ListBox2D(
-            values=content_names, multiselection=self.multiselection,
-            font_size=self.font_size, line_spacing=self.line_spacing,
-            reverse_scrolling=self.reverse_scrolling, size=self.menu_size)
-
-        self.add_callback(self.listbox.scroll_bar.actor, "MouseMoveEvent",
-                          self.scroll_callback)
-
-        # Handle mouse wheel events on the panel.
-        up_event = "MouseWheelForwardEvent"
-        down_event = "MouseWheelBackwardEvent"
-        if self.reverse_scrolling:
-            up_event, down_event = down_event, up_event  # Swap events
-
-        self.add_callback(self.listbox.panel.background.actor, up_event,
-                          self.scroll_callback)
-        self.add_callback(self.listbox.panel.background.actor, down_event,
-                          self.scroll_callback)
-
-        # Handle mouse wheel events on the slots.
-        for slot in self.listbox.slots:
-            self.add_callback(slot.background.actor, up_event,
-                              self.scroll_callback)
-            self.add_callback(slot.background.actor, down_event,
-                              self.scroll_callback)
-            self.add_callback(slot.textblock.actor, up_event,
-                              self.scroll_callback)
-            self.add_callback(slot.textblock.actor, down_event,
-                              self.scroll_callback)
-            slot.add_callback(slot.textblock.actor, "LeftButtonPressEvent",
-                              self.directory_click_callback)
-            slot.add_callback(slot.background.actor, "LeftButtonPressEvent",
-                              self.directory_click_callback)
+        self.panel = Panel2D(size=self.panel_size)
+        self.text_block = TextBlock2D(size=self._text_size,
+                                      color=(0, 0, 0))
+        self.panel.add_element(self.text_block, (0, 0))
 
     def _get_actors(self):
-        """Get the actors composing this UI component."""
-        return self.listbox.actors
+        """ Get the actors composing this UI component.
+        """
+        return self.panel.actors + self.content_panel.actors
 
-    def resize(self, size):
-        pass
+    def _add_to_scene(self, _scene):
+        """ Add all subcomponents or VTK props that compose this UI component.
 
-    def _set_position(self, coords):
-        """Set the lower-left corner position of this UI component.
+        Parameters
+        ----------
+        scene : scene
+        """
+        self.panel.add_to_scene(_scene)
+        self.content_panel.add_to_scene(_scene)
+
+    def _set_position(self, _coords):
+        """ Position the lower-left corner of this UI component.
 
         Parameters
         ----------
         coords: (float, float)
             Absolute pixel coordinates (x, y).
-
         """
-        self.listbox.position = coords
+        self.panel.position = _coords
+
+    def _get_size(self):
+        self.panel.size
+
+    def resize(self, size):
+        """ Resizes Tab panel.
+
+        Parameters
+        ----------
+        size : (int, int)
+            New width and height in pixels.
+        """
+        self._text_size = (int(0.7 * size[0]), size[1])
+        self._button_size = (int(0.3 * size[0]), size[1])
+        self.panel.resize(size)
+        self.text_block.resize(self._text_size)
+
+    @property
+    def color(self):
+        """ Returns the background color of tab panel.
+        """
+        return self.panel.color
+
+    @color.setter
+    def color(self, color):
+        """ Sets background color of tab panel.
+
+        Parameters
+        ----------
+        color : list of 3 floats.
+        """
+        self.panel.color = color
+
+    @property
+    def title(self):
+        """ Returns the title of tab panel.
+        """
+        return self.text_block.message
+
+    @title.setter
+    def title(self, text):
+        """ Sets the title of tab panel.
+
+        Parameters
+        ----------
+        text : str
+            New title for tab panel.
+        """
+        self.text_block.message = text
+
+    def add_element(self, element, coords, anchor="position"):
+        """ Adds a UI component to the content panel.
+
+        The coordinates represent an offset from the lower left corner of the
+        panel.
+
+        Parameters
+        ----------
+        element : UI
+            The UI item to be added.
+        coords : (float, float) or (int, int)
+            If float, normalized coordinates are assumed and they must be
+            between [0,1].
+            If int, pixels coordinates are assumed and it must fit within the
+            panel's size.
+        """
+        element.set_visibility(False)
+        self.content_panel.add_element(element, coords, anchor)
+
+    def remove_element(self, element):
+        """ Removes a UI component from the content panel.
+
+        Parameters
+        ----------
+        element : UI
+            The UI item to be removed.
+        """
+        self.content_panel.remove_element(element)
+
+    def update_element(self, element, coords, anchor="position"):
+        """ Updates the position of a UI component in the content panel.
+
+        Parameters
+        ----------
+        element : UI
+            The UI item to be updated.
+        coords : (float, float) or (int, int)
+            New coordinates.
+            If float, normalized coordinates are assumed and they must be
+            between [0,1].
+            If int, pixels coordinates are assumed and it must fit within the
+            panel's size.
+        """
+        self.content_panel.update_element(element, coords, anchor="position")
+
+
+class GridUI(UI):
+    """ Add actors in a grid and interact with them individually.
+    """
+
+    def __init__(self,
+                 actors, captions=None, caption_offset=(0, -100, 0),
+                 cell_padding=0,
+                 cell_shape="rect", aspect_ratio=16/9., dim=None,
+                 rotation_speed=1, rotation_axis=(0, 1, 0)):
+
+        # TODO: add rotation axis None by default
+
+        self.container = grid(actors, captions=captions,
+                              caption_offset=caption_offset,
+                              cell_padding=cell_padding,
+                              cell_shape=cell_shape,
+                              aspect_ratio=aspect_ratio, dim=dim)
+        self._actors = []
+        self._actors_dict = {}
+        self.rotation_speed = rotation_speed
+        self.rotation_axis = rotation_axis
+
+        for item in self.container._items:
+            self._actors.append(item._items[0])
+            self._actors_dict[item._items[0]] = {'x': -np.inf, 'y': -np.inf}
+
+        super(GridUI, self).__init__(position=(0, 0, 0))
+
+    def _get_size(self):
+        return
+
+    @staticmethod
+    def left_click_callback(istyle, _obj, _what):
+        istyle.trackball_actor.OnLeftButtonDown()
+        istyle.force_render()
+        istyle.event.abort()
+
+    @staticmethod
+    def left_release_callback(istyle, _obj, _what):
+
+        istyle.trackball_actor.OnLeftButtonUp()
+        istyle.force_render()
+        istyle.event.abort()
+
+    @staticmethod
+    def mouse_move_callback(istyle, _obj, _what):
+        istyle.trackball_actor.OnMouseMove()
+        istyle.force_render()
+        istyle.event.abort()
+
+    @staticmethod
+    def left_click_callback2(istyle, obj, self):
+
+        rx, ry, rz = self.rotation_axis
+        clockwise_rotation = np.array([self.rotation_speed,
+                                       rx, ry, rz])
+        rotate(obj, clockwise_rotation)
+
+        istyle.force_render()
+        istyle.event.abort()
+
+    @staticmethod
+    def left_release_callback2(istyle, _obj, _what):
+
+        istyle.force_render()
+        istyle.event.abort()
+
+    @staticmethod
+    def mouse_move_callback2(istyle, obj, self):
+
+        if self._actors_dict[obj]['y'] == - np.inf:
+
+            iren = istyle.GetInteractor()
+            event_pos = iren.GetEventPosition()
+            self._actors_dict[obj]['y'] = event_pos[1]
+
+        else:
+
+            iren = istyle.GetInteractor()
+            event_pos = iren.GetEventPosition()
+            rx, ry, rz = self.rotation_axis
+
+            if event_pos[1] >= self._actors_dict[obj]['y']:
+                clockwise_rotation = np.array([-self.rotation_speed,
+                                               rx, ry, rz])
+                rotate(obj, clockwise_rotation)
+            else:
+                anti_clockwise_rotation = np.array(
+                    [self.rotation_speed, rx, ry, rz])
+                rotate(obj, anti_clockwise_rotation)
+
+            self._actors_dict[obj]['y'] = event_pos[1]
+
+            istyle.force_render()
+            istyle.event.abort()
+
+    ANTICLOCKWISE_ROTATION_Y = np.array([-10, 0, 1, 0])
+    CLOCKWISE_ROTATION_Y = np.array([10, 0, 1, 0])
+    ANTICLOCKWISE_ROTATION_X = np.array([-10, 1, 0, 0])
+    CLOCKWISE_ROTATION_X = np.array([10, 1, 0, 0])
+
+    def key_press_callback(self, istyle, obj, _what):
+        has_changed = False
+        if istyle.event.key == "Left":
+            has_changed = True
+            for a in self._actors:
+                rotate(a, self.ANTICLOCKWISE_ROTATION_Y)
+        elif istyle.event.key == "Right":
+            has_changed = True
+            for a in self._actors:
+                rotate(a, self.CLOCKWISE_ROTATION_Y)
+        elif istyle.event.key == "Up":
+            has_changed = True
+            for a in self._actors:
+                rotate(a, self.ANTICLOCKWISE_ROTATION_X)
+        elif istyle.event.key == "Down":
+            has_changed = True
+            for a in self._actors:
+                rotate(a, self.CLOCKWISE_ROTATION_X)
+
+        if has_changed:
+            istyle.force_render()
+
+    def _setup(self):
+        """Set up this UI component and the events of its actor
+        """
+        # Add default events listener to the VTK actor.
+        for actor in self._actors:
+            # self.handle_events(actor)
+
+            if self.rotation_axis is None:
+                self.add_callback(actor, "LeftButtonPressEvent",
+                                  self.left_click_callback)
+                self.add_callback(actor, "LeftButtonReleaseEvent",
+                                  self.left_release_callback)
+                self.add_callback(actor, "MouseMoveEvent",
+                                  self.mouse_move_callback)
+            else:
+                self.add_callback(actor, "LeftButtonPressEvent",
+                                  self.left_click_callback2)
+                # TODO: possibly add this too
+                self.add_callback(actor, "LeftButtonReleaseEvent",
+                                  self.left_release_callback2)
+                self.add_callback(actor, "MouseMoveEvent",
+                                  self.mouse_move_callback2)
+
+            # TODO: this is currently not running
+            self.add_callback(actor, "KeyPressEvent",
+                              self.key_press_callback)
+        # self.on_key_press = self.key_press_callback2
+
+    def _get_actors(self):
+        """Get the actors composing this UI component."""
+        return self._actors
 
     def _add_to_scene(self, scene):
         """Add all subcomponents or VTK props that compose this UI component.
@@ -2931,124 +5229,29 @@ class FileMenu2D(UI):
         scene : scene
 
         """
-        self.listbox.add_to_scene(scene)
+        self.container.add_to_scene(scene)
 
-    def _get_size(self):
-        return self.listbox.size
-
-    def get_all_file_names(self):
-        """Get file and directory names.
-
-        Returns
-        -------
-        all_file_names: list((string, {"directory", "file"}))
-            List of all file and directory names as string.
-
-        """
-        all_file_names = []
-
-        directory_names = self.get_directory_names()
-        for directory_name in directory_names:
-            all_file_names.append((directory_name, "directory"))
-
-        file_names = self.get_file_names()
-        for file_name in file_names:
-            all_file_names.append((file_name, "file"))
-
-        return all_file_names
-
-    def get_directory_names(self):
-        """Find names of all directories in the current_directory
-
-        Returns
-        -------
-        directory_names: list(string)
-            List of all directory names as string.
-
-        """
-        # A list of directory names in the current directory
-        directory_names = []
-        for (_, dirnames, _) in os.walk(self.current_directory):
-            directory_names += dirnames
-            break
-        directory_names.sort(key=lambda s: s.lower())
-        directory_names.insert(0, "../")
-        return directory_names
-
-    def get_file_names(self):
-        """Find names of all files in the current_directory
-
-        Returns
-        -------
-        file_names: list(string)
-            List of all file names as string.
-
-        """
-        # A list of file names with extension in the current directory
-        for (_, _, files) in os.walk(self.current_directory):
-            break
-
-        file_names = []
-        if "*" in self.extensions or "" in self.extensions:
-            file_names = files
-        else:
-            for ext in self.extensions:
-                for file in files:
-                    if file.endswith("." + ext):
-                        file_names.append(file)
-        file_names.sort(key=lambda s: s.lower())
-        return file_names
-
-    def set_slot_colors(self):
-        """Set the text color of the slots based on the type of element
-        they show. Blue for directories and green for files.
-        """
-        for idx, slot in enumerate(self.listbox.slots):
-            list_idx = min(self.listbox.view_offset + idx,
-                           len(self.directory_contents)-1)
-            if self.directory_contents[list_idx][1] == "directory":
-                slot.textblock.color = (0, 0.6, 0)
-            elif self.directory_contents[list_idx][1] == "file":
-                slot.textblock.color = (0, 0, 0.7)
-
-    def scroll_callback(self, i_ren, _obj, _filemenu_item):
-        """Handle scroll and change the slot text colors.
+    def resize(self, size):
+        """Resize the button.
 
         Parameters
         ----------
-        i_ren: :class:`CustomInteractorStyle`
-        obj: :class:`vtkActor`
-            The picked actor
-        _filemenu_item: :class:`FileMenu2D`
+        size : (float, float)
+            Button size (width, height) in pixels.
 
         """
-        self.set_slot_colors()
-        i_ren.force_render()
-        i_ren.event.abort()
+        # Update actor.
+        pass
 
-    def directory_click_callback(self, i_ren, _obj, listboxitem):
-        """Handle the move into a directory if it has been clicked.
+    def _set_position(self, coords):
+        """ Position the lower-left corner of this UI component.
 
         Parameters
         ----------
-        i_ren: :class:`CustomInteractorStyle`
-        obj: :class:`vtkActor`
-            The picked actor
-        listboxitem: :class:`ListBoxItem2D`
-
+        coords: (float, float)
+            Absolute pixel coordinates (x, y).
         """
-        if (listboxitem.element, "directory") in self.directory_contents:
-            new_directory_path = os.path.join(self.current_directory,
-                                              listboxitem.element)
-            if os.access(new_directory_path, os.R_OK):
-                self.current_directory = new_directory_path
-                self.directory_contents = self.get_all_file_names()
-                content_names = [x[0] for x in self.directory_contents]
-                self.listbox.clear_selection()
-                self.listbox.values = content_names
-                self.listbox.view_offset = 0
-                self.listbox.update()
-                self.listbox.update_scrollbar()
-                self.set_slot_colors()
-        i_ren.force_render()
-        i_ren.event.abort()
+        # coords = (0, 0, 0)
+        pass
+        # self.actor.SetPosition(*coords)
+        # self.container.SetPosition(*coords)
