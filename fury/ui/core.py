@@ -13,7 +13,7 @@ from fury.io import load_image
 from fury.lib import (PolyData, PolyDataMapper2D, Polygon, Points, CellArray,
                       Actor2D, TextActor, Texture, TexturedActor2D, Property2D,
                       FloatArray, DiskSource)
-from fury.utils import set_input
+from fury.utils import set_input, update_actor
 
 
 class UI(object, metaclass=abc.ABCMeta):
@@ -536,6 +536,7 @@ class BorderTexture(UI):
         t_point.SetPoint(1, size[0], 0, 0.0)
         t_point.SetPoint(2, size[0], size[1], 0.0)
         t_point.SetPoint(3, 0, size[1], 0.0)
+        update_actor(self.actor)
 
     def _add_to_scene(self, scene):
         """Add all subcomponents or VTK props that compose this UI component.
