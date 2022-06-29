@@ -468,14 +468,14 @@ def test_record():
 
 def test_opengl_state_simple():
     for gl_state in [
-        window.gl_reset_blend, window.gl_enable_depth,
-        window.gl_disable_depth, window.gl_enable_blend,
-        window.gl_disable_blend,
-        window.gl_set_additive_blending,
-        window.gl_set_normal_blending,
-        window.gl_set_multiplicative_blending,
-        window.gl_set_subtractive_blending,
-        window.gl_set_additive_blending_white_background]:
+            window.gl_reset_blend, window.gl_enable_depth,
+            window.gl_disable_depth, window.gl_enable_blend,
+            window.gl_disable_blend,
+            window.gl_set_additive_blending,
+            window.gl_set_normal_blending,
+            window.gl_set_multiplicative_blending,
+            window.gl_set_subtractive_blending,
+            window.gl_set_additive_blending_white_background]:
 
         scene = window.Scene()
         centers = np.array([
