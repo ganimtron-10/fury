@@ -3088,6 +3088,8 @@ class DrawShape(UI):
 
         Create a Shape.
         """
+        self.control_points = [Disk2D(5, center=self.position) for i in range(4)]
+
         if self.shape_type == "line":
             self.shape = Rectangle2D(size=(3, 3))
         elif self.shape_type == "quad":
@@ -3099,6 +3101,8 @@ class DrawShape(UI):
 
         self.shape.on_left_mouse_button_pressed = self.left_button_pressed
         self.shape.on_left_mouse_button_dragged = self.left_button_dragged
+
+        # self.set_control_points_visibility(False)
 
     def _get_actors(self):
         """Get the actors composing this UI component."""
@@ -3114,6 +3118,7 @@ class DrawShape(UI):
         """
         self._scene = scene
         self.shape.add_to_scene(scene)
+        self._scene.add(*self.control_points)
 
     def _get_size(self):
         return self.shape.size
@@ -3130,6 +3135,20 @@ class DrawShape(UI):
             self.shape.center = coords
         else:
             self.shape.position = coords
+
+    def update_control_points(self):
+
+        self.cal_bounding_box(self.position)
+
+        bb_vertices = [self._bounding_box_min, [self._bounding_box_max[0], self._bounding_box_min[1]],
+                       self._bounding_box_max, [self._bounding_box_min[0], self._bounding_box_max[1]]]
+
+        for i, position in enumerate(bb_vertices):
+            self.control_points[i].center = position
+
+    def set_control_points_visibility(self, visibility):
+        for point in self.control_points:
+            point.set_visibility(visibility)
 
     def rotate(self, angle):
         """Rotate the vertices of the UI component using specific angle.
@@ -3215,18 +3234,25 @@ class DrawShape(UI):
             self.shape.outer_radius = hyp
 
         self.cal_bounding_box(self.position)
+        self.update_control_points()
+
+    def remove(self):
+        self._scene.rm(self.shape.actor)
+        for control_point in self.control_points:
+            self._scene.rm(control_point.actor)
 
     def left_button_pressed(self, i_ren, _obj, shape):
         mode = self.drawpanel.current_mode
         if mode == "selection":
+            # self.set_control_points_visibility(True)
             click_pos = np.array(i_ren.event.position)
             self._drag_offset = click_pos - self.position
             i_ren.event.abort()
         elif mode == "delete":
-            self._scene.rm(self.shape.actor)
-            i_ren.force_render()
+            self.remove()
         else:
             self.drawpanel.left_button_pressed(i_ren, _obj, self.drawpanel)
+        i_ren.force_render()
 
     def left_button_dragged(self, i_ren, _obj, shape):
         if self.drawpanel.current_mode == "selection":
@@ -3236,6 +3262,7 @@ class DrawShape(UI):
                     self._drag_offset - self.drawpanel.position
                 new_position = self.clamp_position(relative_canvas_position)
                 self.drawpanel.canvas.update_element(self, new_position)
+                self.update_control_points()
             i_ren.force_render()
         else:
             self.drawpanel.left_button_dragged(i_ren, _obj, self.drawpanel)
