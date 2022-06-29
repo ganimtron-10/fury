@@ -3060,6 +3060,25 @@ class FileMenu2D(UI):
         i_ren.event.abort()
 
 
+class DrawControlPoint(Disk2D):
+    def __init__(self, parent_shape):
+        super(DrawControlPoint, self).__init__(outer_radius=5)
+        self.parent_shape = parent_shape
+
+        # self.on_left_mouse_button_pressed = self.left_button_pressed
+        self.on_left_mouse_button_dragged = self.left_button_dragged
+
+    def left_button_pressed(self, i_ren, _obj, control_ptn):
+        print("clicked")
+
+    def left_button_dragged(self, i_ren, _obj, control_ptn):
+        mouse_position = i_ren.event.position
+        offset = mouse_position - self.position
+        print(self.parent_shape.size, offset, self.parent_shape.size+offset)
+        self.parent_shape.resize(self.parent_shape.size+offset)
+        i_ren.force_render()
+
+
 class DrawShape(UI):
     """Create and Manage 2D Shapes.
     """
@@ -3088,8 +3107,6 @@ class DrawShape(UI):
 
         Create a Shape.
         """
-        self.control_points = [Disk2D(5, center=self.position) for i in range(4)]
-
         if self.shape_type == "line":
             self.shape = Rectangle2D(size=(3, 3))
         elif self.shape_type == "quad":
@@ -3098,6 +3115,8 @@ class DrawShape(UI):
             self.shape = Disk2D(outer_radius=2)
         else:
             raise IOError("Unknown shape type: {}.".format(self.shape_type))
+
+        self.control_points = [DrawControlPoint(self) for i in range(4)]
 
         self.shape.on_left_mouse_button_pressed = self.left_button_pressed
         self.shape.on_left_mouse_button_dragged = self.left_button_dragged
@@ -3233,7 +3252,6 @@ class DrawShape(UI):
                 hyp = self.max_size
             self.shape.outer_radius = hyp
 
-        self.cal_bounding_box(self.position)
         self.update_control_points()
 
     def remove(self):
