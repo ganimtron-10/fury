@@ -20,6 +20,7 @@ from fury.ui.helpers import TWO_PI, clip_overflow
 from fury.ui.core import Button2D
 from fury.utils import (set_polydata_vertices, vertices_from_actor,
                         update_actor)
+from fury.colormap import hex_to_rgb, rgb_to_hex
 
 
 class TextBox2D(UI):
@@ -3133,11 +3134,36 @@ class DrawShape(UI):
             self.shape.position = coords
 
     def generate_property(self):
+
+        position_box = TextBox2D(10, 1, text=str(self.shape.position))
+        position_box.off_focus = lambda textbox: self.update_position(
+            np.array(textbox.message.split(','), dtype=int))
+
+        rotation_box = TextBox2D(10, 1, text="0")
+
+        def apply_rotation(textbox):
+            # self.shape.position = (self.position/2 - self.position)
+            self.rotate(np.radians(float(textbox.message)))
+            # self.shape.position = (self.position + self.position/2)
+        rotation_box.off_focus = apply_rotation
+
+        def apply_color(textbox):
+            self.shape.color = hex_to_rgb(textbox.message)
+        color_box = TextBox2D(10, 1, text=rgb_to_hex(self.shape.color))
+        color_box.off_focus = apply_color
+
         return {
-            "shape": [TextBlock2D(text="Shape"), TextBox2D(10, 1, text=self.shape_type)],
-            "color": [TextBlock2D(text="Color"), TextBox2D(10, 1, text=str(self.shape.color))],
-            "position": [TextBlock2D(text="Position"), TextBox2D(10, 1, text=str(self.shape.position))]
+            "shape": [TextBlock2D(text="Shape"), TextBlock2D(text=self.shape_type)],
+            "color": [TextBlock2D(text="Color"), color_box],
+            "position": [TextBlock2D(text="Position"), position_box],
+            "rotation": [TextBlock2D(text="Rotation"), rotation_box]
         }
+
+    def update_position(self, click_position):
+        relative_canvas_position = click_position - \
+            self._drag_offset - self.drawpanel.position
+        new_position = self.clamp_position(relative_canvas_position)
+        self.drawpanel.canvas.update_element(self, new_position)
 
     def rotate(self, angle):
         """Rotate the vertices of the UI component using specific angle.
@@ -3147,6 +3173,8 @@ class DrawShape(UI):
         angle: float
             Value by which the vertices are rotated in radian.
         """
+        if self.shape_type == "disk":
+            pass
         points_arr = vertices_from_actor(self.shape.actor)
         rotation_matrix = np.array(
             [[np.cos(angle), np.sin(angle), 0],
