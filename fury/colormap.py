@@ -623,3 +623,16 @@ def hex_to_rgb(color):
     b = int("0x" + color[4: 6], 0) / 255
 
     return(np.array([r, g, b]))
+
+
+def rgb_to_hex(color):
+    """Converts rgb to Hexadecimal color code.
+
+    color : array containting rgb color
+
+    Returns
+    -------
+    c : string containting hexcode of color
+    """
+    color = 255 * color
+    return "#"+"".join([hex(val)[2:] for val in color.astype(int)])
