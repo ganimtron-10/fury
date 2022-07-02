@@ -3436,6 +3436,17 @@ class DrawPanel(UI):
         if key.lower() in mode_from_key.keys():
             self.current_mode = mode_from_key[key.lower()]
 
+    def handle_keys(self, key, key_char):
+        mode_from_key = {
+            "s": "selection",
+            "l": "line",
+            "q": "quad",
+            "c": "circle",
+            "d": "delete",
+        }
+        if key.lower() in mode_from_key.keys():
+            self.current_mode = mode_from_key[key.lower()]
+
     def clamp_mouse_position(self, mouse_position):
         """Restricts the mouse position to the canvas boundary.
 
