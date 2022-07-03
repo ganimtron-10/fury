@@ -3217,6 +3217,8 @@ class DrawShape(UI):
         self.cal_bounding_box(self.position)
 
     def remove(self):
+        """Remove self from the scene.
+        """
         self._scene.rm(self.shape.actor)
 
     def left_button_pressed(self, i_ren, _obj, shape):
@@ -3449,6 +3451,13 @@ class DrawPanel(UI):
                        self.canvas.position + self.canvas.size)
 
     def handle_mouse_click(self, position):
+        """Handle left mouse click event.
+
+        Parameters
+        ----------
+        position: (float,float)
+            Current mouse position.
+        """
         if self.is_draggable and self.current_mode == "selection":
             self._drag_offset = position - self.position
         if self.current_mode in ["line", "quad", "circle"]:
@@ -3459,6 +3468,13 @@ class DrawPanel(UI):
         i_ren.force_render()
 
     def handle_mouse_drag(self, position):
+        """Handle mouse drag events.
+
+        Parameters
+        ----------
+        position: (float,float)
+            Current mouse position.
+        """
         if self.is_draggable and self.current_mode == "selection":
             if self._drag_offset is not None:
                 new_position = position - self._drag_offset
