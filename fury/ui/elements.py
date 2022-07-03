@@ -3216,6 +3216,9 @@ class DrawShape(UI):
 
         self.cal_bounding_box(self.position)
 
+    def remove(self):
+        self._scene.rm(self.shape.actor)
+
     def left_button_pressed(self, i_ren, _obj, shape):
         mode = self.drawpanel.current_mode
         if mode == "selection":
@@ -3223,7 +3226,7 @@ class DrawShape(UI):
             self._drag_offset = click_pos - self.position
             i_ren.event.abort()
         elif mode == "delete":
-            self._scene.rm(self.shape.actor)
+            self.remove()
             i_ren.force_render()
         else:
             self.drawpanel.left_button_pressed(i_ren, _obj, self.drawpanel)
@@ -3475,5 +3478,9 @@ class DrawPanel(UI):
             self.mouse_move_callback(i_ren, _obj, element)
 
     def right_button_pressed(self,  i_ren, _obj, element):
-        i_ren.remove_active_prop(self.canvas.background.actor)
-        self.canvas.background.left_button_state = "released"
+        if self.current_shape is not None:
+            i_ren.remove_active_prop(self.canvas.background.actor)
+            self.canvas.background.left_button_state = "released"
+            self.current_shape.remove()
+            self.current_shape = None
+        i_ren.force_render()
