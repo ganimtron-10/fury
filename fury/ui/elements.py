@@ -3261,6 +3261,7 @@ class DrawPanel(UI):
         super(DrawPanel, self).__init__(position)
         self.is_draggable = is_draggable
         self.current_mode = None
+        self.current_shape = None
 
         if is_draggable:
             self.current_mode = "selection"
@@ -3277,6 +3278,11 @@ class DrawPanel(UI):
             self.left_button_pressed
         self.canvas.background.on_left_mouse_button_dragged = \
             self.left_button_dragged
+        self.canvas.background.on_left_mouse_button_released = \
+            self.left_button_released
+
+        self.canvas.background.on_right_mouse_button_pressed = \
+            self.right_button_pressed
 
         # Todo
         # Convert mode_data into a private variable and make it read-only
@@ -3402,12 +3408,12 @@ class DrawPanel(UI):
                 shape.max_size = self.cal_min_boundary_distance(current_position)
             self.shape_list.append(shape)
             self.current_scene.add(shape)
+            self.current_shape = shape
             self.canvas.add_element(shape, current_position - self.canvas.position)
 
         else:
-            current_shape = self.shape_list[-1]
-            size = current_position - current_shape.position
-            current_shape.resize(size)
+            size = current_position - self.current_shape.position
+            self.current_shape.resize(size)
 
     def update_button_icons(self, current_mode):
         """Updates the button icon.
@@ -3461,3 +3467,13 @@ class DrawPanel(UI):
         mouse_position = self.clamp_mouse_position(i_ren.event.position)
         self.handle_mouse_drag(mouse_position)
         i_ren.force_render()
+
+    def left_button_released(self,  i_ren, _obj, element):
+        if self.current_mode == "line":
+            i_ren.add_active_prop(self.canvas.background.actor)
+            self.canvas.background.left_button_state = "pressing"
+            self.mouse_move_callback(i_ren, _obj, element)
+
+    def right_button_pressed(self,  i_ren, _obj, element):
+        i_ren.remove_active_prop(self.canvas.background.actor)
+        self.canvas.background.left_button_state = "released"
