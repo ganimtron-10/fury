@@ -3097,23 +3097,13 @@ class DrawShape(UI):
         else:
             raise IOError("Unknown shape type: {}.".format(self.shape_type))
 
-        self.bb_border = Panel2D(size=(3, 3), has_border=True, border_width=5, opacity=0)
-        self.bb_border.background.set_visibility(False)
-
-        def left_button_dragged_border(i_ren, _obj, border):
-            offset = i_ren.event.position - border.position
-            self.resize(self.size+offset)
-            i_ren.force_render()
-
-        for key in self.bb_border.borders.keys():
-            # self.bb_border.borders[key].on_left_mouse_button_pressed = \
-            #     self.bb_border.left_button_pressed_border
-
-            self.bb_border.borders[key].on_left_mouse_button_dragged = \
-                left_button_dragged_border
+        self.bb_border = Panel2D(size=(1, 1), has_border=True, border_width=3, opacity=0)
+        self.bb_border.background.on_left_mouse_button_dragged = lambda i_ren, _ob, _ele: None
+        self.set_bb_border_visibility(False)
 
         self.shape.on_left_mouse_button_pressed = self.left_button_pressed
         self.shape.on_left_mouse_button_dragged = self.left_button_dragged
+        self.shape.on_left_mouse_button_released = self.left_button_released
 
     def _get_actors(self):
         """Get the actors composing this UI component."""
@@ -3151,6 +3141,9 @@ class DrawShape(UI):
         self.cal_bounding_box(self.position)
         self.bb_border.position = self._bounding_box_min
         self.bb_border.resize(self._bounding_box_size)
+
+    def set_bb_border_visibility(self, value):
+        self.bb_border.set_visibility(value)
 
     def rotate(self, angle):
         """Rotate the vertices of the UI component using specific angle.
@@ -3247,6 +3240,7 @@ class DrawShape(UI):
         if mode == "selection":
             click_pos = np.array(i_ren.event.position)
             self._drag_offset = click_pos - self.position
+            self.set_bb_border_visibility(True)
             i_ren.event.abort()
         elif mode == "delete":
             self.remove()
@@ -3266,6 +3260,10 @@ class DrawShape(UI):
             i_ren.force_render()
         else:
             self.drawpanel.left_button_dragged(i_ren, _obj, self.drawpanel)
+
+    def left_button_released(self, i_ren, _obj, shape):
+        self.set_bb_border_visibility(False)
+        i_ren.force_render()
 
 
 class DrawPanel(UI):
