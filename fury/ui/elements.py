@@ -3140,7 +3140,6 @@ class DrawShape(UI):
             self.shape.position = coords
 
     def update_bb_border(self):
-        self.cal_bounding_box(self.position)
         self.bb_border.position = self._bounding_box_min
         self.bb_border.resize(self._bounding_box_size)
 
@@ -3184,7 +3183,7 @@ class DrawShape(UI):
         set_polydata_vertices(self.shape._polygonPolyData, new_points_arr)
         update_actor(self.shape.actor)
 
-        self.cal_bounding_box(self.position)
+        self.cal_bounding_box()
 
     def cal_bounding_box(self, update_value=False, position=None, debug=True):
         """Calculates the min, max position and the size of the bounding box.
@@ -3213,16 +3212,16 @@ class DrawShape(UI):
             if y > max_y:
                 max_y = y
 
-        if debug:
-            self.disk[0].center = np.asarray([min_x, min_y])
-            self.disk[1].center = np.asarray([max_x, max_y])
-
         if update_value:
             self._bounding_box_min = np.asarray([min_x, min_y])
             self._bounding_box_max = np.asarray([max_x, max_y])
             self._bounding_box_size = np.asarray([max_x-min_x, max_y-min_y])
 
-        self._bounding_box_offset = position - self._bounding_box_min
+            self._bounding_box_offset = position - self._bounding_box_min
+
+        if debug:
+            self.disk[0].center = np.asarray([min_x, min_y])
+            self.disk[1].center = np.asarray([max_x, max_y])
 
         # self.disk[0].center = np.asarray([min_x, min_y])
         # self.disk[1].center = np.asarray([max_x, max_y])
@@ -3263,8 +3262,8 @@ class DrawShape(UI):
                 hyp = self.max_size
             self.shape.outer_radius = hyp
 
-        self.update_bb_border()
         self.cal_bounding_box(update_value=True, debug=True)
+        self.update_bb_border()
 
     def remove(self):
         self._scene.rm(self.shape.actor)
@@ -3295,6 +3294,7 @@ class DrawShape(UI):
                 new_center = self.clamp_position(center=relative_center_position)
                 self.drawpanel.canvas.update_element(self, new_center, "center")
                 self.cal_bounding_box(update_value=True)
+                self.update_bb_border()
             i_ren.force_render()
         else:
             self.drawpanel.left_button_dragged(i_ren, _obj, self.drawpanel)
