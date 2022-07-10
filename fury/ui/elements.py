@@ -3531,7 +3531,8 @@ class DrawPanel(UI):
         if self.current_mode == "selection":
             if self.is_draggable:
                 self._drag_offset = position - self.position
-            self.current_shape.is_selected = False
+            if self.current_shape:
+                self.current_shape.is_selected = False
         if self.current_mode in ["line", "quad", "circle"]:
             self.draw_shape(self.current_mode, position)
 

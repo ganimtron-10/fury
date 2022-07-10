@@ -19,7 +19,7 @@ fetch_viz_new_icons()
 #########################################################################
 # We then create a DrawPanel Object.
 
-drawing_canvas = ui.DrawPanel(size=(550, 550), position=(25, 25))
+drawing_canvas = ui.DrawPanel(size=(550, 550), position=(25, 25), is_draggable=True)
 
 ###############################################################################
 # Show Manager
