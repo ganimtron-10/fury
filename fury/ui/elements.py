@@ -3120,6 +3120,8 @@ class DrawShape(UI):
         self._scene = scene
         self.shape.add_to_scene(scene)
         self.bb_border.add_to_scene(scene)
+        self.disk = [Disk2D(5) for i in range(4)]
+        self._scene.add(*self.disk)
 
     def _get_size(self):
         return self.shape.size
@@ -3145,6 +3147,27 @@ class DrawShape(UI):
     def set_bb_border_visibility(self, value):
         self.bb_border.set_visibility(value)
 
+    @property
+    def center(self):
+        self.cal_bounding_box()
+        return self._bounding_box_min + self._bounding_box_size/2
+
+    @center.setter
+    def center(self, coords):
+        """Position the center of this UI component.
+
+        Parameters
+        ----------
+        coords: (float, float)
+            Absolute pixel coordinates (x, y).
+
+        """
+        new_center = np.array(coords)
+        self.disk[2].center = new_center
+        self.disk[2].color = (1.0, 0., 0.)
+        new_lower_left_corner = new_center - self._bounding_box_size / 2.
+        self.position = new_lower_left_corner + self._bounding_box_offset
+
     def rotate(self, angle):
         """Rotate the vertices of the UI component using specific angle.
 
@@ -3163,14 +3186,18 @@ class DrawShape(UI):
 
         self.cal_bounding_box(self.position)
 
-    def cal_bounding_box(self, position):
-        """Calculates the min and max position of the bounding box.
+    def cal_bounding_box(self, update_value=False, position=None, debug=True):
+        """Calculates the min, max position and the size of the bounding box.
 
         Parameters
         ----------
         position : (float, float)
             (x, y) in pixels.
         """
+        if position is None:
+            position = self.position
+            self.disk[3].center = position
+            self.disk[3].color = (0., 1., 0.)
         vertices = position + vertices_from_actor(self.shape.actor)[:, :-1]
 
         min_x, min_y = vertices[0]
@@ -3186,30 +3213,38 @@ class DrawShape(UI):
             if y > max_y:
                 max_y = y
 
-        self._bounding_box_min = [min_x, min_y]
-        self._bounding_box_max = [max_x, max_y]
-        self._bounding_box_size = [max_x-min_x, max_y-min_y]
+        if debug:
+            self.disk[0].center = np.asarray([min_x, min_y])
+            self.disk[1].center = np.asarray([max_x, max_y])
+
+        if update_value:
+            self._bounding_box_min = np.asarray([min_x, min_y])
+            self._bounding_box_max = np.asarray([max_x, max_y])
+            self._bounding_box_size = np.asarray([max_x-min_x, max_y-min_y])
 
         self._bounding_box_offset = position - self._bounding_box_min
 
-    def clamp_position(self, position):
-        """Clamps the given position according to the DrawPanel canvas.
+        # self.disk[0].center = np.asarray([min_x, min_y])
+        # self.disk[1].center = np.asarray([max_x, max_y])
+
+    def clamp_position(self, center=None):
+        """Clamps the given center according to the DrawPanel canvas.
 
         Parameters
         ----------
-        position : (float, float)
+        center : (float, float)
             (x, y) in pixels.
 
         Returns
         -------
-        new_position: ndarray(int)
-            New position for the shape.
+        new_center: ndarray(int)
+            New center for the shape.
         """
-        self.cal_bounding_box(position)
-        new_position = np.clip(self._bounding_box_min, [0, 0],
-                               self.drawpanel.size - self._bounding_box_size)
-        new_position = new_position + self._bounding_box_offset
-        return new_position.astype(int)
+        if center is None:
+            center = self.center
+        new_center = np.clip(center, self.shape.size/2,
+                             self.drawpanel.size - self.shape.size/2)
+        return new_center.astype(int)
 
     def resize(self, size):
         """Resize the UI.
@@ -3229,21 +3264,24 @@ class DrawShape(UI):
             self.shape.outer_radius = hyp
 
         self.update_bb_border()
+        self.cal_bounding_box(update_value=True, debug=True)
 
     def remove(self):
         self._scene.rm(self.shape.actor)
         for actor in self.bb_border.actors:
             self._scene.rm(actor)
+        self._scene.rm(*[d.actor for d in self.disk])
 
     def left_button_pressed(self, i_ren, _obj, shape):
         mode = self.drawpanel.current_mode
         if mode == "selection":
             click_pos = np.array(i_ren.event.position)
-            self._drag_offset = click_pos - self.position
+            self._drag_offset = click_pos - self.center
             self.set_bb_border_visibility(True)
             i_ren.event.abort()
         elif mode == "delete":
             self.remove()
+            i_ren.force_render()
         else:
             self.drawpanel.left_button_pressed(i_ren, _obj, self.drawpanel)
         i_ren.force_render()
@@ -3252,11 +3290,11 @@ class DrawShape(UI):
         if self.drawpanel.current_mode == "selection":
             if self._drag_offset is not None:
                 click_position = i_ren.event.position
-                relative_canvas_position = click_position - \
+                relative_center_position = click_position - \
                     self._drag_offset - self.drawpanel.position
-                new_position = self.clamp_position(relative_canvas_position)
-                self.drawpanel.canvas.update_element(self, new_position)
-                self.update_bb_border()
+                new_center = self.clamp_position(center=relative_center_position)
+                self.drawpanel.canvas.update_element(self, new_center, "center")
+                self.cal_bounding_box(update_value=True)
             i_ren.force_render()
         else:
             self.drawpanel.left_button_dragged(i_ren, _obj, self.drawpanel)
