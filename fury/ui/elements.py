@@ -3488,3 +3488,4 @@ class DrawPanel(UI):
 
     def key_press(self,  i_ren, _obj, element):
         self.handle_keys(i_ren.event.key, i_ren.event.key_char)
+        i_ren.force_render()
