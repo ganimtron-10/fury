@@ -3082,7 +3082,6 @@ class DrawShape(UI):
         self.max_size = None
         super(DrawShape, self).__init__(position)
         self.shape.color = np.random.random(3)
-        self.is_selected = True
 
     def _setup(self):
         """Setup this UI component.
@@ -3104,6 +3103,7 @@ class DrawShape(UI):
 
         self.rotation_slider = RingSlider2D(initial_value=0,
                                             text_template="{angle:5.1f}°")
+        self.rotation_slider.set_visibility(False)
 
         def rotate_shape(slider):
             angle = slider.value
@@ -3193,8 +3193,10 @@ class DrawShape(UI):
         self.selection_change()
 
     def selection_change(self):
-        if not self.is_selected:
-        self.rotation_slider.set_visibility(False)
+        if self.is_selected:
+            self.show_rotation_slider()
+        else:
+            self.rotation_slider.set_visibility(False)
 
     def rotate(self, angle):
         """Rotate the vertices of the UI component using specific angle.
@@ -3299,6 +3301,7 @@ class DrawShape(UI):
     def remove(self):
         """Removes the Shape and all related actors.
         """
+        self.drawpanel.shape_list.remove(self)
         self._scene.rm(self.shape.actor)
         self._scene.rm(*self.rotation_slider.actors)
 
@@ -3309,7 +3312,6 @@ class DrawShape(UI):
 
             click_pos = np.array(i_ren.event.position)
             self._drag_offset = click_pos - self.center
-            self.show_rotation_slider()
             i_ren.event.abort()
         elif mode == "delete":
             self.remove()
@@ -3496,7 +3498,7 @@ class DrawPanel(UI):
             if shape_type == "circle":
                 shape.max_size = self.cal_min_boundary_distance(current_position)
             self.shape_list.append(shape)
-            self.update_shape_selection(shape)
+            self.current_shape = shape
             self.current_scene.add(shape)
             self.canvas.add_element(shape, current_position - self.canvas.position)
 
@@ -3600,15 +3602,18 @@ class DrawPanel(UI):
             if dist <= limit and (min_distance is None or dist <= min_distance):
                 min_distance = dist
                 min_distance_shape = shape
-
-        min_distance_shape.is_selected = True
+        if min_distance_shape is not None:
+            self.update_shape_selection(min_distance_shape)
+            return True
+        else:
+            return False
 
     def handle_mouse_click(self, position):
         if self.current_mode == "selection":
-            self.check_nearest_shape(position)
+            if not self.check_nearest_shape(position):
+                self.current_shape.is_selected = False
             if self.is_draggable:
                 self._drag_offset = position - self.position
-            self.current_shape.is_selected = False
         if self.current_mode in ["line", "quad", "circle"]:
             self.draw_shape(self.current_mode, position)
 
