@@ -3132,6 +3132,7 @@ class DrawShape(UI):
         """
         self._scene = scene
         self.shape.add_to_scene(scene)
+        self.cal_bounding_box()
         self.rotation_slider.add_to_scene(scene)
 
     def _get_size(self):
@@ -3234,6 +3235,9 @@ class DrawShape(UI):
         if position is None:
             position = self.position
         vertices = position + vertices_from_actor(self.shape.actor)[:, :-1]
+
+        if self.shape_type in ['line', 'quad']:
+            self.shape_points = vertices
 
         min_x, min_y = vertices[0]
         max_x, max_y = vertices[0]
@@ -3539,8 +3543,81 @@ class DrawPanel(UI):
         return np.clip(mouse_position, self.canvas.position,
                        self.canvas.position + self.canvas.size)
 
+    @staticmethod
+    def lineseg_dists(p, a, b):
+        """Cartesian distance from point to line segment
+
+        Edited to support arguments as series, from:
+        https://stackoverflow.com/a/54442561/11208892
+
+        Args:
+            - p: np.array of single point, shape (2,) or 2D array, shape (x, 2)
+            - a: np.array of shape (x, 2)
+            - b: np.array of shape (x, 2)
+        """
+        # normalized tangent vectors
+        d_ba = b - a
+        d = np.divide(d_ba, (np.hypot(d_ba[:, 0], d_ba[:, 1])
+                             .reshape(-1, 1)))
+
+        # signed parallel distance components
+        # rowwise dot products of 2D vectors
+        s = np.multiply(a - p, d).sum(axis=1)
+        t = np.multiply(p - b, d).sum(axis=1)
+
+        # clamped parallel distance
+        h = np.maximum.reduce([s, t, np.zeros(len(s))])
+
+        # perpendicular distance component
+        # rowwise cross products of 2D vectors
+        d_pa = p - a
+        c = d_pa[:, 0] * d[:, 1] - d_pa[:, 1] * d[:, 0]
+
+        return np.hypot(h, c)
+
+    def check_nearest_shape(self, click_position, limit=5):
+        min_distance = None
+        min_distance_shape = None
+        for shape in self.shape_list:
+            # check the distance
+            if shape.shape_type == "circle":
+                dist = np.linalg.norm(click_position - shape.center) - shape.shape.outer_radius
+
+            elif shape.shape_type == "line":
+
+                dist = DrawPanel.lineseg_dists(
+                    click_position, np.array([shape.shape_points[0]]), np.array([shape.shape_points[2]]))
+
+            elif shape.shape_type == "quad":
+                quad_min_dist = None
+                for i in range(-1, 3):
+                    dist = DrawPanel.lineseg_dists(
+                        click_position, np.array([shape.shape_points[i]]), np.array([shape.shape_points[i+1]]))
+
+                    print(click_position, np.array([shape.shape_points[i]]), np.array(
+                        [shape.shape_points[i+1]]), dist)
+
+                    if quad_min_dist is None or dist < quad_min_dist:
+                        quad_min_dist = dist
+                print("#########################################################################")
+
+                dist = quad_min_dist
+
+            # print("distance", dist)
+            # print("color", shape.shape.color)
+            if dist <= limit and (min_distance is None or dist <= min_distance):
+                min_distance = dist
+                min_distance_shape = shape
+
+        return min_distance_shape
+
     def handle_mouse_click(self, position):
         if self.current_mode == "selection":
+
+            shape = self.check_nearest_shape(position)
+            if shape is not None:
+                shape.shape.color = (1, 0, 0)
+
             if self.is_draggable:
                 self._drag_offset = position - self.position
             self.current_shape.is_selected = False
