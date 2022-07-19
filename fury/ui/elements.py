@@ -3080,9 +3080,9 @@ class DrawShape(UI):
         self.shape_type = shape_type.lower()
         self.drawpanel = drawpanel
         self.max_size = None
-        self.is_selected = True
         super(DrawShape, self).__init__(position)
         self.shape.color = np.random.random(3)
+        self.is_selected = True
 
     def _setup(self):
         """Setup this UI component.
@@ -3104,7 +3104,6 @@ class DrawShape(UI):
 
         self.rotation_slider = RingSlider2D(initial_value=0,
                                             text_template="{angle:5.1f}°")
-        self.rotation_slider.set_visibility(False)
 
         def rotate_shape(slider):
             angle = slider.value
@@ -3195,7 +3194,7 @@ class DrawShape(UI):
 
     def selection_change(self):
         if not self.is_selected:
-            self.rotation_slider.set_visibility(False)
+        self.rotation_slider.set_visibility(False)
 
     def rotate(self, angle):
         """Rotate the vertices of the UI component using specific angle.
@@ -3575,7 +3574,7 @@ class DrawPanel(UI):
 
         return np.hypot(h, c)
 
-    def check_nearest_shape(self, click_position, limit=5):
+    def check_nearest_shape(self, click_position, limit=2):
         min_distance = None
         min_distance_shape = None
         for shape in self.shape_list:
@@ -3589,35 +3588,24 @@ class DrawPanel(UI):
                     click_position, np.array([shape.shape_points[0]]), np.array([shape.shape_points[2]]))
 
             elif shape.shape_type == "quad":
-                quad_min_dist = None
+                p1 = []
+                p2 = []
                 for i in range(-1, 3):
-                    dist = DrawPanel.lineseg_dists(
-                        click_position, np.array([shape.shape_points[i]]), np.array([shape.shape_points[i+1]]))
+                    p1.append(shape.shape_points[i])
+                    p2.append(shape.shape_points[i+1])
 
-                    print(click_position, np.array([shape.shape_points[i]]), np.array(
-                        [shape.shape_points[i+1]]), dist)
+                dist = min(DrawPanel.lineseg_dists(
+                    click_position, np.asarray(p1), np.asarray(p2)))
 
-                    if quad_min_dist is None or dist < quad_min_dist:
-                        quad_min_dist = dist
-                print("#########################################################################")
-
-                dist = quad_min_dist
-
-            # print("distance", dist)
-            # print("color", shape.shape.color)
             if dist <= limit and (min_distance is None or dist <= min_distance):
                 min_distance = dist
                 min_distance_shape = shape
 
-        return min_distance_shape
+        min_distance_shape.is_selected = True
 
     def handle_mouse_click(self, position):
         if self.current_mode == "selection":
-
-            shape = self.check_nearest_shape(position)
-            if shape is not None:
-                shape.shape.color = (1, 0, 0)
-
+            self.check_nearest_shape(position)
             if self.is_draggable:
                 self._drag_offset = position - self.position
             self.current_shape.is_selected = False
