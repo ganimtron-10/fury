@@ -3576,7 +3576,7 @@ class DrawPanel(UI):
 
         return np.hypot(h, c)
 
-    def check_nearest_shape(self, click_position, limit=2):
+    def find_nearest_shape(self, click_position, limit=2):
         min_distance = None
         min_distance_shape = None
         for shape in self.shape_list:
@@ -3606,7 +3606,7 @@ class DrawPanel(UI):
 
     def handle_mouse_click(self, position):
         if self.current_mode == "selection":
-            if not self.check_nearest_shape(position):
+            if not self.find_nearest_shape(position):
                 self.current_shape.is_selected = False
             if self.is_draggable:
                 self._drag_offset = position - self.position
