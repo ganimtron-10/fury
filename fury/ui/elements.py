@@ -3584,12 +3584,7 @@ class DrawPanel(UI):
             if shape.shape_type == "circle":
                 dist = np.linalg.norm(click_position - shape.center) - shape.shape.outer_radius
 
-            elif shape.shape_type == "line":
-
-                dist = DrawPanel.lineseg_dists(
-                    click_position, np.array([shape.shape_points[0]]), np.array([shape.shape_points[2]]))
-
-            elif shape.shape_type == "quad":
+            elif shape.shape_type in ["line", "quad"]:
                 p1 = []
                 p2 = []
                 for i in range(-1, 3):
@@ -3602,6 +3597,7 @@ class DrawPanel(UI):
             if dist <= limit and (min_distance is None or dist <= min_distance):
                 min_distance = dist
                 min_distance_shape = shape
+
         if min_distance_shape is not None:
             self.update_shape_selection(min_distance_shape)
             return True
