@@ -1173,6 +1173,7 @@ class Button2D(UI):
         button.SetMapper(texture_mapper)
 
         self.texture = Texture()
+        self.texture.InterpolateOn()
         button.SetTexture(self.texture)
 
         button_property = Property2D()
