@@ -3085,9 +3085,10 @@ class FileMenu2D(UI):
 
 
 class DrawShapeGroup:
-    def __init__(self):
+    def __init__(self, drawpanel):
         self.grouped_shapes = []
         self._scene = None
+        self.drawpanel = drawpanel
 
         # Group rotation slider
         self.group_rotation_slider = RingSlider2D(initial_value=0,
@@ -3177,8 +3178,46 @@ class DrawShapeGroup:
             Distance by which each shape is to be translated.
 
         """
+        print(offset)
+        vertices = []
         for shape in self.grouped_shapes:
-            shape.update_shape_position(shape.center + offset)
+            vertices.extend(shape.position + vertices_from_actor(shape.shape.actor)[:, :-1])
+
+        min_x, min_y = vertices[0]
+        max_x, max_y = vertices[0]
+
+        for x, y in vertices:
+            if x < min_x:
+                min_x = x
+            if y < min_y:
+                min_y = y
+            if x > max_x:
+                max_x = x
+            if y > max_y:
+                max_y = y
+
+        _bounding_box_min = np.asarray([min_x, min_y], dtype="int")
+        _bounding_box_max = np.asarray([max_x, max_y], dtype="int")
+        _bounding_box_size = np.asarray([max_x-min_x, max_y-min_y], dtype="int")
+
+        print(_bounding_box_min, _bounding_box_max, _bounding_box_size)
+
+        group_center = _bounding_box_min + _bounding_box_size//2
+
+        shape_offset = []
+        for shape in self.grouped_shapes:
+            shape_offset.append(group_center - shape.center)
+
+        new_center = np.clip(group_center + offset, _bounding_box_size//2,
+                             self.drawpanel.size - _bounding_box_size//2)
+
+        print(group_center, new_center)
+
+        for shape, offset in zip(self.grouped_shapes, shape_offset):
+            shape.update_shape_position(new_center + offset)
+            print(shape.center, new_center+offset)
+
+        print("#####################################")
 
     def add_rotation_slider(self, scene):
         """Add rotation slider to the scene.
@@ -3517,7 +3556,7 @@ class DrawPanel(UI):
         """
         self.panel_size = size
         super(DrawPanel, self).__init__(position)
-        self.shape_group = DrawShapeGroup()
+        self.shape_group = DrawShapeGroup(self)
         self.is_draggable = is_draggable
         self.current_mode = None
 
