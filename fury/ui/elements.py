@@ -2,13 +2,8 @@
 
 __all__ = ["TextBox2D", "LineSlider2D", "LineDoubleSlider2D",
            "RingSlider2D", "RangeSlider", "Checkbox", "Option", "RadioButton",
-<< << << < HEAD
            "ComboBox2D", "ListBox2D", "ListBoxItem2D", "FileMenu2D",  "PolyLine",
-           "DrawShape", "DrawPanel"]
-== == == =
-           "ComboBox2D", "ListBox2D", "ListBoxItem2D", "FileMenu2D",
            "DrawShape", "DrawPanel", "PlaybackPanel"]
->> >>>> > master
 
 import os
 import time
@@ -57,7 +52,7 @@ class TextBox2D(UI):
         Flag which says whether the textbox has just been initialized.
     """
 
-    def __init__(self, width, height, text = "Enter Text", position = (100, 10),
+    def __init__(self, width, height, text="Enter Text", position=(100, 10),
                  color=(0, 0, 0), font_size=18, font_family='Arial',
                  justification='left', bold=False,
                  italic=False, shadow=False):
@@ -3797,6 +3792,7 @@ class DrawPanel(UI):
         # i_ren.force_render()
         self.is_creating_polyline = False
         i_ren.force_render()
+
 
 class PlaybackPanel(UI):
     """A playback controller that can do essential functionalities.
