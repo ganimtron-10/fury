@@ -3226,7 +3226,7 @@ class DrawShape(UI):
     """Create and Manage 2D Shapes.
     """
 
-    def __init__(self, shape_type, drawpanel=None, position=(0, 0)):
+    def __init__(self, shape_type, drawpanel=None, position=(0, 0), debug=False):
         """Init this UI element.
 
         Parameters
@@ -3242,6 +3242,8 @@ class DrawShape(UI):
         self.shape_type = shape_type.lower()
         self.drawpanel = drawpanel
         self.max_size = None
+        self.debug = debug
+        self.highlight = False
         super(DrawShape, self).__init__(position)
         self.shape.color = np.random.random(3)
 
@@ -3258,6 +3260,8 @@ class DrawShape(UI):
             self.shape = Disk2D(outer_radius=2)
         else:
             raise IOError("Unknown shape type: {}.".format(self.shape_type))
+
+        self.cal_bounding_box()
 
         self.bb_box = [Rectangle2D(size=(3, 3)) for i in range(4)]
         self.set_bb_box_visibility(False)
@@ -3363,29 +3367,41 @@ class DrawShape(UI):
 
     def selection_change(self):
         if self.is_selected:
+            self.update_highlight(True)
             self.show_rotation_slider()
             self.set_bb_box_visibility(True)
         else:
+            self.update_highlight(False)
             self.rotation_slider.set_visibility(False)
             self.set_bb_box_visibility(False)
 
-    def set_bb_box_visibility(self, value):
-        if value:
-            border_width = 3
-            points = [self._bounding_box_min-(0, border_width),
-                      [self._bounding_box_max[0], self._bounding_box_min[1]],
-                      self._bounding_box_min - border_width,
-                      [self._bounding_box_min[0]-border_width, self._bounding_box_max[1]]]
-            size = [(self._bounding_box_size[0]+border_width, border_width),
-                    (border_width, self._bounding_box_size[1]+border_width),
-                    (border_width, self._bounding_box_size[1] + border_width),
-                    (self._bounding_box_size[0]+border_width, border_width)]
-            for i in range(4):
-                self.bb_box[i].position = points[i]
-                self.bb_box[i].resize(size[i])
+    def update_highlight(self, value):
+        highlight_color = [.1, .1, .0]
+        if self.highlight:
+            self.shape.color -= highlight_color if not value else 0
+        else:
+            self.shape.color += highlight_color if value else 0
 
-        for border in self.bb_box:
-            border.set_visibility(value)
+        self.highlight = value
+
+    def set_bb_box_visibility(self, value):
+        if self.debug:
+            if value:
+                border_width = 3
+                points = [self._bounding_box_min-(0, border_width),
+                          [self._bounding_box_max[0], self._bounding_box_min[1]],
+                          self._bounding_box_min - border_width,
+                          [self._bounding_box_min[0]-border_width, self._bounding_box_max[1]]]
+                size = [(self._bounding_box_size[0]+border_width, border_width),
+                        (border_width, self._bounding_box_size[1]+border_width),
+                        (border_width, self._bounding_box_size[1] + border_width),
+                        (self._bounding_box_size[0]+border_width, border_width)]
+                for i in range(4):
+                    self.bb_box[i].position = points[i]
+                    self.bb_box[i].resize(size[i])
+
+            for border in self.bb_box:
+                border.set_visibility(value)
 
     def rotate(self, angle):
         """Rotate the vertices of the UI component using specific angle.
@@ -3705,10 +3721,10 @@ class DrawPanel(UI):
                           position=current_position)
         if shape_type == "circle":
             shape.max_size = self.cal_min_boundary_distance(current_position)
-        self.shape_list.append(shape)
-        self.update_shape_selection(shape)
         self.current_scene.add(shape)
         self.canvas.add_element(shape, current_position - self.canvas.position)
+        self.shape_list.append(shape)
+        self.update_shape_selection(shape)
 
     def resize_shape(self, current_position):
         """Resize the shape.
