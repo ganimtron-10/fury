@@ -17,7 +17,8 @@ from fury.data import read_viz_icons
 from fury.lib import PolyDataMapper2D
 from fury.ui.core import UI, Rectangle2D, TextBlock2D, Disk2D
 from fury.ui.containers import Panel2D
-from fury.ui.helpers import TWO_PI, clip_overflow
+from fury.ui.helpers import (TWO_PI, clip_overflow,
+                             cal_bounding_box_2d, rotate_2d)
 from fury.ui.core import Button2D
 from fury.utils import (set_polydata_vertices, vertices_from_actor,
                         update_actor)
@@ -3274,6 +3275,12 @@ class DrawShape(UI):
                                             text_template="{angle:5.1f}°")
         self.rotation_slider.set_visibility(False)
 
+        if self.drawpanel:
+            slider_position = self.drawpanel.canvas.position + \
+                [self.drawpanel.canvas.size[0] - self.rotation_slider.size[0]/2,
+                 self.rotation_slider.size[1]/2]
+            self.rotation_slider.center = slider_position
+
         def rotate_shape(slider):
             angle = slider.value
             previous_angle = slider.previous_value
@@ -3281,7 +3288,7 @@ class DrawShape(UI):
 
             current_center = self.center
             self.rotate(np.deg2rad(rotation_angle))
-            self.update_shape_position(current_center - self.drawpanel.position)
+            self.update_shape_position(current_center - self.drawpanel.canvas.position)
 
         self.rotation_slider.on_change = rotate_shape
 
@@ -3374,10 +3381,7 @@ class DrawShape(UI):
         if self.shape_type == "circle":
             return
         points_arr = vertices_from_actor(self.shape.actor)
-        rotation_matrix = np.array(
-            [[np.cos(angle), np.sin(angle), 0],
-             [-np.sin(angle), np.cos(angle), 0], [0, 0, 1]])
-        new_points_arr = np.matmul(points_arr, rotation_matrix)
+        new_points_arr = rotate_2d(points_arr, angle)
         set_polydata_vertices(self.shape._polygonPolyData, new_points_arr)
         update_actor(self.shape.actor)
 
@@ -3388,19 +3392,10 @@ class DrawShape(UI):
         """
         self._scene.rm(*self.rotation_slider.actors)
         self.rotation_slider.add_to_scene(self._scene)
-        slider_position = self.drawpanel.position + \
-            [self.drawpanel.size[0] - self.rotation_slider.size[0]/2,
-             self.rotation_slider.size[1]/2]
-        self.rotation_slider.center = slider_position
         self.rotation_slider.set_visibility(True)
 
-    def cal_bounding_box(self, position=None):
+    def cal_bounding_box(self):
         """Calculate the min, max position and the size of the bounding box.
-
-        Parameters
-        ----------
-        position : (float, float)
-            (x, y) in pixels.
         """
         position = self.position if position is None else position
 
@@ -3411,24 +3406,10 @@ class DrawShape(UI):
         else:
             vertices = position + vertices_from_actor(self.shape.actor)[:, :-1]
 
-        min_x, min_y = vertices[0]
-        max_x, max_y = vertices[0]
+        self._bounding_box_min, self._bounding_box_max, \
+            self._bounding_box_size = cal_bounding_box_2d(vertices)
 
-        for x, y in vertices:
-            if x < min_x:
-                min_x = x
-            if y < min_y:
-                min_y = y
-            if x > max_x:
-                max_x = x
-            if y > max_y:
-                max_y = y
-
-        self._bounding_box_min = np.asarray([min_x, min_y], dtype="int")
-        self._bounding_box_max = np.asarray([max_x, max_y], dtype="int")
-        self._bounding_box_size = np.asarray([max_x-min_x, max_y-min_y], dtype="int")
-
-        self._bounding_box_offset = position - self._bounding_box_min
+        self._bounding_box_offset = self.position - self._bounding_box_min
 
     def clamp_position(self, center=None):
         """Clamp the given center according to the DrawPanel canvas.
@@ -3445,7 +3426,7 @@ class DrawShape(UI):
         """
         center = self.center if center is None else center
         new_center = np.clip(center, self._bounding_box_size//2,
-                             self.drawpanel.size - self._bounding_box_size//2)
+                             self.drawpanel.canvas.size - self._bounding_box_size//2)
         return new_center.astype(int)
 
     def resize(self, size):
@@ -3500,7 +3481,7 @@ class DrawShape(UI):
             if self._drag_offset is not None:
                 click_position = i_ren.event.position
                 relative_center_position = click_position - \
-                    self._drag_offset - self.drawpanel.position
+                    self._drag_offset - self.drawpanel.canvas.position
                 self.update_shape_position(relative_center_position)
             i_ren.force_render()
         else:
@@ -3593,10 +3574,10 @@ class DrawPanel(UI):
             self.mode_panel.add_element(btn, btn_pos+padding)
             btn_pos[0] += btn.size[0]+padding
 
-        self.canvas.add_element(self.mode_panel, (0, 0))
+        self.canvas.add_element(self.mode_panel, (0, -mode_panel_size[1]))
 
         self.mode_text = TextBlock2D(text="Select appropriate drawing mode using below icon")
-        self.canvas.add_element(self.mode_text, (0.0, 0.95))
+        self.canvas.add_element(self.mode_text, (0.0, 1.0))
 
     def _get_actors(self):
         """Get the actors composing this UI component."""
@@ -3626,7 +3607,7 @@ class DrawPanel(UI):
         coords: (float, float)
             Absolute pixel coordinates (x, y).
         """
-        self.canvas.position = coords
+        self.canvas.position = coords + [0, self.mode_panel.size[1]]
 
     def resize(self, size):
         """Resize the UI.
