@@ -3265,7 +3265,7 @@ class DrawShape(UI):
         else:
             raise IOError("Unknown shape type: {}.".format(self.shape_type))
 
-        self.cal_bounding_box(update_value=True)
+        self.cal_bounding_box()
 
         self.shape.on_left_mouse_button_pressed = self.left_button_pressed
         self.shape.on_left_mouse_button_dragged = self.left_button_dragged
@@ -3397,14 +3397,12 @@ class DrawShape(UI):
     def cal_bounding_box(self):
         """Calculate the min, max position and the size of the bounding box.
         """
-        position = self.position if position is None else position
-
         if self.shape_type == "polyline":
             vertices = self.shape.calculate_vertices()
             if not vertices.any():
                 return
         else:
-            vertices = position + vertices_from_actor(self.shape.actor)[:, :-1]
+            vertices = self.position + vertices_from_actor(self.shape.actor)[:, :-1]
 
         self._bounding_box_min, self._bounding_box_max, \
             self._bounding_box_size = cal_bounding_box_2d(vertices)
@@ -3764,7 +3762,7 @@ class DrawPanel(UI):
     def left_button_released(self, i_ren, _obj, element):
         if self.is_creating_polyline:
             self.current_shape.shape.add_point(i_ren.event.position, True)
-            self.current_shape.cal_bounding_box(update_value=True)
+            self.current_shape.cal_bounding_box()
         # if self.current_mode == "polyline":
         #     self.shape_list[-1].shape.add_point(i_ren.event.position, interactive=True)
 
