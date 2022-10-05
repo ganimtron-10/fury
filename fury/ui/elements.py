@@ -3331,6 +3331,27 @@ class PolyLine(UI):
         else:
             self.remove_last_line()
 
+    def smoothen_line(self):
+        print("Smoothening")
+        from scipy.interpolate import BSpline, splrep, splev
+
+        ts = []
+        ys = []
+
+        for x, y in self.points:
+            ts.append(x)
+            ys.append(y)
+
+        tck = splrep(np.asarray(ts), np.asarray(ys))
+        ys_interp = splev(ts, tck, k=1)
+
+        new_points = []
+
+        for x, y in zip(ts, ys_interp):
+            new_points.append((x, y))
+
+        self.update_line(new_points)
+
     def remove_last_line(self):
         self._scene.rm(self.current_line.actor)
 
@@ -4038,6 +4059,7 @@ class DrawPanel(UI):
         if self.is_creating_polyline:
             self.is_creating_polyline = False
             polyline = self.current_shape.shape
+            polyline.smoothen_line()
             if not polyline.closed:
                 polyline.remove_last_line()
         i_ren.force_render()
