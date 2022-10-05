@@ -3775,6 +3775,7 @@ class DrawPanel(UI):
             "quad": ["quad.png", "quad-pressed.png"],
             "circle": ["circle.png", "circle-pressed.png"],
             "drawing": ["drawing.png", "drawing-pressed.png"],
+            "resize": ["resize.png", "resize-pressed.png"],
             "delete": ["delete.png", "delete-pressed.png"]
         }
 
@@ -3953,6 +3954,9 @@ class DrawPanel(UI):
         self.current_scene.add(line)
 
     def handle_mouse_click(self, position):
+        if self.current_mode == "resize":
+            for shape in self.shape_list:
+                shape.debug = True
         if self.current_mode == "drawing":
             self.draw_shape("polyline", position)
             self.current_shape.shape.offset_from_mouse = 0
