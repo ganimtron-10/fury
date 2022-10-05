@@ -3857,6 +3857,10 @@ class DrawPanel(UI):
         self.update_shape_selection(None)
         self.shape_group.clear()
 
+        if mode == "resize":
+            for shape in self.shape_list:
+                shape.debug = True
+
     def cal_min_boundary_distance(self, position):
         """Calculate the minimum distance between the current position and canvas boundary.
 
@@ -3955,9 +3959,6 @@ class DrawPanel(UI):
         self.current_scene.add(line)
 
     def handle_mouse_click(self, position):
-        if self.current_mode == "resize":
-            for shape in self.shape_list:
-                shape.debug = True
         if self.current_mode == "drawing":
             self.draw_shape("polyline", position)
             self.current_shape.shape.offset_from_mouse = 0
