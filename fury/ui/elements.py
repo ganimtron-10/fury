@@ -3424,8 +3424,7 @@ class DrawShape(UI):
 
         self.cal_bounding_box()
 
-        if self.debug:
-            self.bb_box = [Rectangle2D(size=(3, 3)) for i in range(4)]
+        self.bb_box = [Rectangle2D(size=(3, 3)) for i in range(4)]
 
         self.shape.on_left_mouse_button_pressed = self.left_button_pressed
         self.shape.on_left_mouse_button_dragged = self.left_button_dragged
@@ -3467,8 +3466,7 @@ class DrawShape(UI):
         self._scene = scene
         self.shape.add_to_scene(scene)
         self.rotation_slider.add_to_scene(scene)
-        if self.debug:
-            scene.add(*[border.actor for border in self.bb_box])
+        scene.add(*[border.actor for border in self.bb_box])
 
     def _get_size(self):
         return self.shape.size
@@ -3659,8 +3657,7 @@ class DrawShape(UI):
             self._scene.rm(self.shape.actor)
 
         self._scene.rm(*self.rotation_slider.actors)
-        if self.debug:
-            self._scene.rm(*[border.actor for border in self.bb_box])
+        self._scene.rm(*[border.actor for border in self.bb_box])
 
     def left_button_pressed(self, i_ren, _obj, shape):
         mode = self.drawpanel.current_mode
@@ -3991,6 +3988,7 @@ class DrawPanel(UI):
             self.resize_shape(position)
 
     def left_button_dragged(self,  i_ren, _obj, element):
+        print("panel drag evnt")
         mouse_position = self.clamp_mouse_position(i_ren.event.position)
         self.handle_mouse_drag(mouse_position)
         i_ren.force_render()
