@@ -3424,11 +3424,31 @@ class DrawShape(UI):
 
         self.cal_bounding_box()
 
+        def resize_left_press(i_ren, obj, rect):
+            print("Click")
+
+        def resize_left_dragx(i_ren, obj, rect):
+            last_position = rect.position
+            current_position = i_ren.event.position
+            diff = current_position[0] - last_position[0]
+            self.resize((self.size[0] + diff, self.size[1]))
+
+        def resize_left_dragy(i_ren, obj, rect):
+            last_position = rect.position
+            current_position = i_ren.event.position
+            diff = current_position[1] - last_position[1]
+            print(diff)
+            self.resize((self.size[0], self.size[1] + diff))
+            # self.position = self._bounding_box_min
+
         self.bb_box = [Rectangle2D(size=(3, 3)) for i in range(4)]
-        for border in self.bb_box:
-            border.set_visibility(False)
-            # border.on_left_mouse_button_pressed = lambda i_ren, obj, rect: print("left click")
-            # border.on_left_mouse_button_dragged = lambda i_ren, obj, rect: print("left drag")
+        for i in range(len(self.bb_box)):
+            self.bb_box[i].set_visibility(False)
+            self.bb_box[i].on_left_mouse_button_pressed = resize_left_press
+            if i % 2 == 0:
+                self.bb_box[i].on_left_mouse_button_dragged = resize_left_dragy
+            else:
+                self.bb_box[i].on_left_mouse_button_dragged = resize_left_dragx
 
         self.shape.on_left_mouse_button_pressed = self.left_button_pressed
         self.shape.on_left_mouse_button_dragged = self.left_button_dragged
@@ -3470,7 +3490,8 @@ class DrawShape(UI):
         self._scene = scene
         self.shape.add_to_scene(scene)
         self.rotation_slider.add_to_scene(scene)
-        scene.add(*[border.actor for border in self.bb_box])
+        for border in self.bb_box:
+            border.add_to_scene(scene)
 
     def _get_size(self):
         return self.shape.size
