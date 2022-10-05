@@ -3427,6 +3427,8 @@ class DrawShape(UI):
         self.bb_box = [Rectangle2D(size=(3, 3)) for i in range(4)]
         for border in self.bb_box:
             border.set_visibility(False)
+            # border.on_left_mouse_button_pressed = lambda i_ren, obj, rect: print("left click")
+            # border.on_left_mouse_button_dragged = lambda i_ren, obj, rect: print("left drag")
 
         self.shape.on_left_mouse_button_pressed = self.left_button_pressed
         self.shape.on_left_mouse_button_dragged = self.left_button_dragged
