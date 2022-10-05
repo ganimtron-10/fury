@@ -3425,6 +3425,8 @@ class DrawShape(UI):
         self.cal_bounding_box()
 
         self.bb_box = [Rectangle2D(size=(3, 3)) for i in range(4)]
+        for border in self.bb_box:
+            border.set_visibility(False)
 
         self.shape.on_left_mouse_button_pressed = self.left_button_pressed
         self.shape.on_left_mouse_button_dragged = self.left_button_dragged
@@ -3725,6 +3727,7 @@ class DrawPanel(UI):
         super(DrawPanel, self).__init__(position)
         self.shape_group = DrawShapeGroup(self)
         self.is_draggable = is_draggable
+        self.shape_list = []
         self.current_mode = None
         self.debug = debug
         self.highlight_color = highlight_color
@@ -3732,7 +3735,6 @@ class DrawPanel(UI):
         if is_draggable:
             self.current_mode = "selection"
 
-        self.shape_list = []
         self.drawing_lines = []
         self.key_status = {
             "Control_L": False,
@@ -3851,6 +3853,8 @@ class DrawPanel(UI):
         self._current_mode = mode
         if mode is not None:
             self.mode_text.message = f"Mode: {mode}"
+
+        self.update_shape_selection(None)
         self.shape_group.clear()
 
     def cal_min_boundary_distance(self, position):
@@ -3988,7 +3992,6 @@ class DrawPanel(UI):
             self.resize_shape(position)
 
     def left_button_dragged(self,  i_ren, _obj, element):
-        print("panel drag evnt")
         mouse_position = self.clamp_mouse_position(i_ren.event.position)
         self.handle_mouse_drag(mouse_position)
         i_ren.force_render()
