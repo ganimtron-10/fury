@@ -13,8 +13,15 @@ from string import printable
 
 import numpy as np
 
+from vtkmodules.vtkRenderingCore import vtkCoordinate
+from fury import window, actor, utils, io, ui
+from fury.lib import PolyDataMapper2D, CellArray, PolyData, Points, Actor2D
+from fury.shaders import shader_to_actor
+from fury.utils import colors_from_actor, update_actor
+
 from fury.data import read_viz_icons
-from fury.lib import PolyDataMapper2D
+from vtkmodules.vtkCommonCore import vtkUnsignedCharArray
+from fury.lib import PolyDataMapper2D, CellArray, Points
 from fury.ui.core import UI, Rectangle2D, TextBlock2D, Disk2D
 from fury.ui.containers import Panel2D
 from fury.ui.helpers import (TWO_PI, clip_overflow,
@@ -3222,6 +3229,31 @@ class PolyLine(UI):
         color : (float, float, float), optional
             RGB: Values must be between 0-1.
         """
+        self.ids = []
+
+        self.ogl_lines = CellArray()
+        self.ogl_points = Points()
+        self.ogl_colors = vtkUnsignedCharArray()
+        self.ogl_colors.SetNumberOfComponents(3)
+        self.ogl_colors.SetName("colors")
+
+        self.ogl_polydata = PolyData()
+        self.ogl_polydata.SetPoints(self.ogl_points)
+        self.ogl_polydata.SetLines(self.ogl_lines)
+        self.ogl_polydata.GetPointData().AddArray(self.ogl_colors)
+
+        self.ogl_mapper = PolyDataMapper2D()
+
+        self.ogl_actor = Actor2D()
+        self.ogl_actor.SetMapper(self.ogl_mapper)
+        self.ogl_actor.GetProperty().SetColor(1, 1, 1)
+        self.ogl_actor.GetProperty().SetLineWidth(5)
+
+        self.ogl_mapper.SetInputData(self.ogl_polydata)
+        self.ogl_mapper.Modified()
+        self.ogl_actor.GetProperty().Modified()
+        self._last_point_id = None
+
         self.points = []
         self.line_width = line_width
         self.lines = []
@@ -3249,6 +3281,7 @@ class PolyLine(UI):
         """
         self._scene = scene
         scene.add(*self.lines)
+        scene.add(self.ogl_actor)
 
     def _get_size(self):
         pass
@@ -3380,6 +3413,16 @@ class PolyLine(UI):
         add_to_scene: bool, optional
             Add current line to the scene.
         """
+
+        current_point_id = self.ogl_points.InsertNextPoint(*point, 0.0)
+        self.ids.append(current_point_id)
+        if self._last_point_id is not None:
+            self.ogl_lines.InsertNextCell(2, [self._last_point_id, current_point_id])
+        self._last_point_id = current_point_id
+
+        self.ogl_points.Modified()
+        self.ogl_lines.Modified()
+
         if self.current_line:
             self.resize_line(np.asarray(point) - self.current_line.position)
 
@@ -3391,8 +3434,8 @@ class PolyLine(UI):
         self.lines.append(new_line)
         self.points.append(point)
         self.previous_point = point
-        if add_to_scene:
-            self._scene.add(new_line)
+        # if add_to_scene:
+        #     self._scene.add(new_line)
 
     @property
     def color(self):
