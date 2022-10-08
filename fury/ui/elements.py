@@ -3494,7 +3494,7 @@ class ColorPicker(UI):
         a square that selects the saturation and value for the selected hue.
     """
 
-    def __init__(self, position=(0, 0)):
+    def __init__(self, side=100, position=(0, 0)):
         """ Initialize the color picker.
         Parameters
         ----------
@@ -3504,7 +3504,7 @@ class ColorPicker(UI):
                 Coordinates (x, y) of the lower-left corner of the sqaure.
         """
         super(ColorPicker, self).__init__(position)
-        self.side = 100
+        self.side = side
         self.pointer.position = self.ColorSelectionSquare.center
         self.position = position
         self.current_hue = 0
@@ -3563,8 +3563,8 @@ class ColorPicker(UI):
         ----------
         scene : scene
         """
-        self.ColorSelectionSquare._add_to_scene(scene)  # this line was changed
-        self.pointer._add_to_scene(scene)  # this line was changed
+        self.ColorSelectionSquare.add_to_scene(scene)  # this line was changed
+        self.pointer.add_to_scene(scene)  # this line was changed
         scene.add(self.HueBar)
     # def _add_to_renderer(self, ren):
     #     """ Add all subcomponents or VTK props that compose this UI component.
