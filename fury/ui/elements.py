@@ -3424,31 +3424,29 @@ class DrawShape(UI):
 
         self.cal_bounding_box()
 
-        def resize_left_press(i_ren, obj, rect):
-            print("Click")
-
         def resize_left_dragx(i_ren, obj, rect):
             last_position = rect.position
             current_position = i_ren.event.position
             diff = current_position[0] - last_position[0]
             self.resize((self.size[0] + diff, self.size[1]))
+            self.center = self._bounding_box_min + self._bounding_box_size//2
 
         def resize_left_dragy(i_ren, obj, rect):
             last_position = rect.position
             current_position = i_ren.event.position
             diff = current_position[1] - last_position[1]
-            print(diff)
             self.resize((self.size[0], self.size[1] + diff))
-            # self.position = self._bounding_box_min
+            self.center = self._bounding_box_min + self._bounding_box_size//2
 
         self.bb_box = [Rectangle2D(size=(3, 3)) for i in range(4)]
-        for i in range(len(self.bb_box)):
-            self.bb_box[i].set_visibility(False)
-            self.bb_box[i].on_left_mouse_button_pressed = resize_left_press
-            if i % 2 == 0:
-                self.bb_box[i].on_left_mouse_button_dragged = resize_left_dragy
-            else:
-                self.bb_box[i].on_left_mouse_button_dragged = resize_left_dragx
+        self.bb_box[0].color = (1, 1, 0)
+        # self.bb_box[0].on_left_mouse_button_dragged = resize_left_dragy
+        self.bb_box[1].color = (0, 1, 0)
+        self.bb_box[1].on_left_mouse_button_dragged = resize_left_dragx
+        self.bb_box[2].color = (0, 0, 1)
+        # self.bb_box[2].on_left_mouse_button_dragged = resize_left_dragx
+        self.bb_box[3].color = (1, 1, 1)
+        self.bb_box[3].on_left_mouse_button_dragged = resize_left_dragy
 
         self.shape.on_left_mouse_button_pressed = self.left_button_pressed
         self.shape.on_left_mouse_button_dragged = self.left_button_dragged
