@@ -19,7 +19,7 @@ fetch_viz_new_icons()
 #########################################################################
 # We then create a DrawPanel Object.
 
-drawing_canvas = ui.DrawPanel(size=(560, 560), position=(40, 10))
+drawing_canvas = ui.DrawPanel(size=(650, 650), position=(50, 20))
 
 ###############################################################################
 # Show Manager
@@ -27,12 +27,12 @@ drawing_canvas = ui.DrawPanel(size=(560, 560), position=(40, 10))
 #
 # Now we add DrawPanel to the scene.
 
-current_size = (650, 650)
-showm = window.ShowManager(size=current_size, title='DrawPanel UI Example')
+current_size = (750, 750)
+showm = window.ShowManager(size=current_size, title="DrawPanel UI Example")
 
 showm.scene.add(drawing_canvas)
 
-interactive = False
+interactive = 1
 
 if interactive:
     showm.start()
