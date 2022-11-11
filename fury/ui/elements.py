@@ -3092,22 +3092,27 @@ class DrawShapeGroup:
         self.drawpanel = drawpanel
 
         # Group rotation slider
-        self.group_rotation_slider = RingSlider2D(initial_value=0,
-                                                  text_template="{angle:5.1f}°")
+        # self.group_rotation_slider = RingSlider2D(initial_value=0,
+        #                                           text_template="{angle:5.1f}°")
+        self.group_rotation_slider = Button2D(
+            icon_fnames=[('star', read_viz_icons(fname='star.png'))], size=(50, 50))
 
         self.group_rotation_slider.set_visibility(False)
 
-        def update_rotation(slider):
-            angle = slider.value
-            previous_angle = slider.previous_value
-            rotation_angle = angle - previous_angle
+        def update_rotation(i_ren, obj, btn):
+            # angle = slider.value
+            # previous_angle = slider.previous_value
+            # rotation_angle = angle - previous_angle
+            rotation_angle = 30
 
             for shape in self.grouped_shapes:
                 current_center = shape.center
                 shape.rotate(np.deg2rad(rotation_angle))
                 shape.update_shape_position(current_center - shape.drawpanel.canvas.position)
 
-        self.group_rotation_slider.on_change = update_rotation
+            i_ren.force_render()
+
+        self.group_rotation_slider.on_left_mouse_button_pressed = update_rotation
 
     def add(self, shape):
         """Add shape to the group.
@@ -3271,8 +3276,10 @@ class DrawShape(UI):
         self.shape.on_left_mouse_button_dragged = self.left_button_dragged
         self.shape.on_left_mouse_button_released = self.left_button_released
 
-        self.rotation_slider = RingSlider2D(initial_value=0,
-                                            text_template="{angle:5.1f}°")
+        # self.rotation_slider = RingSlider2D(initial_value=0,
+        #                                     text_template="{angle:5.1f}°")
+        self.rotation_slider = Button2D(
+            icon_fnames=[('star', read_viz_icons(fname='star.png'))], size=(50, 50))
         self.rotation_slider.set_visibility(False)
 
         if self.drawpanel:
@@ -3281,16 +3288,18 @@ class DrawShape(UI):
                  self.rotation_slider.size[1]/2]
             self.rotation_slider.center = slider_position
 
-        def rotate_shape(slider):
-            angle = slider.value
-            previous_angle = slider.previous_value
-            rotation_angle = angle - previous_angle
+        def rotate_shape(i_ren, obj, btn):
+            # angle = slider.value
+            # previous_angle = slider.previous_value
+            # rotation_angle = angle - previous_angle
+            rotation_angle = 30
 
             current_center = self.center
             self.rotate(np.deg2rad(rotation_angle))
             self.update_shape_position(current_center - self.drawpanel.canvas.position)
+            i_ren.force_render()
 
-        self.rotation_slider.on_change = rotate_shape
+        self.rotation_slider.on_left_mouse_button_pressed = rotate_shape
 
     def _get_actors(self):
         """Get the actors composing this UI component."""
