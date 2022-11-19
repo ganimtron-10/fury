@@ -3,10 +3,9 @@
 __all__ = ["TextBox2D", "LineSlider2D", "LineDoubleSlider2D",
            "RingSlider2D", "RangeSlider", "Checkbox", "Option", "RadioButton",
            "ComboBox2D", "ListBox2D", "ListBoxItem2D", "FileMenu2D",
-           "DrawShape", "DrawPanel", "PlaybackPanel"]
+           "DrawShape", "DrawPanel", "SpinBox", "PlaybackPanel"]
 
 import os
-import time
 from collections import OrderedDict
 from numbers import Number
 from string import printable
@@ -14,7 +13,7 @@ from string import printable
 import numpy as np
 
 from fury.data import read_viz_icons
-from fury.lib import PolyDataMapper2D
+from fury.lib import Command
 from fury.ui.core import UI, Rectangle2D, TextBlock2D, Disk2D
 from fury.ui.containers import Panel2D
 from fury.ui.helpers import (TWO_PI, clip_overflow,
@@ -3808,19 +3807,195 @@ class DrawPanel(UI):
         self.key_status[i_ren.event.key] = False
 
 
+class SpinBox(UI):
+    """SpinBox UI.
+    """
+
+    def __init__(self, position=(350, 400), size=(300, 100), padding=10,
+                 panel_color=(1, 1, 1), min_val=0, max_val=100,
+                 initial_val=50, step=1, textbox_width=10, textbox_height=2):
+        """Init this UI element.
+        Parameters
+        ----------
+        position : (int, int), optional
+            Absolute coordinates (x, y) of the lower-left corner of this
+            UI component.
+        size : (int, int), optional
+            Width and height in pixels of this UI component.
+        padding : int, optional
+            Distance between  and background.
+        panel_color : (float, float, float), optional
+            Panel color of SpinBoxUI.
+        min_val: int, optional
+            Minimum value of SpinBoxUI.
+        max_val: int, optional
+            Maximum value of SpinBoxUI.
+        initial_val: int, optional
+            Initial value of SpinBoxUI.
+        step: int, optional
+            Step value of SpinBoxUI.
+        textbox_width: int, optional
+            Width of Textbox.
+        textbox_height: int, optional
+            Height of Textbox.
+        """
+        self.panel_size = size
+        self.padding = padding
+        self.panel_color = panel_color
+        self.min_val = min_val
+        self.max_val = max_val
+        self.value = initial_val
+        self.step = step
+        self.textbox_width = textbox_width
+        self.textbox_height = textbox_height
+
+        super(SpinBox, self).__init__(position)
+
+        self.resize(size)
+
+        self.on_change = lambda ui: None
+
+    def _setup(self):
+        """Setup this UI component.
+        Create the SpinBoxUI with Background (Panel2D) and InputBox (TextBox2D)
+        and Increment,Decrement Button (Button2D).
+        """
+        self.panel = Panel2D(size=self.panel_size, color=self.panel_color)
+
+        self.textbox = TextBox2D(width=self.textbox_width,
+                                 height=self.textbox_height)
+        self.textbox.set_message(str(self.value))
+        self.increment_button = Button2D(
+            icon_fnames=[("up", read_viz_icons(fname="circle-up.png"))])
+        self.decrement_button = Button2D(
+            icon_fnames=[("down", read_viz_icons(fname="circle-down.png"))])
+
+        self.panel.add_element(self.textbox, (0, 0))
+        self.panel.add_element(self.increment_button, (0, 0))
+        self.panel.add_element(self.decrement_button, (0, 0))
+
+        # Adding button click callbacks
+        self.increment_button.on_left_mouse_button_pressed = \
+            self.increment_callback
+        self.decrement_button.on_left_mouse_button_pressed = \
+            self.decrement_callback
+        self.textbox.off_focus = self.textbox_update_value
+
+    def resize(self, size):
+        """Resize SpinBox.
+        Parameters
+        ----------
+        size : (float, float)
+            SpinBox size(width, height) in pixels.
+        """
+        self.panel_size = size
+        self.textbox_size = (int(0.7 * size[0]), int(0.8 * size[1]))
+        self.button_size = (int(0.2 * size[0]), int(0.3 * size[1]))
+        self.padding = int(0.03 * self.panel_size[0])
+
+        self.panel.resize(size)
+        self.textbox.text.resize(self.textbox_size)
+        self.increment_button.resize(self.button_size)
+        self.decrement_button.resize(self.button_size)
+
+        textbox_pos = (self.padding, int((size[1] - self.textbox_size[1])/2))
+        inc_btn_pos = (size[0] - self.padding - self.button_size[0],
+                       int((1.5*size[1] - self.button_size[1])/2))
+        dec_btn_pos = (size[0] - self.padding - self.button_size[0],
+                       int((0.5*size[1] - self.button_size[1])/2))
+
+        self.panel.update_element(self.textbox, textbox_pos)
+        self.panel.update_element(self.increment_button, inc_btn_pos)
+        self.panel.update_element(self.decrement_button, dec_btn_pos)
+
+    def _get_actors(self):
+        """Get the actors composing this UI component."""
+        return self.panel.actors
+
+    def _add_to_scene(self, scene):
+        """Add all subcomponents or VTK props that compose this UI component.
+        Parameters
+        ----------
+        scene : Scene
+        """
+        self.panel.add_to_scene(scene)
+
+    def _get_size(self):
+        return self.panel.size
+
+    def _set_position(self, coords):
+        """Set the lower-left corner position of this UI component.
+        Parameters
+        ----------
+        coords: (float, float)
+            Absolute pixel coordinates (x, y).
+        """
+        self.panel.center = coords
+
+    def increment_callback(self, i_ren, _obj, _button):
+        self.increment()
+        i_ren.force_render()
+        i_ren.event.abort()
+
+    def decrement_callback(self, i_ren, _obj, _button):
+        self.decrement()
+        i_ren.force_render()
+        i_ren.event.abort()
+
+    @property
+    def value(self):
+        return self._value
+
+    @value.setter
+    def value(self, value):
+        if value > self.max_val:
+            self._value = self.max_val
+        elif value < self.min_val:
+            self._value = self.min_val
+        else:
+            self._value = value
+
+    def increment(self):
+        """Increment the current value by the step."""
+        current_val = int(self.textbox.message)
+        if current_val == self.max_val:
+            return
+        self.value = current_val + self.step
+
+        self.textbox.set_message(str(self.value))
+        self.on_change(self)
+
+    def decrement(self):
+        """Decrement the current value by the step."""
+        current_val = int(self.textbox.message)
+        if current_val == self.min_val:
+            return
+        self.value = current_val - self.step
+
+        self.textbox.set_message(str(self.value))
+        self.on_change(self)
+
+    def textbox_update_value(self, textbox):
+        self.value = int(textbox.text.message)
+
+        self.textbox.set_message(str(self.value))
+        self.on_change(self)
+
+
 class PlaybackPanel(UI):
     """A playback controller that can do essential functionalities.
        such as play, pause, stop, and seek.
     """
 
-    def __init__(self, loop=False, position=(0, 0)):
-        super(PlaybackPanel, self).__init__()
-        self.position = position
+    def __init__(self, loop=False, position=(0, 0), width=None):
+        self._width = width if width is not None else 900
+        self._auto_width = width is None
+        self._position = position
+        super(PlaybackPanel, self).__init__(position)
         self._playing = False
         self._loop = None
         self.loop() if loop else self.play_once()
         self._speed = 1
-
         # callback functions
         self.on_play_pause_toggle = lambda state: None
         self.on_play = lambda: None
@@ -3831,20 +4006,21 @@ class PlaybackPanel(UI):
         self.on_speed_up = lambda x: None
         self.on_slow_down = lambda x: None
         self.on_speed_changed = lambda x: None
+        self._set_position(position)
 
     def _setup(self):
         """Setup this Panel component.
 
         """
-        self.time_text = TextBlock2D(position=(820, 10))
-        self.speed_text = TextBlock2D(text='1', position=(0, 0), font_size=21,
+        self.time_text = TextBlock2D()
+        self.speed_text = TextBlock2D(text='1', font_size=21,
                                       color=(0.2, 0.2, 0.2), bold=True,
-                                      justification='center', vertical_justification='middle')
+                                      justification='center',
+                                      vertical_justification='middle')
 
         self.panel = Panel2D(size=(190, 30), color=(1, 1, 1), align="right",
                              has_border=True, border_color=(0, 0.3, 0),
                              border_width=2)
-        self.panel.position = (5, 5)
 
         play_pause_icons = [("play", read_viz_icons(fname="play3.png")),
                             ("pause", read_viz_icons(fname="pause2.png"))]
@@ -3870,8 +4046,7 @@ class PlaybackPanel(UI):
             size=(15, 15)
         )
 
-        self._progress_bar = LineSlider2D(center=(512, 20),
-                                          initial_value=0,
+        self._progress_bar = LineSlider2D(initial_value=0,
                                           orientation='horizontal',
                                           min_value=0, max_value=100,
                                           text_alignment='top', length=590,
@@ -3938,25 +4113,30 @@ class PlaybackPanel(UI):
         self.current_time = 0
 
     def play(self):
+        """Play the playback"""
         self._playing = True
         self._play_pause_btn.set_icon_by_name('pause')
         self.on_play()
 
     def stop(self):
+        """Stop the playback"""
         self._playing = False
         self._play_pause_btn.set_icon_by_name('play')
         self.on_stop()
 
     def pause(self):
+        """Pause the playback"""
         self._playing = False
         self._play_pause_btn.set_icon_by_name('play')
         self.on_pause()
 
     def loop(self):
+        """Set repeating mode to loop."""
         self._loop = True
         self._loop_btn.set_icon_by_name('loop')
 
     def play_once(self):
+        """Set repeating mode to repeat once."""
         self._loop = False
         self._loop_btn.set_icon_by_name('once')
 
@@ -4081,17 +4261,52 @@ class PlaybackPanel(UI):
         _scene : scene
 
         """
+        def resize_cbk(caller, ev):
+            if self._auto_width:
+                width = _scene.GetSize()[0]
+                if width == self.width:
+                    return
+                self._width = width
+                self._set_position(self.position)
+                self._progress_bar.value = self._progress_bar.value
+        _scene.AddObserver(Command.StartEvent, resize_cbk)
         self.panel.add_to_scene(_scene)
         self._progress_bar.add_to_scene(_scene)
         self.time_text.add_to_scene(_scene)
 
-    def _set_position(self, _coords):
-        x, y = _coords
-        self.panel.position = (x + 5, y + 5)
-        self._progress_bar.center = (x + 512, y + 20)
+    @property
+    def width(self):
+        """Return the width of the PlaybackPanel
 
-        self.time_text.position = (x + self._progress_bar.track.width + 230,
-                                   y + 10)
+        Returns
+        -------
+        float
+            The width of the PlaybackPanel.
+        """
+        return self._width
+
+    @width.setter
+    def width(self, width):
+        """Set width of the PlaybackPanel.
+
+        Parameters
+        ----------
+        width: float
+            The width of the whole panel.
+            If set to None, The width will be the same as the window's width.
+        """
+        self._width = width if width is not None else 900
+        self._auto_width = width is None
+        self._set_position(self.position)
+
+    def _set_position(self, _coords):
+        x, y = self.position
+        width = self.width
+        self.panel.position = (x + 5, y + 5)
+        progress_length = max(width - 310 - x, 1.0)
+        self._progress_bar.track.width = progress_length
+        self._progress_bar.center = (x + 215 + progress_length / 2, y + 20)
+        self.time_text.position = (x + 225 + progress_length, y + 10)
 
     def _get_size(self):
         return self.panel.size + self._progress_bar.size + self.time_text.size
