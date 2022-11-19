@@ -3445,20 +3445,21 @@ class DrawShape(UI):
         self.shape.on_left_mouse_button_dragged = self.left_button_dragged
         self.shape.on_left_mouse_button_released = self.left_button_released
 
-        self.rotation_slider = RingSlider2D(initial_value=0,
-                                            text_template="{angle:5.1f}°")
+        # self.rotation_slider = RingSlider2D(initial_value=0,
+        #                                     text_template="{angle:5.1f}°")
+        self.rotation_slider = SpinBox(size=(185, 40), min_val=0, max_val=360)
         self.rotation_slider.set_visibility(False)
 
         if self.drawpanel:
             slider_position = self.drawpanel.canvas.position + \
-                [self.drawpanel.canvas.size[0] - self.rotation_slider.size[0]/2,
-                 self.rotation_slider.size[1]/2]
+                [self.drawpanel.canvas.size[0], 0]
             self.rotation_slider.center = slider_position
 
         def rotate_shape(slider):
-            angle = slider.value
-            previous_angle = slider.previous_value
-            rotation_angle = angle - previous_angle
+            # angle = slider.value
+            # previous_angle = slider.previous_value
+            # rotation_angle = angle - previous_angle
+            rotation_angle = slider.value
 
             current_center = self.center
             self.rotate(np.deg2rad(rotation_angle))
@@ -3769,6 +3770,7 @@ class DrawPanel(UI):
         # Todo
         # Add this size to __init__
         mode_panel_size = (len(mode_data) * 35 + 2 * padding, 40)
+        print(mode_panel_size)
         self.mode_panel = Panel2D(size=mode_panel_size, color=(0.5, 0.5, 0.5))
         btn_pos = np.array([0, 0])
 

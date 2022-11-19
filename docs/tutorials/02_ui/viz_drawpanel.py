@@ -32,7 +32,7 @@ showm = window.ShowManager(size=current_size, title="DrawPanel UI Example")
 
 showm.scene.add(drawing_canvas)
 
-interactive = False
+interactive = True
 
 if interactive:
     showm.start()
