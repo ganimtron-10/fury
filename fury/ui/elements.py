@@ -3243,6 +3243,7 @@ class DrawShape(UI):
         self.debug = debug
         self.color = np.random.random(3) if color is None else color
         self.highlight_color = highlight_color
+        self.rotation = 0
         super(DrawShape, self).__init__(position)
 
     def _setup(self):
@@ -3270,27 +3271,6 @@ class DrawShape(UI):
         self.shape.on_left_mouse_button_dragged = self.left_button_dragged
         self.shape.on_left_mouse_button_released = self.left_button_released
 
-        self.rotation_slider = RingSlider2D(initial_value=0,
-                                            text_template="{angle:5.1f}°")
-        self.rotation_slider.set_visibility(False)
-
-        if self.drawpanel:
-            slider_position = self.drawpanel.canvas.position + \
-                [self.drawpanel.canvas.size[0] - self.rotation_slider.size[0]/2,
-                 self.rotation_slider.size[1]/2]
-            self.rotation_slider.center = slider_position
-
-        def rotate_shape(slider):
-            angle = slider.value
-            previous_angle = slider.previous_value
-            rotation_angle = angle - previous_angle
-
-            current_center = self.center
-            self.rotate(np.deg2rad(rotation_angle))
-            self.update_shape_position(current_center - self.drawpanel.canvas.position)
-
-        self.rotation_slider.on_change = rotate_shape
-
     def _get_actors(self):
         """Get the actors composing this UI component."""
         return self.shape
@@ -3305,7 +3285,6 @@ class DrawShape(UI):
         """
         self._scene = scene
         self.shape.add_to_scene(scene)
-        self.rotation_slider.add_to_scene(scene)
         if self.debug:
             scene.add(*[border.actor for border in self.bb_box])
 
@@ -3370,12 +3349,12 @@ class DrawShape(UI):
 
     def selection_change(self):
         if self.is_selected:
+            self.drawpanel.rotation_slider.value = self.rotation
             self.highlight(True)
-            self.show_rotation_slider()
             self.set_bb_box_visibility(True)
         else:
             self.highlight(False)
-            self.rotation_slider.set_visibility(False)
+            self.drawpanel.rotation_slider.set_visibility(False)
             self.set_bb_box_visibility(False)
 
     def highlight(self, value):
@@ -3416,13 +3395,6 @@ class DrawShape(UI):
         update_actor(self.shape.actor)
 
         self.cal_bounding_box()
-
-    def show_rotation_slider(self):
-        """Display the RingSlider2D to allow rotation of shape from the center.
-        """
-        self._scene.rm(*self.rotation_slider.actors)
-        self.rotation_slider.add_to_scene(self._scene)
-        self.rotation_slider.set_visibility(True)
 
     def cal_bounding_box(self):
         """Calculate the min, max position and the size of the bounding box.
@@ -3477,9 +3449,9 @@ class DrawShape(UI):
         """
         self.drawpanel.shape_list.remove(self)
         self._scene.rm(self.shape.actor)
-        self._scene.rm(*self.rotation_slider.actors)
         if self.debug:
             self._scene.rm(*[border.actor for border in self.bb_box])
+        self.drawpanel.rotation_slider.set_visibility(False)
 
     def left_button_pressed(self, i_ren, _obj, shape):
         mode = self.drawpanel.current_mode
@@ -3492,6 +3464,7 @@ class DrawShape(UI):
 
             click_pos = np.array(i_ren.event.position)
             self._drag_offset = click_pos - self.center
+            self.drawpanel.show_rotation_slider()
             i_ren.event.abort()
         elif mode == "delete":
             if self.drawpanel.shape_group.is_present(self):
@@ -3504,7 +3477,7 @@ class DrawShape(UI):
 
     def left_button_dragged(self, i_ren, _obj, shape):
         if self.drawpanel.current_mode == "selection":
-            self.rotation_slider.set_visibility(False)
+            self.drawpanel.rotation_slider.set_visibility(False)
             if self._drag_offset is not None:
                 click_position = i_ren.event.position
                 relative_center_position = click_position - \
@@ -3522,7 +3495,7 @@ class DrawShape(UI):
 
     def left_button_released(self, i_ren, _obj, shape):
         if self.drawpanel.current_mode == "selection" and self.drawpanel.shape_group.is_empty():
-            self.show_rotation_slider()
+            self.drawpanel.show_rotation_slider()
         i_ren.force_render()
 
 
@@ -3619,6 +3592,22 @@ class DrawPanel(UI):
         self.mode_text = TextBlock2D(text="Select appropriate drawing mode using below icon")
         self.canvas.add_element(self.mode_text, (0.0, 1.0))
 
+        self.rotation_slider = RingSlider2D(initial_value=0,
+                                            text_template="{angle:5.1f}°")
+        self.rotation_slider.set_visibility(False)
+
+        def rotate_shape(slider):
+            angle = slider.value
+            previous_angle = slider.previous_value
+            rotation_angle = angle - previous_angle
+
+            current_center = self.current_shape.center
+            self.current_shape.rotate(np.deg2rad(rotation_angle))
+            self.current_shape.rotation = slider.value
+            self.current_shape.update_shape_position(current_center - self.canvas.position)
+
+        self.rotation_slider.on_moving_slider = rotate_shape
+
     def _get_actors(self):
         """Get the actors composing this UI component."""
         return self.canvas.actors
@@ -3631,9 +3620,10 @@ class DrawPanel(UI):
         scene : scene
 
         """
-        self.current_scene = scene
+        self._scene = scene
         iren = scene.GetRenderWindow().GetInteractor().GetInteractorStyle()
         iren.add_active_prop(self.canvas.actors[0])
+
         self.canvas.add_to_scene(scene)
         self.shape_group._scene = scene
 
@@ -3649,6 +3639,10 @@ class DrawPanel(UI):
             Absolute pixel coordinates (x, y).
         """
         self.canvas.position = coords + [0, self.mode_panel.size[1]]
+        slider_position = self.canvas.position + \
+            [self.canvas.size[0] - self.rotation_slider.size[0]/2,
+                self.rotation_slider.size[1]/2]
+        self.rotation_slider.center = slider_position
 
     def resize(self, size):
         """Resize the UI.
@@ -3705,9 +3699,9 @@ class DrawPanel(UI):
                           debug=self.debug)
         if shape_type == "circle":
             shape.max_size = self.cal_min_boundary_distance(current_position)
-        self.current_scene.add(shape)
-        self.canvas.add_element(shape, current_position - self.canvas.position)
         self.shape_list.append(shape)
+        self._scene.add(shape)
+        self.canvas.add_element(shape, current_position - self.canvas.position)
         self.update_shape_selection(shape)
 
     def resize_shape(self, current_position):
@@ -3728,6 +3722,13 @@ class DrawPanel(UI):
                 shape.is_selected = True
             else:
                 shape.is_selected = False
+
+    def show_rotation_slider(self):
+        """Display the  RingSlider2D to allow rotation of shape from the center.
+        """
+        self._scene.rm(*self.rotation_slider.actors)
+        self.rotation_slider.add_to_scene(self._scene)
+        self.rotation_slider.set_visibility(True)
 
     def update_button_icons(self, current_mode):
         """Update the button icon.
