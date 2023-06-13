@@ -4137,3 +4137,5 @@ class Scrollbar(LineSlider2D):
 
             self.handle.width = bar_size[1]
             self.handle.height = bar_size[0]
+        else:
+            raise ValueError('Unknown orientation')
