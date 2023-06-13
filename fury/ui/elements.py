@@ -4107,5 +4107,33 @@ class PlaybackPanel(UI):
 
 
 class Scrollbar(LineSlider2D):
-    def __init__(self):
-        super(Scrollbar, self).__init__()
+    def __init__(
+        self,
+        center=(150, 150),
+        # initial_value=50,
+        # min_value=0,
+        # max_value=100,
+        track_size=(200, 10),
+        bar_size=(10, 50),
+        orientation='vertical',
+    ):
+
+        super(Scrollbar, self).__init__(
+            center=center,
+            orientation=orientation,
+            text_template="",
+            shape="square"
+        )
+
+        if orientation == "vertical":
+            self.track.width = track_size[1]
+            self.track.height = track_size[0]
+
+            self.handle.width = bar_size[0]
+            self.handle.height = bar_size[1]
+        elif orientation == "horizontal":
+            self.track.width = track_size[0]
+            self.track.height = track_size[1]
+
+            self.handle.width = bar_size[1]
+            self.handle.height = bar_size[0]
