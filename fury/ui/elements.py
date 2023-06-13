@@ -16,6 +16,7 @@ __all__ = [
     'DrawShape',
     'DrawPanel',
     'PlaybackPanel',
+    'Scrollbar'
 ]
 
 import os
@@ -4103,3 +4104,8 @@ class PlaybackPanel(UI):
 
     def _get_size(self):
         return self.panel.size + self._progress_bar.size + self.time_text.size
+
+
+class Scrollbar(LineSlider2D):
+    def __init__(self):
+        super(Scrollbar, self).__init__()
