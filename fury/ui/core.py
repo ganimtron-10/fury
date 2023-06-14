@@ -734,6 +734,8 @@ class TextBlock2D(UI):
         super(TextBlock2D, self).__init__(position=position)
         self.scene = None
         self.have_bg = bool(bg_color)
+        self._justification = justification
+        self._vertical_justification = vertical_justification
         if size is not None:
             self.resize(size)
         else:
@@ -741,11 +743,9 @@ class TextBlock2D(UI):
         self.color = color
         self.background_color = bg_color
         self.font_family = font_family
-        self.justification = justification
         self.bold = bold
         self.italic = italic
         self.shadow = shadow
-        self.vertical_justification = vertical_justification
         self.message = text
 
     def _setup(self):
@@ -766,6 +766,9 @@ class TextBlock2D(UI):
             self.background.resize(size)
         self.actor.SetTextScaleModeToProp()
         self.actor.SetPosition2(*size)
+        self.actor.SetTextScaleModeToNone()
+
+        self.set_justification()
 
     def _get_actors(self):
         """Get the actors composing this UI component."""
@@ -785,8 +788,7 @@ class TextBlock2D(UI):
             self.background.resize(size)
         scene.add(self.background, self.actor)
 
-        self.justification = self.justification
-        self.vertical_justification = self.vertical_justification
+        self.set_justification()
 
     @property
     def message(self):
@@ -884,13 +886,7 @@ class TextBlock2D(UI):
         str
             Text justification.
         """
-        justification = self.actor.GetTextProperty().GetJustificationAsString()
-        if justification == 'Left':
-            return 'left'
-        elif justification == 'Centered':
-            return 'center'
-        elif justification == 'Right':
-            return 'right'
+        return self._justification
 
     @justification.setter
     def justification(self, justification):
@@ -902,15 +898,9 @@ class TextBlock2D(UI):
             Possible values are left, right, center.
 
         """
-        text_property = self.actor.GetTextProperty()
-        if justification == 'left':
-            text_property.SetJustificationToLeft()
-        elif justification == 'center':
-            text_property.SetJustificationToCentered()
-            self.actor.SetPosition(self.position + [self.background.size[0]//2, 0])
-        elif justification == 'right':
-            text_property.SetJustificationToRight()
-            self.actor.SetPosition(self.position + [self.background.size[0], 0])
+        if justification in ['left', 'center', 'right']:
+            self._justification = justification
+            self.set_justification()
         else:
             msg = 'Text can only be justified left, right and center.'
             raise ValueError(msg)
@@ -925,14 +915,7 @@ class TextBlock2D(UI):
             Text vertical justification.
 
         """
-        text_property = self.actor.GetTextProperty()
-        vjustification = text_property.GetVerticalJustificationAsString()
-        if vjustification == 'Bottom':
-            return 'bottom'
-        elif vjustification == 'Centered':
-            return 'middle'
-        elif vjustification == 'Top':
-            return 'top'
+        return self._vertical_justification
 
     @vertical_justification.setter
     def vertical_justification(self, vertical_justification):
@@ -944,15 +927,9 @@ class TextBlock2D(UI):
             Possible values are bottom, middle, top.
 
         """
-        text_property = self.actor.GetTextProperty()
-        if vertical_justification == 'bottom':
-            text_property.SetVerticalJustificationToBottom()
-        elif vertical_justification == 'middle':
-            text_property.SetVerticalJustificationToCentered()
-            self.actor.SetPosition(self.position + [0, self.background.size[1]//2])
-        elif vertical_justification == 'top':
-            text_property.SetVerticalJustificationToTop()
-            self.actor.SetPosition(self.position + [0, self.background.size[1]])
+        if vertical_justification in ['top', 'middle', 'bottom']:
+            self._vertical_justification = vertical_justification
+            self.set_justification()
         else:
             msg = 'Vertical justification must be: bottom, middle or top.'
             raise ValueError(msg)
@@ -1084,6 +1061,32 @@ class TextBlock2D(UI):
             self.have_bg = True
             self.background.set_visibility(True)
             self.background.color = color
+
+    def set_justification(self):
+        updated_position = [0, 0]
+        text_property = self.actor.GetTextProperty()
+
+        if self._justification == 'left':
+            text_property.SetJustificationToLeft()
+            updated_position[0] = self.position[0]
+        elif self._justification == 'center':
+            text_property.SetJustificationToCentered()
+            updated_position[0] = self.position[0] + self.background.size[0]//2
+        elif self._justification == 'right':
+            text_property.SetJustificationToRight()
+            updated_position[0] = self.position[0] + self.background.size[0]
+
+        if self._vertical_justification == 'bottom':
+            text_property.SetVerticalJustificationToBottom()
+            updated_position[1] = self.position[1]
+        elif self._vertical_justification == 'middle':
+            text_property.SetVerticalJustificationToCentered()
+            updated_position[1] = self.position[1] + self.background.size[1]//2
+        elif self._vertical_justification == 'top':
+            text_property.SetVerticalJustificationToTop()
+            updated_position[1] = self.position[1] + self.background.size[1]
+
+        self.actor.SetPosition(updated_position)
 
     def _set_position(self, position):
         """Set text actor position.
