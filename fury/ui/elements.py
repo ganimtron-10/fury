@@ -4629,8 +4629,7 @@ class Tree2D(UI):
     def _setup(self):
         """Setup this UI element."""
         self.generate_tree(self.structure)
-        _icon_path = 'https://img.icons8.com/material-rounded/24/000000/'\
-                     'stacked-organizational-chart-highlighted-parent-node.png'
+        _icon_path = 'D:/FuryWorkspace/new_icons/stacked-organizational-chart-highlighted-parent-node.png'
 
         self.base_node = TreeNode2D(label=self.tree_name, children=self._nodes,
                                     expandable=False, expanded=True,
@@ -4971,7 +4970,7 @@ class TreeNode2D(UI):
 
             node.parent = self
             node.expanded = False
-            node.title_panel.set_visibility(False)
+            # node.title_panel.set_visibility(False)
             node.child_height = self.child_height
 
             _node_coords = (self.indent+self.child_indent,
