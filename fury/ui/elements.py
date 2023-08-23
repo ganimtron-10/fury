@@ -5118,6 +5118,10 @@ class TreeNode2D(UI):
     def set_content_visibility(self, visibility):
         """Set content's visibility of this UI component."""
         self.content_panel.set_visibility(visibility)
+        for element in self.content_panel._elements:
+            if isinstance(element, type(self)):
+                if not element.expanded:
+                    element.set_content_visibility(False)
 
     def select_child(self, child_label):
         """Get the instance of a particular child node.
