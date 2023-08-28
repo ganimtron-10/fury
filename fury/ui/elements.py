@@ -5082,7 +5082,7 @@ class TreeNode2D(UI):
                                   recursive=False)
                 else:
                     parent.resize((parent.size[0], parent.content_size[1]),
-                                  recursive=False)
+                                  recursive=True)
 
             parent = parent.parent
 
@@ -5120,7 +5120,7 @@ class TreeNode2D(UI):
         self.content_panel.set_visibility(visibility)
         for element in self.content_panel._elements:
             if isinstance(element, type(self)):
-                    element.set_content_visibility(element.expanded)
+                element.set_content_visibility(element.expanded)
 
     def select_child(self, child_label):
         """Get the instance of a particular child node.
