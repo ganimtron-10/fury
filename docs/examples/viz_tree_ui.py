@@ -30,8 +30,7 @@ panel_second = ui.Panel2D(size=(100, 100), color=(0.3, 0.8, 0.5))
 
 ###############################################################################
 # Now, we create an ImageContainer2D for the ImageContainers node
-path = "https://raw.githubusercontent.com/fury-gl/"\
-       "fury-communication-assets/main/fury-logo.png"
+path = "D:/FuryWorkspace/new_icons/fury-communication-assets/fury-logo.png"
 
 img = ImageContainer2D(img_path=path, size=(100, 100))
 
@@ -79,7 +78,7 @@ show_manager = window.ShowManager(size=current_size,
 show_manager.scene.add(tree)
 
 # To interact with the UI, set interactive = True
-interactive = False
+interactive = 1
 
 if interactive:
     show_manager.start()
