@@ -13,12 +13,15 @@ from fury.material import (
     VectorFieldLineMaterial,
     VectorFieldThinLineMaterial,
 )
+from fury.optpkg import optional_package
 from fury.utils import (
     generate_planar_uvs,
     get_slices,
     set_group_visibility,
     show_slices,
 )
+
+_, have_numba, _ = optional_package("numba")
 
 
 def random_png(width, height):
@@ -994,3 +997,29 @@ def test_SphGlyph_geometry_properties():
     # Check SH coefficients
     assert glyph.sh_coeff.shape[0] == 3 * 3 * 3 * 9
     assert glyph.sf_func.shape[0] == 200 * glyph.material.n_coeffs
+
+
+def test_streamtube():
+    lines = [np.array([[0, 0, 0], [1, 1, 1]])]
+    colors = np.array([[1, 0, 0]])
+    scene = window.Scene()
+
+    tube_actor = actor.streamtube(lines=lines, colors=colors)
+    scene.add(tube_actor)
+
+    fname = "streamtube_test.png"
+    window.snapshot(scene=scene, fname=fname)
+    img = Image.open(fname)
+    img_array = np.array(img)
+
+    mean_r, mean_g, mean_b, _ = np.mean(
+        img_array.reshape(-1, img_array.shape[2]), axis=0
+    )
+
+    assert mean_r > mean_g and mean_r > mean_b
+
+    middle_pixel = img_array[img_array.shape[0] // 2, img_array.shape[1] // 2]
+    r, g, b, a = middle_pixel
+    assert r > g and r > b
+
+    scene.remove(tube_actor)
