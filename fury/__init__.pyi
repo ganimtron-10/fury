@@ -380,7 +380,7 @@ from .ui import (
     #     ListBox2D as ListBox2D,
     #     ListBoxItem2D as ListBoxItem2D,
     #     Option as Option,
-    #     Panel2D as Panel2D,
+    Panel2D as Panel2D,
     #     PlaybackPanel as PlaybackPanel,
     #     RadioButton as RadioButton,
     #     RangeSlider as RangeSlider,

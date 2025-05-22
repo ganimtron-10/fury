@@ -10,7 +10,7 @@ some geometric shapes from FURY UI elements.
 First, a bunch of imports.
 """
 
-from fury.ui import Rectangle2D, Disk2D
+from fury.ui import Rectangle2D, Disk2D, Panel2D
 from fury.window import Scene, ShowManager
 from fury.data import fetch_viz_icons
 
@@ -44,14 +44,16 @@ disk = Disk2D(outer_radius=50, center=(400, 200), color=(1, 1, 0))
 # Now that all the elements have been initialised, we add them to the show
 # manager.
 
+panel = Panel2D(size=(100, 100), position=(500, 500), color=(0, 0, 1))
 
 scene.add(rect)
 scene.add(disk)
-# show_manager.scene.add(ring)
+scene.add(panel)
 
 if __name__ == "__main__":
     current_size = (800, 800)
     show_manager = ShowManager(
         scene=scene, size=current_size, title="FURY 2.0: Shapes Example"
     )
+    panel.canvas = show_manager.window
     show_manager.start()
