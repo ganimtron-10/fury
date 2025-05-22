@@ -78,10 +78,21 @@ LineDebugMaterial = gfx.LineDebugMaterial
 DirectionalLight = gfx.DirectionalLight
 OrbitController = gfx.OrbitController
 PerspectiveCamera = gfx.PerspectiveCamera
+ScreenCoordsCamera = gfx.ScreenCoordsCamera
 Renderer = gfx.WgpuRenderer
 run = run
 Canvas = WgpuCanvas
 OffscreenCanvas = OffscreenWgpuCanvas
+
+Event = gfx.Event
+WindowEvent = gfx.WindowEvent
+PointerEvent = gfx.PointerEvent
+WheelEvent = gfx.WheelEvent
+KeyboardEvent = gfx.KeyboardEvent
+
+
+plane_geometry = gfx.plane_geometry
+
 if have_jupyter_rfb:
     JupyterCanvas = JupyterWgpuCanvas
 else:
