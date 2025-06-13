@@ -22,6 +22,7 @@ from fury.lib import PointerEvent
 from fury.ui.core import UI, Rectangle2D
 
 # # from fury.utils import rotate, set_input
+from fury.ui.context import UIContext
 
 
 class Panel2D(UI):
@@ -94,10 +95,10 @@ class Panel2D(UI):
 
         if self.has_border:
             self.borders = {
-                "left": Rectangle2D(),
-                "right": Rectangle2D(),
-                "top": Rectangle2D(),
-                "bottom": Rectangle2D(),
+                "left": Rectangle2D(color=(1, 0, 0)),
+                "right": Rectangle2D(color=(0, 1, 0)),
+                "top": Rectangle2D(color=(0, 0, 1)),
+                "bottom": Rectangle2D(color=(1, 1, 0)),
             }
 
             self.border_coords = {
@@ -108,7 +109,7 @@ class Panel2D(UI):
             }
 
             for key in self.borders.keys():
-                self.borders[key].color = self._border_color
+                # self.borders[key].color = self._border_color
                 self.add_element(self.borders[key], self.border_coords[key])
 
             for key in self.borders.keys():

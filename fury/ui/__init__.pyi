@@ -31,6 +31,7 @@ __all__ = [
     #     "clip_overflow",
     #     "rotate_2d",
     #     "wrap_overflow",
+    "UIContext",
 ]
 
 # from . import (
@@ -70,3 +71,5 @@ from .core import UI, Disk2D, Rectangle2D
 #     rotate_2d,
 #     wrap_overflow,
 # )
+
+from .context import UIContext

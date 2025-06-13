@@ -38,6 +38,7 @@ from fury.primitive import prim_disk
 #     TexturedActor2D,
 # )
 # from fury.utils import set_input
+from fury.ui.context import UIContext
 
 
 class UI(object, metaclass=abc.ABCMeta):
@@ -220,13 +221,25 @@ class UI(object, metaclass=abc.ABCMeta):
 
     @property
     def position(self):
+        # Currently returns values in y down
         return self._position
 
     @position.setter
     def position(self, coords):
+        # y down came in
         coords = np.asarray(coords)
-        self._set_position(coords)
         self._position = coords
+        # converted to y up for setting
+        y_up_coords = np.array([coords[0], UIContext.get_canvas_size()[1] - coords[1]])
+        print(f"{UIContext.get_canvas_size()} {self}: {y_up_coords} {self.size}")
+
+        center_coords = np.array(
+            [
+                y_up_coords[0] + (self.size[0] / 2),
+                y_up_coords[1] + (self.size[1] / 2),
+            ]
+        )
+        self._set_position(center_coords)
 
     @abc.abstractmethod
     def _set_position(self, _coords):

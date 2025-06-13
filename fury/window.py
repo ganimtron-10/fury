@@ -23,6 +23,7 @@ from fury.lib import (
     Canvas,
     Controller,
     DirectionalLight,
+    Group as GfxGroup,  # type: ignore
     JupyterCanvas,
     OffscreenCanvas,
     OrbitController,
@@ -35,10 +36,10 @@ from fury.lib import (
     get_app,
     run,
 )
-from fury.ui import UI
+from fury.ui import UI, UIContext
 
 
-class Scene(GfxScene):
+class Scene(GfxGroup):
     """Scene class to hold the actors in the scene.
 
     Data Structure to arrange the logical and spatial representation of the
@@ -90,6 +91,7 @@ class Scene(GfxScene):
         self.ui_camera = ScreenCoordsCamera()
         self.ui_scene.add(self.ui_camera)
         self.add(self.ui_scene)
+        self.ui_elements = []
 
         self._bg_color = background
         self._bg_actor = None
@@ -171,11 +173,12 @@ class Scene(GfxScene):
         self.add(*self.lights)
 
     def add(self, *objects):
-        for object in objects:
-            if isinstance(object, UI):
-                object.add_to_scene(self.ui_scene)
+        for obj in objects:
+            if isinstance(obj, UI):
+                self.ui_elements.append(obj)
+                obj.add_to_scene(self.ui_scene)
             else:
-                self.main_scene.add(object)
+                self.main_scene.add(obj)
 
 
 @dataclass
@@ -330,6 +333,14 @@ def render_screens(renderer, screens: List[Screen]):
         screen.viewport.render(scene_root.ui_scene, scene_root.ui_camera, flush=False)
 
     renderer.flush()
+
+
+def reposition_ui(screens: List[Screen]):
+    print(f"Repositioning UI")
+    for screen in screens:
+        scene_root = screen.scene
+        for child in scene_root.ui_elements:
+            child.position = child.position
 
 
 def calculate_screen_sizes(screens, size):
@@ -615,17 +626,19 @@ class ShowManager:
             )
         return screens
 
-    def _resize(self, _event):
+    def _resize(self, event):
         """Handle window resize events by updating viewports and re-rendering.
 
         Parameters
         ----------
         _event : Event
             The PyGfx resize event object (unused in current implementation)."""
+        UIContext.set_canvas_size((event.width, event.height))
         update_viewports(
             self.screens,
             calculate_screen_sizes(self._screen_config, self.renderer.logical_size),
         )
+        reposition_ui(self.screens)
         self.render()
 
     async def _handle_key_long_press(self, event):
