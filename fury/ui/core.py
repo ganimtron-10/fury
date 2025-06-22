@@ -111,6 +111,7 @@ class UI(object, metaclass=abc.ABCMeta):
         self._scene = object()
         self._position = np.array([0, 0])
         self._callbacks = []
+        self._childrens = []
 
         self._setup()  # Setup needed actors and sub UI components.
         self.position = position
@@ -158,47 +159,6 @@ class UI(object, metaclass=abc.ABCMeta):
         """Actors composing this UI component."""
         return self._get_actors()
 
-    @abc.abstractmethod
-    def _add_to_scene(self, _scene: Scene):
-        """Add all subcomponents or VTK props that compose this UI component.
-
-        Parameters
-        ----------
-        _scene : Scene
-
-        """
-        msg = "Subclasses of UI must implement `_add_to_scene(self, scene)`."
-        raise NotImplementedError(msg)
-
-    def add_to_scene(self, scene: Scene):
-        """Allow UI objects to add their own props to the scene.
-
-        Parameters
-        ----------
-        scene : scene
-
-        """
-        self._add_to_scene(scene)
-
-        # Get a hold on the current interactor style.
-        # iren = scene.GetRenderWindow().GetInteractor().GetInteractorStyle()
-
-        # for callback in self._callbacks:
-        #     if not isinstance(iren, CustomInteractorStyle):
-        #         msg = (
-        #             "The ShowManager requires `CustomInteractorStyle` in"
-        #             " order to use callbacks."
-        #         )
-        #         raise TypeError(msg)
-
-        #     if callback[0] == self._scene:
-        #         iren.add_callback(iren, callback[1], callback[2], args=[self])
-        #     else:
-        #         # iren.add_callback(*callback, args=[self])
-        #         if len(callback) > 3:
-        #             iren.add_callback(
-        #                       *callback[:3], priority=callback[3], args=[self])
-
     # @warn_on_args_to_kwargs()
     # def add_callback(self, prop, event_type, callback, *, priority=0):
     #     """Add a callback to a specific event for this UI component.
@@ -230,16 +190,18 @@ class UI(object, metaclass=abc.ABCMeta):
         coords = np.asarray(coords)
         self._position = coords
         # converted to y up for setting
-        y_up_coords = np.array([coords[0], UIContext.get_canvas_size()[1] - coords[1]])
-        print(f"{UIContext.get_canvas_size()} {self}: {y_up_coords} {self.size}")
-
         center_coords = np.array(
             [
-                y_up_coords[0] + (self.size[0] / 2),
-                y_up_coords[1] + (self.size[1] / 2),
+                coords[0] + (self.size[0] / 2),
+                coords[1] + (self.size[1] / 2),
             ]
         )
-        self._set_position(center_coords)
+
+        y_up_coords = np.array(
+            [center_coords[0], UIContext.get_canvas_size()[1] - center_coords[1]]
+        )
+
+        self._set_position(y_up_coords)
 
     @abc.abstractmethod
     def _set_position(self, _coords):
@@ -474,20 +436,11 @@ class Rectangle2D(UI):
 
         self.actor = create_mesh(geometry=geo, material=mat)
         self.handle_events(self.actor)
+        self._childrens.append(self.actor)
 
     def _get_actors(self):
         """Get the actors composing this UI component."""
         return [self.actor]
-
-    def _add_to_scene(self, scene):
-        """Add all subcomponents or VTK props that compose this UI component.
-
-        Parameters
-        ----------
-        scene : scene
-
-        """
-        scene.add(self.actor)
 
     def _get_size(self):
         # # Get 2D coordinates of two opposed corners of the rectangle.
@@ -546,7 +499,7 @@ class Rectangle2D(UI):
 
         """
         # self.actor.SetPosition(*coords)
-        self.actor.local.position = np.array([*coords, 0])
+        self.actor.local.position = np.array([*coords, self.actor.local.position[2]])
 
     @property
     def color(self):
@@ -655,20 +608,11 @@ class Disk2D(UI):
         )
 
         self.handle_events(self.actor)
+        self._childrens.append(self.actor)
 
     def _get_actors(self):
         """Get the actors composing this UI component."""
         return [self.actor]
-
-    def _add_to_scene(self, scene):
-        """Add all subcomponents or VTK props that compose this UI component.
-
-        Parameters
-        ----------
-        scene : scene
-
-        """
-        scene.add(self.actor)
 
     def _get_size(self):
         diameter = 2 * self.outer_radius

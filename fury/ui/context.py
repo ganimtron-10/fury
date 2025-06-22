@@ -31,7 +31,6 @@ class UIContextClass:
         return self._active_ui
 
     def set_canvas_size(self, size):
-        print(f"Incoming size {size}")
         size = np.array(size)
         if not np.array_equal(self._canvas_size, size):
             self._canvas_size = size

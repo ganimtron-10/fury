@@ -25,23 +25,25 @@ scene = Scene()
 ###############################################################################
 # Let's draw some simple shapes. First, a rectangle.
 
-rect = Rectangle2D(size=(100, 100), position=(400, 400), color=(1, 0, 1))
+# rect = Rectangle2D(size=(100, 100), position=(400, 400), color=(1, 0, 1))
+
+# ###############################################################################
+# # Then we can draw a solid circle, or disk.
+
+# disk = Disk2D(outer_radius=50, center=(400, 200), color=(1, 1, 0))
 
 ###############################################################################
 # Then we can draw a solid circle, or disk.
 
-disk = Disk2D(outer_radius=50, center=(400, 200), color=(1, 1, 0))
-
-###############################################################################
-# Then we can draw a solid circle, or disk.
-
-panel = Panel2D(size=(250, 250), position=(200, 300), color=(0, 1, 1))
+panel = Panel2D(
+    size=(250, 250), position=(0, 0), color=(0, 1, 1), has_border=1, border_width=5
+)
 
 ###############################################################################
 # Now that all the elements have been initialised, we add them to the scene.
 
-scene.add(rect)
-scene.add(disk)
+# scene.add(rect)
+# scene.add(disk)
 scene.add(panel)
 
 if __name__ == "__main__":

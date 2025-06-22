@@ -35,6 +35,7 @@ from fury.lib import (
     Viewport,
     get_app,
     run,
+    Mesh,
 )
 from fury.ui import UI, UIContext
 
@@ -176,7 +177,7 @@ class Scene(GfxGroup):
         for obj in objects:
             if isinstance(obj, UI):
                 self.ui_elements.append(obj)
-                obj.add_to_scene(self.ui_scene)
+                add_ui(self.ui_scene, obj)
             else:
                 self.main_scene.add(obj)
 
@@ -232,6 +233,20 @@ class Screen:
         value : tuple
             The desired position and size (x, y, w, h) for the viewport."""
         self.viewport.rect = value
+
+
+def add_ui(scene: GfxScene, ui_obj: UI, z_index: float = 1.0):
+    next_level_ui = []
+    for child in ui_obj._childrens:
+        if isinstance(child, Mesh):
+            child.local.z = z_index
+            scene.add(child)
+        else:
+            next_level_ui.append(child)
+
+    if next_level_ui:
+        for ui in next_level_ui:
+            add_ui(scene, ui, z_index - 0.001)
 
 
 def create_screen(
@@ -336,7 +351,6 @@ def render_screens(renderer, screens: List[Screen]):
 
 
 def reposition_ui(screens: List[Screen]):
-    print(f"Repositioning UI")
     for screen in screens:
         scene_root = screen.scene
         for child in scene_root.ui_elements:

@@ -92,13 +92,15 @@ class Panel2D(UI):
         self._elements = []
         self.element_offsets = []
         self.background = Rectangle2D()
+        self._childrens.append(self.background)
+        # self.background.set_visibility(False)
 
         if self.has_border:
             self.borders = {
-                "left": Rectangle2D(color=(1, 0, 0)),
-                "right": Rectangle2D(color=(0, 1, 0)),
-                "top": Rectangle2D(color=(0, 0, 1)),
-                "bottom": Rectangle2D(color=(1, 1, 0)),
+                "left": Rectangle2D(color=(1, 0, 0)),  # r
+                "right": Rectangle2D(color=(0, 1, 0)),  # g
+                "top": Rectangle2D(color=(0, 0, 1)),  # b
+                "bottom": Rectangle2D(color=(1, 1, 0)),  # rg
             }
 
             self.border_coords = {
@@ -111,6 +113,7 @@ class Panel2D(UI):
             for key in self.borders.keys():
                 # self.borders[key].color = self._border_color
                 self.add_element(self.borders[key], self.border_coords[key])
+                self.background._childrens.append(self.borders[key])
 
             for key in self.borders.keys():
                 self.borders[
@@ -129,22 +132,7 @@ class Panel2D(UI):
 
     def _get_actors(self):
         """Get the actors composing this UI component."""
-        actors = []
-        for element in self._elements:
-            actors += element.actors
-
-        return actors
-
-    def _add_to_scene(self, scene):
-        """Add all subcomponents or VTK props that compose this UI component.
-
-        Parameters
-        ----------
-        scene : scene
-
-        """
-        for element in self._elements:
-            element.add_to_scene(scene)
+        return self._childrens
 
     def _get_size(self):
         return self.background.size
