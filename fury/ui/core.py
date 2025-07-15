@@ -4,11 +4,8 @@ import abc
 
 import numpy as np
 
-from fury.actor import disk
 from fury.decorators import warn_on_args_to_kwargs
-from fury.geometry import (
-    create_mesh,
-)
+from fury.geometry import buffer_to_geometry, create_mesh
 from fury.lib import (
     KeyboardEvent,
     Mesh,
@@ -18,6 +15,7 @@ from fury.lib import (
 from fury.material import (
     _create_mesh_material,
 )
+from fury.primitive import prim_ring
 from fury.ui import UIContext
 from fury.ui.helpers import Anchor
 
@@ -126,7 +124,6 @@ class UI(object, metaclass=abc.ABCMeta):
         """
         self._position = np.array([0, 0])
         self._children = []
-        self._actors = []
 
         self._setup()  # Setup needed actors and sub UI components.
         self.set_position(position, x_anchor, y_anchor)
@@ -162,6 +159,12 @@ class UI(object, metaclass=abc.ABCMeta):
         msg = "Subclasses of UI must implement `_setup(self)`."
         raise NotImplementedError(msg)
 
+    @abc.abstractmethod
+    def _get_actors(self):
+        """Get the actors composing this UI component."""
+        msg = "Subclasses of UI must implement `_get_actors(self)`."
+        raise NotImplementedError(msg)
+
     @property
     def actors(self):
         """Get actors composing this UI component.
@@ -171,7 +174,7 @@ class UI(object, metaclass=abc.ABCMeta):
         list
             List of actors composing this UI component.
         """
-        return self._actors
+        return self._get_actors()
 
     @property
     def children(self):
@@ -553,7 +556,7 @@ class Rectangle2D(UI):
     def _setup(self):
         """Set up this UI component.
 
-        Create the polygon actor used internally.
+        Create the plane actor used internally.
         """
         # # Setup four points
         # size = (1, 1)
@@ -596,8 +599,17 @@ class Rectangle2D(UI):
         )
         self.actor = create_mesh(geometry=geo, material=mat)
 
-        self._actors.append(self.actor)
         self.handle_events(self.actor)
+
+    def _get_actors(self):
+        """Get the actors composing this UI component.
+
+        Returns
+        -------
+        list
+            List of actors composing this UI component.
+        """
+        return [self.actor]
 
     def _get_size(self):
         """Get the current size of the rectangle actor.
@@ -748,6 +760,8 @@ class Disk2D(UI):
     ----------
     outer_radius : int
         Outer radius of the disk.
+    inner_radius : int
+        Inner radius of the disk.
     center : (float, float), optional
         Coordinates (x, y) of the center of the disk.
     color : (float, float, float), optional
@@ -761,6 +775,7 @@ class Disk2D(UI):
         self,
         outer_radius,
         *,
+        inner_radius=0,
         center=(0, 0),
         color=(1, 1, 1),
         opacity=1.0,
@@ -771,6 +786,8 @@ class Disk2D(UI):
         ----------
         outer_radius : int
             Outer radius of the disk.
+        inner_radius : int, optional
+            Inner radius of the disk.
         center : (float, float), optional
             Coordinates (x, y) of the center of the disk.
         color : (float, float, float), optional
@@ -779,6 +796,7 @@ class Disk2D(UI):
             Must take values in [0, 1].
         """
         self.actor = None
+        self.inner_radius = inner_radius
         self.outer_radius = outer_radius
 
         super(Disk2D, self).__init__(
@@ -810,12 +828,26 @@ class Disk2D(UI):
         # # Add default events listener to the VTK actor.
         # self.handle_events(self.actor)
 
-        self.actor = disk(
-            centers=np.zeros((1, 3)), radii=self.outer_radius, material="basic"
+        positions, indices = prim_ring(
+            inner_radius=self.inner_radius, outer_radius=self.outer_radius
         )
+        geo = buffer_to_geometry(positions=positions, indices=indices)
+        mat = _create_mesh_material(
+            material="basic", enable_picking=True, flat_shading=True
+        )
+        self.actor = create_mesh(geometry=geo, material=mat)
 
-        self._actors.append(self.actor)
         self.handle_events(self.actor)
+
+    def _get_actors(self):
+        """Get the actors composing this UI component.
+
+        Returns
+        -------
+        list
+            List of actors composing this UI component.
+        """
+        return [self.actor]
 
     def _get_size(self):
         """Get the current size of the disk.
@@ -912,8 +944,45 @@ class Disk2D(UI):
         # self._disk.SetOuterRadius(radius)
         # self._disk.Update()
         if self.actor:
-            self.actor = disk(centers=np.zeros((1, 3)), radii=radius, material="basic")
+            positions, indices = prim_ring(
+                inner_radius=self.inner_radius, outer_radius=radius
+            )
+            self.actor.geometry = buffer_to_geometry(
+                positions=positions, indices=indices
+            )
         self._outer_radius = radius
+
+    @property
+    def inner_radius(self):
+        """Get the inner radius of the disk.
+
+        Returns
+        -------
+        int
+            Inner radius in pixels.
+        """
+        # return self._disk.GetInnerRadius()
+        return self._inner_radius
+
+    @inner_radius.setter
+    def inner_radius(self, radius):
+        """Set the inner radius of the disk.
+
+        Parameters
+        ----------
+        radius : int
+            New inner radius.
+        """
+        # self._disk.SetInnerRadius(radius)
+        # self._disk.Update()
+        if self.actor:
+            positions, indices = prim_ring(
+                inner_radius=radius, outer_radius=self.outer_radius
+            )
+            self.actor.geometry = buffer_to_geometry(
+                positions=positions, indices=indices
+            )
+        self._inner_radius = radius
 
 
 # class TextBlock2D(UI):

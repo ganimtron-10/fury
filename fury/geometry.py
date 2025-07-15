@@ -380,3 +380,125 @@ def axes_for_dir(d, prev_x=None):
     x /= np.linalg.norm(x)
     y = np.cross(d, x)
     return x, y
+
+
+def generate_ring(
+    inner_radius, outer_radius, radial_segments, circumferential_segments
+):
+    """
+    Generate geometry data for ring.
+
+    Parameters
+    ----------
+    inner_radius : float
+        The inner radius of the ring (radius of the hole).
+    outer_radius : float
+        The outer radius of the ring.
+    radial_segments : int
+        Number of segments along the radial direction.
+    circumferential_segments : int
+        Number of segments around the circumference.
+
+    Returns
+    -------
+    positions : ndarray
+        Array of vertex positions (x, y, 0).
+    normals : ndarray
+        Array of vertex normals (0, 0, 1).
+    texcoords : ndarray
+        Array of texture coordinates (u, v).
+    indices : ndarray
+        Array of triangle indices.
+    """
+    inner_radius = max(0, float(inner_radius))
+    outer_radius = max(inner_radius, float(outer_radius))
+
+    if radial_segments < 1:
+        raise ValueError("radial_segments must be greater than or equal to 1")
+    if circumferential_segments < 3:
+        raise ValueError("circumferential_segments must be greater than or equal to 3")
+    if not (0 <= inner_radius < outer_radius):
+        raise ValueError(
+            "inner_radius must be greater than equal to 0 and less than outer_radius"
+        )
+
+    # Number of vertices along radial and circumferential directions
+    nr = radial_segments + 1
+    nc = circumferential_segments
+
+    # Generate radial and angular coordinates
+    radii = np.linspace(inner_radius, outer_radius, nr, dtype=np.float32)
+    angles = np.linspace(0, 2 * np.pi, nc, endpoint=False, dtype=np.float32)
+
+    # Create a grid of radii and angles
+    rr, aa = np.meshgrid(radii, angles)
+    rr, aa = rr.flatten(), aa.flatten()
+
+    # Convert to Cartesian coordinates (x, y, z=0)
+    x = rr * np.cos(aa)
+    y = rr * np.sin(aa)
+    positions = np.column_stack([x, y, np.zeros_like(x)])
+
+    # Texture coordinates: map radial distance to [0, 1], angle to [0, 1]
+    texcoords = np.zeros((nc * nr, 2), dtype=np.float32)
+    texcoords[:, 0] = (rr - inner_radius) / (
+        outer_radius - inner_radius
+    )  # u: radial distance
+    texcoords[:, 1] = aa / (2 * np.pi)  # v: angular coordinate
+    # Flip v to match typical texture coordinate orientation
+    texcoords[:, 1] = 1 - texcoords[:, 1]
+
+    # Normals: all point along +z (0, 0, 1)
+    normals = np.tile(np.array([0, 0, 1], dtype=np.float32), (nc * nr, 1))
+
+    # Generate indices for triangles
+    indices = []
+    for i in range(nc):
+        for j in range(radial_segments):
+            # Vertex indices for a quad (counter-clockwise)
+            v0 = i * nr + j
+            v1 = i * nr + (j + 1)
+            v2 = ((i + 1) % nc) * nr + j
+            v3 = ((i + 1) % nc) * nr + (j + 1)
+
+            # Two triangles per quad
+            indices.append([v0, v1, v3])  # First triangle
+            indices.append([v0, v3, v2])  # Second triangle
+
+    indices = np.array(indices, dtype=np.uint32)
+
+    return positions, normals, texcoords, indices
+
+
+def ring_geometry(
+    inner_radius=0, outer_radius=10, radial_segments=1, circumferential_segments=16
+):
+    """
+    Generate a Ring geometry.
+
+    Parameters
+    ----------
+    inner_radius : float
+        The inner radius of the ring (radius of the hole).
+    outer_radius : float
+        The outer radius of the ring.
+    radial_segments : int
+        Number of segments along the radial direction.
+    circumferential_segments : int
+        Number of segments around the circumference.
+
+    Returns
+    -------
+    Geometry
+        A geometry object representing the requested ring.
+    """
+    positions, normals, texcoords, indices = generate_ring(
+        inner_radius, outer_radius, radial_segments, circumferential_segments
+    )
+
+    return Geometry(
+        indices=indices,
+        positions=positions,
+        normals=normals,
+        texcoords=texcoords,
+    )
