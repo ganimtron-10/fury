@@ -920,7 +920,7 @@ class Disk2D(UI):
         # self._disk.Update()
         if self.actor:
             self.actor.geometry = ring_geometry(
-                inner_radius=self.inner_radius, outer_radius=self.outer_radius
+                inner_radius=self.inner_radius, outer_radius=radius
             )
         self._outer_radius = radius
 
@@ -949,7 +949,7 @@ class Disk2D(UI):
         # self._disk.Update()
         if self.actor:
             self.actor.geometry = ring_geometry(
-                inner_radius=self.inner_radius, outer_radius=self.outer_radius
+                inner_radius=radius, outer_radius=self.outer_radius
             )
         self._inner_radius = radius
 
