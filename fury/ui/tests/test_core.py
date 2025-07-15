@@ -189,6 +189,18 @@ def test_disk2d_outer_radius_property(mock_ui_context_v1):
     npt.assert_equal(disk_ui.size, (30, 30))  # New diameter
 
 
+def test_disk2d_inner_radius_property(mock_ui_context_v1):
+    """Test inner_radius getter and setter for Disk2D."""
+    disk_ui = ui.Disk2D(outer_radius=20, inner_radius=10)
+    npt.assert_equal(disk_ui.inner_radius, 10)
+
+    disk_ui.inner_radius = 15
+    npt.assert_equal(disk_ui.inner_radius, 15)
+
+    with npt.assert_raises(ValueError):
+        disk_ui.inner_radius = 25
+
+
 def test_disk2d_color_property(mock_ui_context_v1):
     """Test color getter and setter for Disk2D."""
     disk_ui = ui.Disk2D(outer_radius=10)
@@ -267,53 +279,51 @@ def test_rectangle2d_visual_snapshot(mock_ui_context_v1):
     npt.assert_almost_equal(mean_b_hidden, 0, decimal=0)
 
 
-# Unable to set color for disk
-# def test_disk2d_visual_snapshot(mock_ui_context_v1):
-#     """Visual test for Disk2D."""
-#     disk_radius = 25
-#     disk_center_ui = (100, 100)
-#     disk_color = (0.0, 1.0, 0.0)
+def test_disk2d_visual_snapshot(mock_ui_context_v1):
+    """Visual test for Disk2D."""
+    disk_radius = 25
+    disk_center_ui = (100, 100)
+    disk_color = (0.0, 1.0, 0.0)
 
-#     disk = ui.Disk2D(
-#         outer_radius=disk_radius,
-#         center=disk_center_ui,
-#         color=disk_color,
-#     )
+    disk = ui.Disk2D(
+        outer_radius=disk_radius,
+        center=disk_center_ui,
+        color=disk_color,
+    )
 
-#     scene = window.Scene()
-#     scene.add(disk)
+    scene = window.Scene()
+    scene.add(disk)
 
-#     fname = "disk_test_visible.png"
-#     window.snapshot(scene=scene, fname=fname)
+    fname = "disk_test_visible.png"
+    window.snapshot(scene=scene, fname=fname)
 
-#     img = Image.open(fname)
-#     img_array = np.array(img)
+    img = Image.open(fname)
+    img_array = np.array(img)
 
-#     mean_r, mean_g, mean_b, _mean_a = np.mean(
-#         img_array.reshape(-1, img_array.shape[2]), axis=0
-#     )
+    mean_r, mean_g, mean_b, _mean_a = np.mean(
+        img_array.reshape(-1, img_array.shape[2]), axis=0
+    )
 
-#     assert mean_g > mean_r and mean_g > mean_b
+    assert mean_g > mean_r and mean_g > mean_b
 
-#     npt.assert_almost_equal(mean_r, 0, decimal=0)
-#     npt.assert_almost_equal(mean_b, 0, decimal=0)
-#     assert 0 < mean_g <= 255
+    npt.assert_almost_equal(mean_r, 0, decimal=0)
+    npt.assert_almost_equal(mean_b, 0, decimal=0)
+    assert 0 < mean_g <= 255
 
-#     # Creating new scene because if we reuse previous scene
-#       a new camera is again added
-#     scene = window.Scene()
-#     scene.add(disk)
+    # Creating new scene because if we reuse previous scene a new camera is again added
+    scene = window.Scene()
+    scene.add(disk)
 
-#     disk.set_visibility(False)
-#     fname_hidden = "disk_test_hidden.png"
-#     window.snapshot(scene=scene, fname=fname_hidden)
+    disk.set_visibility(False)
+    fname_hidden = "disk_test_hidden.png"
+    window.snapshot(scene=scene, fname=fname_hidden)
 
-#     img_hidden = Image.open(fname_hidden)
-#     img_array_hidden = np.array(img_hidden)
+    img_hidden = Image.open(fname_hidden)
+    img_array_hidden = np.array(img_hidden)
 
-#     mean_r_hidden, mean_g_hidden, mean_b_hidden, _mean_a_hidden = np.mean(
-#         img_array_hidden.reshape(-1, img_array_hidden.shape[2]), axis=0
-#     )
-#     npt.assert_almost_equal(mean_r_hidden, 0, decimal=0)
-#     npt.assert_almost_equal(mean_g_hidden, 0, decimal=0)
-#     npt.assert_almost_equal(mean_b_hidden, 0, decimal=0)
+    mean_r_hidden, mean_g_hidden, mean_b_hidden, _mean_a_hidden = np.mean(
+        img_array_hidden.reshape(-1, img_array_hidden.shape[2]), axis=0
+    )
+    npt.assert_almost_equal(mean_r_hidden, 0, decimal=0)
+    npt.assert_almost_equal(mean_g_hidden, 0, decimal=0)
+    npt.assert_almost_equal(mean_b_hidden, 0, decimal=0)
