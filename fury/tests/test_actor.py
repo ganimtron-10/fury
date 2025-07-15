@@ -599,6 +599,66 @@ def test_surface_with_texture(tmpdir):
     assert np.array_equal(surface_actor.geometry.indices.data, faces)
 
 
+def test_surface_with_texture_coords(tmpdir):
+    """Test surface creation with custom texture coordinates."""
+    # Create simple geometry (a single triangle)
+    vertices = np.array(
+        [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]], dtype=np.float32
+    )
+
+    faces = np.array([[0, 1, 2]], dtype=np.int32)
+
+    # Create custom texture coordinates
+    texture_coords = np.array([[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]], dtype=np.float32)
+
+    # Create a dummy texture file
+    texture_file = tmpdir.join("texture.png")
+    image = random_png(10, 10)
+    image.save(str(texture_file), "PNG")
+
+    # Test with texture_coords
+    mesh = actor.surface(
+        vertices=vertices,
+        faces=faces,
+        texture=str(texture_file),
+        texture_coords=texture_coords,
+    )
+
+    # Verify the mesh was created (in a real test, you'd check properties)
+    assert mesh is not None
+
+
+def test_texture_coords_validation(tmpdir):
+    """Test that invalid texture_coords raise appropriate errors."""
+    vertices = np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0]], dtype=np.float32)
+    faces = np.array([[0, 1, 2]], dtype=np.int32)
+
+    # Create a dummy texture file
+    texture_file = tmpdir.join("texture.png")
+    image = random_png(10, 10)
+    image.save(str(texture_file), "PNG")
+
+    # Test wrong shape
+    with pytest.raises(ValueError):
+        bad_coords = np.array([[0, 0], [1, 0]])  # missing one vertex
+        actor.surface(
+            vertices=vertices,
+            faces=faces,
+            texture=str(texture_file),
+            texture_coords=bad_coords,
+        )
+
+    # Test wrong dtype
+    with pytest.raises(ValueError):
+        bad_coords = np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0]])
+        actor.surface(
+            vertices=vertices,
+            faces=faces,
+            texture=str(texture_file),
+            texture_coords=bad_coords,
+        )
+
+
 def test_surface_error_conditions():
     """Test error conditions for invalid inputs."""
     vertices = np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0]], dtype=np.float32)
