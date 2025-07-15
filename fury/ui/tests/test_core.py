@@ -189,6 +189,18 @@ def test_disk2d_outer_radius_property(mock_ui_context_v1):
     npt.assert_equal(disk_ui.size, (30, 30))  # New diameter
 
 
+def test_disk2d_inner_radius_property(mock_ui_context_v1):
+    """Test inner_radius getter and setter for Disk2D."""
+    disk_ui = ui.Disk2D(outer_radius=20, inner_radius=10)
+    npt.assert_equal(disk_ui.inner_radius, 10)
+
+    disk_ui.inner_radius = 15
+    npt.assert_equal(disk_ui.inner_radius, 15)
+
+    with npt.assert_raises(ValueError):
+        disk_ui.inner_radius = 25
+
+
 def test_disk2d_color_property(mock_ui_context_v1):
     """Test color getter and setter for Disk2D."""
     disk_ui = ui.Disk2D(outer_radius=10)
