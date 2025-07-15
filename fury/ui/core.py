@@ -4,11 +4,8 @@ import abc
 
 import numpy as np
 
-from fury.actor import disk
 from fury.decorators import warn_on_args_to_kwargs
-from fury.geometry import (
-    create_mesh,
-)
+from fury.geometry import create_mesh, ring_geometry
 from fury.lib import (
     KeyboardEvent,
     Mesh,
@@ -748,6 +745,8 @@ class Disk2D(UI):
     ----------
     outer_radius : int
         Outer radius of the disk.
+    inner_radius : int
+        Inner radius of the disk.
     center : (float, float), optional
         Coordinates (x, y) of the center of the disk.
     color : (float, float, float), optional
@@ -761,6 +760,7 @@ class Disk2D(UI):
         self,
         outer_radius,
         *,
+        inner_radius=0,
         center=(0, 0),
         color=(1, 1, 1),
         opacity=1.0,
@@ -771,6 +771,8 @@ class Disk2D(UI):
         ----------
         outer_radius : int
             Outer radius of the disk.
+        inner_radius : int, optional
+            Inner radius of the disk.
         center : (float, float), optional
             Coordinates (x, y) of the center of the disk.
         color : (float, float, float), optional
@@ -779,6 +781,7 @@ class Disk2D(UI):
             Must take values in [0, 1].
         """
         self.actor = None
+        self.inner_radius = inner_radius
         self.outer_radius = outer_radius
 
         super(Disk2D, self).__init__(
@@ -810,9 +813,13 @@ class Disk2D(UI):
         # # Add default events listener to the VTK actor.
         # self.handle_events(self.actor)
 
-        self.actor = disk(
-            centers=np.zeros((1, 3)), radii=self.outer_radius, material="basic"
+        geo = ring_geometry(
+            inner_radius=self.inner_radius, outer_radius=self.outer_radius
         )
+        mat = _create_mesh_material(
+            material="basic", enable_picking=True, flat_shading=True
+        )
+        self.actor = create_mesh(geometry=geo, material=mat)
 
         self._actors.append(self.actor)
         self.handle_events(self.actor)
@@ -912,8 +919,39 @@ class Disk2D(UI):
         # self._disk.SetOuterRadius(radius)
         # self._disk.Update()
         if self.actor:
-            self.actor = disk(centers=np.zeros((1, 3)), radii=radius, material="basic")
+            self.actor.geometry = ring_geometry(
+                inner_radius=self.inner_radius, outer_radius=self.outer_radius
+            )
         self._outer_radius = radius
+
+    @property
+    def inner_radius(self):
+        """Get the inner radius of the disk.
+
+        Returns
+        -------
+        int
+            Inner radius in pixels.
+        """
+        # return self._disk.GetInnerRadius()
+        return self._inner_radius
+
+    @inner_radius.setter
+    def inner_radius(self, radius):
+        """Set the inner radius of the disk.
+
+        Parameters
+        ----------
+        radius : int
+            New inner radius.
+        """
+        # self._disk.SetInnerRadius(radius)
+        # self._disk.Update()
+        if self.actor:
+            self.actor.geometry = ring_geometry(
+                inner_radius=self.inner_radius, outer_radius=self.outer_radius
+            )
+        self._inner_radius = radius
 
 
 # class TextBlock2D(UI):
