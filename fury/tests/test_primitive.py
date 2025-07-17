@@ -326,7 +326,8 @@ def test_disk_primitive():
 def test_prim_ring_vertices_and_triangles():
     verts, faces = fp.prim_ring()
 
-    # Expected shapes: (circumferential_segments * (radial_segments + 1), 3) for vertices
+    # Expected shapes:
+    # (circumferential_segments * (radial_segments + 1), 3) for vertices
     # (circumferential_segments * radial_segments * 2, 3) for faces
     expected_verts_shape_default = (32 * (1 + 1), 3)
     expected_faces_shape_default = (32 * 1 * 2, 3)
@@ -341,7 +342,6 @@ def test_prim_ring_vertices_and_triangles():
     inner_radius_default = 0.5
     outer_radius_default = 1.0
     radial_segments_default = 1
-    circumferential_segments_default = 32
 
     # Check inner ring vertices
     inner_ring_verts_indices = np.arange(0, verts.shape[0], radial_segments_default + 1)
