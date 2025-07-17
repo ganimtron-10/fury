@@ -22,6 +22,7 @@ __all__ = [
     "image",
     "marker",
     "point",
+    "ring",
     "square",
     "star",
     "text",
@@ -39,7 +40,7 @@ __all__ = [
 from .bio import volume_slicer
 from .core import actor_from_primitive, arrow, axes, line
 from .curved import cone, cylinder, ellipsoid, sphere
-from .planar import disk, image, marker, point, square, star, text, triangle
+from .planar import disk, image, marker, point, ring, square, star, text, triangle
 from .polyhedron import (
     box,
     frustum,
