@@ -5,7 +5,7 @@ import abc
 import numpy as np
 
 from fury.decorators import warn_on_args_to_kwargs
-from fury.geometry import create_mesh, ring_geometry
+from fury.geometry import buffer_to_geometry, create_mesh
 from fury.lib import (
     KeyboardEvent,
     Mesh,
@@ -15,6 +15,7 @@ from fury.lib import (
 from fury.material import (
     _create_mesh_material,
 )
+from fury.primitive import prim_ring
 from fury.ui import UIContext
 from fury.ui.helpers import Anchor
 
@@ -813,9 +814,10 @@ class Disk2D(UI):
         # # Add default events listener to the VTK actor.
         # self.handle_events(self.actor)
 
-        geo = ring_geometry(
+        positions, indices = prim_ring(
             inner_radius=self.inner_radius, outer_radius=self.outer_radius
         )
+        geo = buffer_to_geometry(positions=positions, indices=indices)
         mat = _create_mesh_material(
             material="basic", enable_picking=True, flat_shading=True
         )
@@ -919,8 +921,11 @@ class Disk2D(UI):
         # self._disk.SetOuterRadius(radius)
         # self._disk.Update()
         if self.actor:
-            self.actor.geometry = ring_geometry(
+            positions, indices = prim_ring(
                 inner_radius=self.inner_radius, outer_radius=radius
+            )
+            self.actor.geometry = buffer_to_geometry(
+                positions=positions, indices=indices
             )
         self._outer_radius = radius
 
@@ -948,8 +953,11 @@ class Disk2D(UI):
         # self._disk.SetInnerRadius(radius)
         # self._disk.Update()
         if self.actor:
-            self.actor.geometry = ring_geometry(
+            positions, indices = prim_ring(
                 inner_radius=radius, outer_radius=self.outer_radius
+            )
+            self.actor.geometry = buffer_to_geometry(
+                positions=positions, indices=indices
             )
         self._inner_radius = radius
 
