@@ -260,10 +260,6 @@ def test_VectorFieldThinLineMaterial_invalid_cross_section():
     ):
         material.cross_section = [1, 2]
 
-    # Test non-integer values
-    with pytest.raises(ValueError, match="cross_section must contain only integers"):
-        material.cross_section = [1.5, 2.0, 3.0]
-
     # Test invalid types
     with pytest.raises(ValueError):
         material.cross_section = "invalid"
@@ -394,6 +390,38 @@ def test_create_vector_field_material_arrow():
     assert material.thickness_space == "screen"  # default
     assert material.aa is True  # default
     assert np.array_equal(material.cross_section, cross_section)
+
+
+def test_visibility_none():
+    """Test setting visibility to None."""
+    cross_section = [7, 8, 9]
+    material = _create_vector_field_material(
+        cross_section,
+        material="arrow",
+        opacity=0.8,
+        thickness=1.5,
+    )
+
+    material.visibility = None
+    assert material.visibility is None  # Default behavior
+    assert np.array_equal(
+        material.uniform_buffer.data["visibility"],
+        np.array([-1, -1, -1, 0], dtype=np.int32),  # As per implementation
+    )
+
+    material = _create_vector_field_material(
+        cross_section,
+        visibility=(True, False, True),
+        material="arrow",
+        opacity=0.8,
+        thickness=1.5,
+    )
+
+    assert material.visibility == [True, False, True]  # Default behavior
+    assert np.array_equal(
+        material.uniform_buffer.data["visibility"],
+        np.array([1, 0, 1, 0], dtype=np.int32),  # As per implementation
+    )
 
 
 def test_create_vector_field_material_invalid_type():

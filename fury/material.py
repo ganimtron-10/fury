@@ -224,6 +224,7 @@ def _create_line_material(
 def _create_vector_field_material(
     cross_section,
     *,
+    visibility=None,
     material="thin_line",
     enable_picking=True,
     opacity=1.0,
@@ -239,6 +240,9 @@ def _create_vector_field_material(
     cross_section : list or tuple, shape (3,), optional
         A list or tuple representing the cross section dimensions.
         If None, the cross section will be ignored and complete field will be shown.
+    visibility : list or tuple, shape (3,), optional
+        A list or tuple representing the visibility in the x, y, and z dimensions.
+        If None, the visibility will be set to (-1, -1, -1) to show the complete field.
     material : str, optional
         The type of vector field material to create. Options are 'thin_line' (default),
         'line', 'arrow'.
@@ -273,11 +277,11 @@ def _create_vector_field_material(
     }
 
     if material == "thin_line":
-        return VectorFieldThinLineMaterial(cross_section, **args)
+        return VectorFieldThinLineMaterial(cross_section, visibility=visibility, **args)
     elif material == "line":
-        return VectorFieldLineMaterial(cross_section, **args)
+        return VectorFieldLineMaterial(cross_section, visibility=visibility, **args)
     elif material == "arrow":
-        return VectorFieldArrowMaterial(cross_section, **args)
+        return VectorFieldArrowMaterial(cross_section, visibility=visibility, **args)
     else:
         raise ValueError(f"Unsupported material type: {material}")
 
@@ -473,27 +477,78 @@ class VectorFieldThinLineMaterial(LineMaterial):
     ----------
     cross_section : {list, tuple, ndarray}
         A list or tuple  or ndarray representing the cross section dimensions.
+    visibility : {list, tuple, ndarray}, optional
+        A list or tuple  or ndarray representing the visibility in the 3D.
+        If None, the visibility will be set to (-1, -1, -1) to show the complete field.
     **kwargs : dict
             Additional keyword arguments for the material.
     """
 
     uniform_type = dict(
         LineThinSegmentMaterial.uniform_type,
-        cross_section="4xi4",  # vec3<i32>
+        cross_section="4xf4",  # vec4<i32>
+        visibility="4xi4",  # vec4<i32>
     )
 
-    def __init__(self, cross_section, **kwargs):
+    def __init__(self, cross_section, *, visibility=None, **kwargs):
         """Initialize the VectorFieldMaterial.
 
         Parameters
         ----------
         cross_section : {list, tuple, ndarray}
             A list or tuple  or ndarray representing the cross section dimensions.
+        visibility : {list, tuple, ndarray}, optional
+            A list or tuple  or ndarray representing the visibility in the 3D.
+            If None, the visibility will be set to (-1, -1, -1) to show the complete
+            field.
         **kwargs : dict
             Additional keyword arguments for the material.
         """
         super().__init__(color_mode="vertex", **kwargs)
         self.cross_section = cross_section
+        self.visibility = visibility
+
+    @property
+    def visibility(self):
+        """Get the visibility of the vector field in each dimension.
+
+        Returns
+        -------
+        list
+            A list representing the visibility in the x, y, and z dimensions.
+        """
+        vis = self.uniform_buffer.data["visibility"][:3]
+        if all(vis == (-1, -1, -1)):
+            return None
+        return [bool(i) for i in vis]
+
+    @visibility.setter
+    def visibility(self, visibility):
+        """Set the visibility of the vector field in each dimension.
+
+        Parameters
+        ----------
+        visibility : list or tuple
+            A list or tuple representing the visibility in the x, y, and z dimensions.
+        """
+        if visibility is None:
+            self.uniform_buffer.data["visibility"] = np.asarray(
+                [-1, -1, -1, 0], dtype=np.int32
+            )
+        else:
+            if len(visibility) != 3:
+                raise ValueError("visibility must have exactly 3 dimensions.")
+            if not all(
+                isinstance(i, bool)
+                or (hasattr(i, "item") and isinstance(i.item(), bool))
+                for i in visibility
+            ):
+                raise ValueError("visibility must contain only booleans.")
+
+            self.uniform_buffer.data["visibility"] = np.asarray(
+                [*visibility, 0], dtype=np.int32
+            )
+        self.uniform_buffer.update_full()
 
     @property
     def cross_section(self):
@@ -517,11 +572,6 @@ class VectorFieldThinLineMaterial(LineMaterial):
         """
         if len(cross_section) != 3:
             raise ValueError("cross_section must have exactly 3 dimensions.")
-        if not all(
-            isinstance(i, int) or (hasattr(i, "item") and isinstance(i.item(), int))
-            for i in cross_section
-        ):
-            raise ValueError("cross_section must contain only integers.")
 
         self.uniform_buffer.data["cross_section"] = np.asarray(
             [*cross_section, 0], dtype=np.int32

@@ -210,7 +210,6 @@ class VectorField(WorldObject):
 
         self.vectors = field.reshape(total_vectors, 3).astype(np.float32)
         self.field_shape = field.shape[:3]
-        self.visibility = visibility
         if field.ndim == 4:
             self.vectors_per_voxel = 1
         else:
@@ -239,6 +238,7 @@ class VectorField(WorldObject):
         self.geometry = buffer_to_geometry(positions=pts, colors=colors)
         self.material = _create_vector_field_material(
             (0, 0, 0),
+            visibility=visibility,
             material=actor_type,
             thickness=thickness,
             opacity=opacity,
@@ -248,6 +248,20 @@ class VectorField(WorldObject):
             self.cross_section = np.asarray([-2, -2, -2], dtype=np.int32)
         else:
             self.cross_section = cross_section
+
+    def get_bounding_box(self):
+        """Get the bounding box of the vector field.
+
+        Returns
+        -------
+        list
+            A list containing two elements, each a list of three floats representing
+            the minimum and maximum coordinates of the bounding box.
+        """
+        return [
+            [0, 0, 0],
+            [self.field_shape[0] - 1, self.field_shape[1] - 1, self.field_shape[2] - 1],
+        ]
 
     @property
     def cross_section(self):
@@ -276,14 +290,37 @@ class VectorField(WorldObject):
             )
         if len(value) != 3:
             raise ValueError(f"Cross section must have length 3, but got {len(value)}")
-        if self.visibility is None:
-            self.material.cross_section = np.asarray([-2, -2, -2], dtype=np.int32)
-            return
-        value = np.asarray(value, dtype=np.int32)
-        value = np.minimum(np.asarray(self.field_shape) - 1, value)
-        value = np.maximum(value, np.zeros((3,), dtype=np.int32))
-        value = np.where(self.visibility, value, -1)
-        self.material.cross_section = value
+        value = np.asarray(value, dtype=np.float32)
+        bounds = self.get_bounding_box()
+        value = np.maximum(bounds[0], value)
+        value = np.minimum(bounds[1], value)
+        self.material.cross_section = value.astype(np.int32)
+
+    @property
+    def visibility(self):
+        """Get the visibility of the vector field.
+
+        Returns
+        -------
+        tuple
+            A tuple of three boolean values indicating the visibility of the slices
+            in the x, y, and z dimensions, respectively.
+        """
+        return self.material.visibility
+
+    @visibility.setter
+    def visibility(self, value):
+        """Set the visibility of the vector field.
+
+        Parameters
+        ----------
+        value : tuple
+            A tuple of three boolean values indicating the visibility of the slices
+            in the x, y, and z dimensions, respectively.
+        """
+        if not isinstance(value, (list, tuple)) or len(value) != 3:
+            raise ValueError("Visibility must be a tuple of three boolean values.")
+        self.material.visibility = value
 
 
 def vector_field(

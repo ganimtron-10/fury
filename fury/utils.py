@@ -654,3 +654,53 @@ def get_lmax(n_coeffs, *, basis_type="standard"):
         return int(np.rint(np.sqrt(n_coeffs + 1) - 1))
     elif basis_type == "descoteaux07":
         return int(np.rint(np.sqrt(2 * n_coeffs - 0.5) - 1.5))
+
+
+def get_transformed_cube_bounds(affine_matrix, vertex1, vertex2):
+    """Get the min and max ranges of a transformed cube.
+
+    Parameters
+    ----------
+    affine_matrix : ndarray, shape (4, 4)
+        The affine transformation matrix to apply to the cube vertices.
+    vertex1 : ndarray, shape (3,)
+        The coordinates of one corner of the cube.
+    vertex2 : ndarray, shape (3,)
+        The coordinates of the opposite corner of the cube.
+
+    Returns
+    -------
+    list
+        A list containing the min and max ranges of the transformed cube in the format
+        [[min_x, min_y, min_z], [max_x, max_y, max_z]].
+    """
+
+    if len(vertex1) != 3 or len(vertex2) != 3:
+        raise ValueError("vertex1 and vertex2 must be 3D coordinates.")
+    if not isinstance(affine_matrix, np.ndarray) or affine_matrix.shape != (4, 4):
+        raise ValueError("affine_matrix must be a 4x4 numpy array.")
+
+    x1, y1, z1 = vertex1
+    x2, y2, z2 = vertex2
+
+    vertices = np.array(
+        [
+            [x1, y1, z1, 1],
+            [x2, y1, z1, 1],
+            [x1, y2, z1, 1],
+            [x1, y1, z2, 1],
+            [x2, y2, z1, 1],
+            [x2, y1, z2, 1],
+            [x1, y2, z2, 1],
+            [x2, y2, z2, 1],
+        ]
+    )
+
+    transformed_vertices = vertices @ affine_matrix.T
+
+    transformed_vertices = transformed_vertices[:, :3]
+
+    min_vals = np.min(transformed_vertices, axis=0)
+    max_vals = np.max(transformed_vertices, axis=0)
+
+    return [min_vals, max_vals]

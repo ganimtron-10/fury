@@ -11,12 +11,22 @@ fn scaled_color(v: vec3<f32>) -> vec3<f32> {
     return abs(normalize(v));
 }
 
-fn visible_cross_section(center: vec3<i32>, cross_section: vec3<i32>) -> bool {
-    let xVal = center.x == cross_section.x;
-    let yVal = center.y == cross_section.y;
-    let zVal = center.z == cross_section.z;
+fn visible_cross_section(center: vec3<f32>, cross_section: vec3<f32>, visibility: vec3<i32>) -> bool {
+    let xVal = center.x == cross_section.x && visibility.x != 0;
+    let yVal = center.y == cross_section.y && visibility.y != 0;
+    let zVal = center.z == cross_section.z && visibility.z != 0;
 
     return xVal || yVal || zVal;
+}
+
+fn is_point_on_plane_equation(plane: vec4<f32>, point: vec3<f32>, scale: f32) -> bool {
+    // Plane equation: plane.x*x + plane.y*y + plane.z*z + plane.w = 0
+    let distance = dot(plane.xyz, point) + plane.w;
+
+    // Normalize the distance by the length of the normal vector
+    let normalizedDistance = distance / length(plane.xyz);
+
+    return abs(normalizedDistance) <= scale / 2.0;
 }
 
 fn visible_range(center: vec3<i32>, low_range: vec3<i32>, high_range: vec3<i32>) -> bool {

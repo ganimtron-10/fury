@@ -10,6 +10,7 @@ from fury.utils import (
     generate_planar_uvs,
     get_lmax,
     get_slices,
+    get_transformed_cube_bounds,
     set_group_opacity,
     set_group_visibility,
     show_slices,
@@ -366,3 +367,84 @@ def test_create_sh_basis_matrix_known_values():
     # Y_1^1 = 0 (due to cos(phi) term)
     expected = np.array([[1 / (2 * np.sqrt(np.pi)), 0, np.sqrt(3 / (4 * np.pi)), 0]])
     assert np.allclose(B, expected, atol=1e-6)
+
+
+def test_get_transformed_cube_bounds_valid_input():
+    """Test function with valid inputs returns correct bounds"""
+    affine_matrix = np.eye(4)
+    vertex1 = np.array([1, 2, 3])
+    vertex2 = np.array([4, 5, 6])
+
+    result = get_transformed_cube_bounds(affine_matrix, vertex1, vertex2)
+    expected = [np.array([1, 2, 3]), np.array([4, 5, 6])]
+
+    assert np.array_equal(result[0], expected[0])
+    assert np.array_equal(result[1], expected[1])
+
+
+def test_get_transformed_cube_bounds_invalid_vertex_dimensions():
+    """Test function raises ValueError for non-3D vertices"""
+    affine_matrix = np.eye(4)
+
+    with pytest.raises(ValueError, match="must be 3D coordinates"):
+        get_transformed_cube_bounds(
+            affine_matrix, np.array([1, 2]), np.array([4, 5, 6])
+        )
+
+    with pytest.raises(ValueError, match="must be 3D coordinates"):
+        get_transformed_cube_bounds(
+            affine_matrix, np.array([1, 2, 3]), np.array([4, 5])
+        )
+
+
+def test_get_transformed_cube_bounds_invalid_matrix_shape():
+    """Test function raises ValueError for non-4x4 matrix"""
+    vertex1 = np.array([1, 2, 3])
+    vertex2 = np.array([4, 5, 6])
+
+    with pytest.raises(ValueError, match="must be a 4x4 numpy array"):
+        get_transformed_cube_bounds(np.eye(3), vertex1, vertex2)
+
+    with pytest.raises(ValueError, match="must be a 4x4 numpy array"):
+        get_transformed_cube_bounds("not_a_matrix", vertex1, vertex2)
+
+
+def test_get_transformed_cube_bounds_translation():
+    """Test function correctly handles translation"""
+    affine_matrix = np.array(
+        [[1, 0, 0, 10], [0, 1, 0, 20], [0, 0, 1, 30], [0, 0, 0, 1]]
+    )
+    vertex1 = np.array([1, 2, 3])
+    vertex2 = np.array([4, 5, 6])
+
+    result = get_transformed_cube_bounds(affine_matrix, vertex1, vertex2)
+    expected = [np.array([11, 22, 33]), np.array([14, 25, 36])]
+
+    assert np.array_equal(result[0], expected[0])
+    assert np.array_equal(result[1], expected[1])
+
+
+def test_get_transformed_cube_bounds_scaling():
+    """Test function correctly handles scaling"""
+    affine_matrix = np.array([[2, 0, 0, 0], [0, 3, 0, 0], [0, 0, 4, 0], [0, 0, 0, 1]])
+    vertex1 = np.array([1, 1, 1])
+    vertex2 = np.array([2, 2, 2])
+
+    result = get_transformed_cube_bounds(affine_matrix, vertex1, vertex2)
+    expected = [np.array([2, 3, 4]), np.array([4, 6, 8])]
+
+    assert np.array_equal(result[0], expected[0])
+    assert np.array_equal(result[1], expected[1])
+
+
+def test_get_transformed_cube_bounds_degenerate_case():
+    """Test function handles single-point cube correctly"""
+    affine_matrix = np.eye(4)
+    vertex1 = np.array([5, 5, 5])
+    vertex2 = np.array([5, 5, 5])
+
+    result = get_transformed_cube_bounds(affine_matrix, vertex1, vertex2)
+    expected = [np.array([5, 5, 5]), np.array([5, 5, 5])]
+
+    assert np.array_equal(result[0], expected[0])
+    assert np.array_equal(result[1], expected[1])
