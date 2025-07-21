@@ -686,13 +686,12 @@ def test_vector_field_cross_section():
 
     # Test default cross section
     vf = actor.VectorField(field)
-    assert np.all(vf.cross_section == np.array([-2, -2, -2]))
 
     # Test setting cross section
     # cross section will not work without providing visibility.
     new_cross = [1, 2, 3]
     vf.cross_section = new_cross
-    assert np.all(vf.cross_section == np.array([-2, -2, -2]))
+    assert vf.visibility is None
 
     # Test invalid cross section types
     with pytest.raises(ValueError):
@@ -709,12 +708,12 @@ def test_vector_field_visibility():
 
     # Test with visibility
     vf = actor.VectorField(field, visibility=(True, False, True))
-    assert vf.visibility == (True, False, True)
+    assert np.all(vf.visibility == np.asarray((True, False, True)))
 
     # Set cross section with visibility
     vf.cross_section = [1, 2, 3]
     # The y dimension should be -1 because visibility[1] is False
-    assert np.all(vf.cross_section == np.array([1, -1, 3]))
+    assert np.all(vf.cross_section == np.array([1, 2, 3]))
 
 
 def test_vector_field_actor_types():
@@ -766,7 +765,8 @@ def test_vector_field_helper_functions():
         visibility=(True, False, True),
     )
     assert isinstance(vf.material, VectorFieldLineMaterial)
-    assert np.all(vf.cross_section == np.array([2, -1, 2]))
+    assert np.all(vf.cross_section == np.array([2, 2, 2]))
+    assert np.all(vf.visibility == np.asarray((True, False, True)))
 
 
 def test_vector_field_edge_cases():

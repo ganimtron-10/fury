@@ -168,7 +168,6 @@ fn vs_main(in: VertexInput) -> Varyings {
 
     var node_index = index / 6;
 
-    let center = flatten_to_3d(node_index / (NUM_VECTORS * 2), DATA_SHAPE);
 
     let vertex_index = index % 6;
     let vertex_num = vertex_index + 1;
@@ -222,6 +221,44 @@ fn vs_main(in: VertexInput) -> Varyings {
     var pos_s_prev = (pos_n_prev.xy / pos_n_prev.w + 1.0) * screen_factor;
     var pos_s_node = (pos_n_node.xy / pos_n_node.w + 1.0) * screen_factor;
     var pos_s_next = (pos_n_next.xy / pos_n_next.w + 1.0) * screen_factor;
+
+    let center = flatten_to_3d(node_index / (NUM_VECTORS * 2), DATA_SHAPE);
+    var w_center = world_transform * vec4<f32>(vec3<f32>(center), 1.0);
+    let cross_section = u_material.cross_section.xyz;
+    let visibility = u_material.visibility.xyz;
+    let diff = pos_w_node.xyz - w_center.xyz;
+
+    if (!all(visibility == vec3<i32>(-1))) {
+        let is_near_x_plane = is_point_on_plane_equation(
+            vec4<f32>(-1.0, 0.0, 0.0, f32(cross_section.x)),
+            vec3<f32>(w_center.xyz),
+            abs(world_transform[0][0])
+        );
+        if is_near_x_plane {
+            pos_w_node.x = f32(cross_section.x) + diff.x;
+            w_center.x = f32(cross_section.x);
+        }
+
+        let is_near_y_plane = is_point_on_plane_equation(
+            vec4<f32>(0.0, -1.0, 0.0, f32(cross_section.y)),
+            vec3<f32>(w_center.xyz),
+            abs(world_transform[1][1])
+        );
+        if is_near_y_plane {
+            pos_w_node.y = f32(cross_section.y) + diff.y;
+            w_center.y = f32(cross_section.y);
+        }
+
+        let is_near_z_plane = is_point_on_plane_equation(
+            vec4<f32>(0.0, 0.0, -1.0, f32(cross_section.z)),
+            vec3<f32>(w_center.xyz),
+            abs(world_transform[2][2])
+        );
+        if is_near_z_plane {
+            pos_w_node.z = f32(cross_section.z) + diff.z;
+            w_center.z = f32(cross_section.z);
+        }
+    }
 
     $$ if line_type == 'infsegment'
     let can_move_backwards = {{ 'true' if (start_is_infinite and end_is_infinite) else 'false' }};
@@ -739,8 +776,9 @@ fn vs_main(in: VertexInput) -> Varyings {
     $$ endif
 
 
-    varyings.center = vec3<i32>(center);
-    varyings.cross_section = vec3<i32>(u_material.cross_section.xyz);
+    varyings.center = vec3<f32>(w_center.xyz);
+    varyings.cross_section = vec3<f32>(cross_section);
+    varyings.visibility = vec3<i32>(visibility);
     return varyings;
 }
 
@@ -761,7 +799,8 @@ fn fs_main(varyings: Varyings, @builtin(front_facing) is_front: bool) -> Fragmen
     {$ include 'pygfx.clipping_planes.wgsl' $}
 
     let cross_section = varyings.cross_section;
-    if !all(cross_section == vec3<i32>(-2)) && !visible_cross_section(varyings.center, cross_section) {
+    let visibility = varyings.visibility;
+    if !all(visibility == vec3<i32>(-1)) && !visible_cross_section(varyings.center, cross_section, visibility) {
         discard;
     }
 
