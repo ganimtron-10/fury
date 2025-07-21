@@ -231,6 +231,49 @@ def test_triangle():
     validate_actors(centers=centers, colors=colors, actor_type="triangle")
 
 
+def test_ring():
+    centers = np.array([[0, 0, 0]])
+    colors = np.array([[1, 0, 0]])
+    scene = window.Scene()
+    ring_actor = actor.ring(centers=centers, colors=colors)
+    scene.add(ring_actor)
+
+    npt.assert_array_equal(ring_actor.local.position, centers[0])
+
+    mean_vertex = np.round(np.mean(ring_actor.geometry.positions.view, axis=0))
+    npt.assert_array_almost_equal(mean_vertex, centers[0])
+
+    fname = "ring_test.png"
+    window.snapshot(scene=scene, fname=fname)
+
+    img = Image.open(fname)
+    img_array = np.array(img)
+
+    mean_r, mean_g, mean_b, _mean_a = np.mean(
+        img_array.reshape(-1, img_array.shape[2]), axis=0
+    )
+
+    assert mean_r > mean_b and mean_r > mean_g
+    scene.remove(ring_actor)
+
+    ring_actor_1 = actor.ring(centers=centers, colors=colors, material="basic")
+    scene.add(ring_actor_1)
+    fname_1 = "ring_test_1.png"
+    window.snapshot(scene=scene, fname=fname_1)
+    img = Image.open(fname_1)
+    img_array = np.array(img)
+
+    mean_r, mean_g, mean_b, _mean_a = np.mean(
+        img_array.reshape(-1, img_array.shape[2]), axis=0
+    )
+
+    assert mean_r > mean_b and mean_r > mean_g
+    assert 0 < mean_r < 255
+    assert mean_g == 0 and mean_b == 0
+
+    scene.remove(ring_actor_1)
+
+
 def test_point():
     centers = np.array([[0, 0, 0]])
     colors = np.array([[1, 0, 0]])

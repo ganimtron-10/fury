@@ -321,3 +321,124 @@ def test_disk_primitive():
 
     npt.assert_raises(TypeError, fp.prim_disk, radius=1.0, sectors=10.5)
     npt.assert_raises(ValueError, fp.prim_disk, radius=1.0, sectors=7)
+
+
+def test_prim_ring_vertices_and_triangles():
+    verts, faces = fp.prim_ring()
+
+    # Expected shapes:
+    # (circumferential_segments * (radial_segments + 1), 3) for vertices
+    # (circumferential_segments * radial_segments * 2, 3) for faces
+    expected_verts_shape_default = (32 * (1 + 1), 3)
+    expected_faces_shape_default = (32 * 1 * 2, 3)
+
+    npt.assert_equal(verts.shape, expected_verts_shape_default)
+    npt.assert_equal(faces.shape, expected_faces_shape_default)
+
+    npt.assert_almost_equal(verts.min(), -1.0, decimal=7)
+    npt.assert_almost_equal(verts.max(), 1.0, decimal=7)
+
+    # Check radial distances for inner and outer vertices
+    inner_radius_default = 0.5
+    outer_radius_default = 1.0
+    radial_segments_default = 1
+
+    # Check inner ring vertices
+    inner_ring_verts_indices = np.arange(0, verts.shape[0], radial_segments_default + 1)
+    inner_ring_verts = verts[inner_ring_verts_indices, :2]
+    distances_inner = np.sqrt(inner_ring_verts[:, 0] ** 2 + inner_ring_verts[:, 1] ** 2)
+    npt.assert_almost_equal(distances_inner, inner_radius_default, decimal=6)
+
+    # Check outer ring vertices
+    outer_ring_verts_indices = np.arange(
+        radial_segments_default, verts.shape[0], radial_segments_default + 1
+    )
+    outer_ring_verts = verts[outer_ring_verts_indices, :2]
+    distances_outer = np.sqrt(outer_ring_verts[:, 0] ** 2 + outer_ring_verts[:, 1] ** 2)
+    npt.assert_almost_equal(distances_outer, outer_radius_default, decimal=6)
+
+    # Check that all vertices are referenced by triangles
+    npt.assert_equal(
+        list(set(np.concatenate(faces, axis=None))), list(range(len(verts)))
+    )
+
+    custom_inner_radius_1 = 0.1
+    custom_outer_radius_1 = 2.0
+    custom_radial_segments_1 = 3
+    custom_circumferential_segments_1 = 16
+
+    verts_c1, faces_c1 = fp.prim_ring(
+        inner_radius=custom_inner_radius_1,
+        outer_radius=custom_outer_radius_1,
+        radial_segments=custom_radial_segments_1,
+        circumferential_segments=custom_circumferential_segments_1,
+    )
+
+    expected_verts_shape_c1 = (
+        custom_circumferential_segments_1 * (custom_radial_segments_1 + 1),
+        3,
+    )
+    expected_faces_shape_c1 = (
+        custom_circumferential_segments_1 * custom_radial_segments_1 * 2,
+        3,
+    )
+
+    npt.assert_equal(verts_c1.shape, expected_verts_shape_c1)
+    npt.assert_equal(faces_c1.shape, expected_faces_shape_c1)
+    npt.assert_almost_equal(verts_c1.min(), -custom_outer_radius_1, decimal=7)
+    npt.assert_almost_equal(verts_c1.max(), custom_outer_radius_1, decimal=7)
+    npt.assert_array_equal(verts_c1[:, 2], np.zeros(verts_c1.shape[0]))
+    npt.assert_equal(
+        list(set(np.concatenate(faces_c1, axis=None))), list(range(len(verts_c1)))
+    )
+
+    # Test with custom parameters: different radii
+    custom_inner_radius_2 = 10.0
+    custom_outer_radius_2 = 20.0
+    custom_radial_segments_2 = 1
+    custom_circumferential_segments_2 = 8
+
+    verts_c2, faces_c2 = fp.prim_ring(
+        inner_radius=custom_inner_radius_2,
+        outer_radius=custom_outer_radius_2,
+        radial_segments=custom_radial_segments_2,
+        circumferential_segments=custom_circumferential_segments_2,
+    )
+
+    expected_verts_shape_c2 = (
+        custom_circumferential_segments_2 * (custom_radial_segments_2 + 1),
+        3,
+    )
+    expected_faces_shape_c2 = (
+        custom_circumferential_segments_2 * custom_radial_segments_2 * 2,
+        3,
+    )
+
+    npt.assert_equal(verts_c2.shape, expected_verts_shape_c2)
+    npt.assert_equal(faces_c2.shape, expected_faces_shape_c2)
+    npt.assert_almost_equal(verts_c2.min(), -custom_outer_radius_2, decimal=7)
+    npt.assert_almost_equal(verts_c2.max(), custom_outer_radius_2, decimal=7)
+    npt.assert_array_equal(verts_c2[:, 2], np.zeros(verts_c2.shape[0]))
+    npt.assert_equal(
+        list(set(np.concatenate(faces_c2, axis=None))), list(range(len(verts_c2)))
+    )
+
+
+def test_prim_ring_error_handling():
+    with npt.assert_raises(ValueError):
+        fp.prim_ring(radial_segments=0)
+
+    with npt.assert_raises(ValueError):
+        fp.prim_ring(circumferential_segments=2)
+
+    with npt.assert_raises(ValueError):
+        fp.prim_ring(inner_radius=1.0, outer_radius=0.5)
+
+    with npt.assert_raises(ValueError):
+        fp.prim_ring(inner_radius=1.0, outer_radius=1.0)
+
+    with npt.assert_raises(ValueError):
+        fp.prim_ring(inner_radius=-0.5, outer_radius=0.0)
+
+    with npt.assert_raises(ValueError):
+        fp.prim_ring(inner_radius=0.0, outer_radius=-1.0)

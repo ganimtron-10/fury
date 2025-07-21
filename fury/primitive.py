@@ -1362,3 +1362,75 @@ def prim_triangle():
     vertices = np.array([[-0.5, -0.5, 0.0], [0.5, -0.5, 0.0], [0.0, 0.5, 0.0]])
     triangles = np.array([[0, 1, 2]], dtype="i8")
     return vertices, triangles
+
+
+def prim_ring(
+    *, inner_radius=0.5, outer_radius=1, radial_segments=1, circumferential_segments=32
+):
+    """Return vertices and triangles for a ring geometry.
+
+    Parameters
+    ----------
+    inner_radius : float, optional
+        The inner radius of the ring (radius of the hole).
+    outer_radius : float, optional
+        The outer radius of the ring.
+    radial_segments : int, optional
+        Number of segments along the radial direction.
+    circumferential_segments : int, optional
+        Number of segments around the circumference.
+
+    Returns
+    -------
+    vertices: ndarray, shape (3, 3)
+        Coordinates of the 3 vertices that compose the triangle.
+    triangles: ndarray, shape (1, 3)
+        Indices of the 1 triangle that composes the geometry.
+
+    Raises
+    ------
+    ValueError
+        If radial_segments is less than 1.
+        If circumferential_segments is less than 3.
+        If inner_radius is not between 0 and outer_radius.
+    """
+    inner_radius = max(0, float(inner_radius))
+    outer_radius = max(inner_radius, float(outer_radius))
+
+    if radial_segments < 1:
+        raise ValueError("radial_segments must be greater than or equal to 1")
+    if circumferential_segments < 3:
+        raise ValueError("circumferential_segments must be greater than or equal to 3")
+    if not (0 <= inner_radius < outer_radius):
+        raise ValueError(
+            "inner_radius must be greater than equal to 0 and less than outer_radius"
+        )
+
+    nr = radial_segments + 1
+    nc = circumferential_segments
+
+    radii = np.linspace(inner_radius, outer_radius, nr, dtype=np.float32)
+    angles = np.linspace(0, 2 * np.pi, nc, endpoint=False, dtype=np.float32)
+
+    rr, aa = np.meshgrid(radii, angles)
+    rr, aa = rr.flatten(), aa.flatten()
+
+    # Convert to Cartesian coordinates (x, y, z=0)
+    x = rr * np.cos(aa)
+    y = rr * np.sin(aa)
+    vertices = np.column_stack([x, y, np.zeros_like(x)])
+
+    triangles = []
+    for i in range(nc):
+        for j in range(radial_segments):
+            v0 = i * nr + j
+            v1 = i * nr + (j + 1)
+            v2 = ((i + 1) % nc) * nr + j
+            v3 = ((i + 1) % nc) * nr + (j + 1)
+
+            triangles.append([v0, v1, v3])
+            triangles.append([v0, v3, v2])
+
+    triangles = np.array(triangles, dtype=np.uint32)
+
+    return vertices, triangles
