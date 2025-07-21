@@ -696,12 +696,12 @@ def prim_rhombicuboctahedron():
 
 
 def prim_star(*, dim=2):
-    """Return vertices and triangles for star geometry.
+    """Return vertices and triangles for a 5-pointed star (2D or 3D).
 
     Parameters
     ----------
     dim : int, optional
-        Dimension of the star (2 or 3).
+        Dimension of the star, either 2 or 3.
 
     Returns
     -------
@@ -710,87 +710,48 @@ def prim_star(*, dim=2):
     triangles : ndarray
         Triangles that compose the star.
     """
+    outer_radius = 1 / 2
+    inner_radius = 1 / 5
+    z_height = 1 / 10
+
+    if dim not in (2, 3):
+        raise ValueError("prim_star supports only dim=2 or dim=3")
+
+    pi = math.pi
+    angles = [pi / 2 + i * 2 * pi / 5 for i in range(5)]
+    inner_angles = [ang + pi / 5 for ang in angles]
+
+    base = []
+    for i in range(5):
+        a = angles[i]
+        ia = inner_angles[i]
+        base.append([outer_radius * math.cos(a), outer_radius * math.sin(a), 0])
+        base.append([inner_radius * math.cos(ia), inner_radius * math.sin(ia), 0])
+
+    faces = [
+        [0, 1, 9],
+        [1, 2, 3],
+        [3, 4, 5],
+        [5, 6, 7],
+        [7, 8, 9],
+        [1, 3, 5],
+        [1, 5, 7],
+        [1, 7, 9],
+    ]
+
     if dim == 2:
-        vert = np.array(
-            [
-                [-2.0, -3.0, 0.0],
-                [0.0, -2.0, 0.0],
-                [3.0, -3.0, 0.0],
-                [2.0, -1.0, 0.0],
-                [3.0, 1.0, 0.0],
-                [1.0, 1.0, 0.0],
-                [0.0, 3.0, 0.0],
-                [-1.0, 1.0, 0.0],
-                [-3.0, 1.0, 0.0],
-                [-2.0, -1.0, 0.0],
-            ]
-        )
+        vertices = np.array(base, dtype=float)
+        return vertices, np.array(faces, dtype=int)
 
-        triangles = np.array(
-            [
-                [1, 9, 0],
-                [1, 2, 3],
-                [3, 4, 5],
-                [5, 6, 7],
-                [7, 8, 9],
-                [1, 9, 3],
-                [3, 7, 9],
-                [3, 5, 7],
-            ],
-            dtype="i8",
-        )
+    vertices = base + [[0, 0, z_height], [0, 0, -z_height]]
+    top_idx, bot_idx = 10, 11
+    for i in range(10):
+        j = (i + 1) % 10
+        faces.append([i, j, top_idx])
+        faces.append([j, i, bot_idx])
 
-    if dim == 3:
-        vert = np.array(
-            [
-                [-2.0, -3.0, 0.0],
-                [0.0, -2, 0.0],
-                [3.0, -3.0, 0.0],
-                [2.0, -1.0, 0.0],
-                [3.0, 0.5, 0.0],
-                [1.0, 0.5, 0.0],
-                [0, 3.0, 0.0],
-                [-1.0, 0.5, 0.0],
-                [-3.0, 0.5, 0.0],
-                [-2.0, -1.0, 0.0],
-                [0.0, 0.0, 0.5],
-                [0.0, 0.0, -0.5],
-            ]
-        )
-        triangles = np.array(
-            [
-                [1, 9, 0],
-                [1, 2, 3],
-                [3, 4, 5],
-                [5, 6, 7],
-                [7, 8, 9],
-                [1, 9, 3],
-                [3, 7, 9],
-                [3, 5, 7],
-                [1, 0, 10],
-                [0, 9, 10],
-                [10, 9, 8],
-                [7, 8, 10],
-                [6, 7, 10],
-                [5, 6, 10],
-                [5, 10, 4],
-                [10, 3, 4],
-                [3, 10, 2],
-                [10, 1, 2],
-                [1, 0, 11],
-                [0, 9, 11],
-                [11, 9, 8],
-                [7, 8, 10],
-                [6, 7, 11],
-                [5, 6, 11],
-                [5, 10, 4],
-                [11, 3, 4],
-                [3, 11, 2],
-                [11, 1, 2],
-            ],
-            dtype="i8",
-        )
-    return vert, triangles
+    vertices = np.array(vertices, dtype=float)
+    return vertices, np.array(faces, dtype=int)
 
 
 def prim_triangularprism():

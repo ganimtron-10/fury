@@ -14,7 +14,7 @@ def test_vertices_primitives():
         (fp.prim_box, (24, 3), -0.5, 0.5, 0, {"detailed": True}),
         (fp.prim_box, (8, 3), -0.5, 0.5, 0, {"detailed": False}),
         (fp.prim_tetrahedron, (4, 3), -0.5, 0.5, 0, {}),
-        (fp.prim_star, (10, 3), -3, 3, -0.0666666666, {}),
+        (fp.prim_star, (10, 3), -0.47552825814757677, 1 / 2, 0, {}),
         (fp.prim_rhombicuboctahedron, (24, 3), -0.5, 0.5, 0, {}),
         (fp.prim_frustum, (8, 3), -0.5, 0.5, 0, {}),
     ]
@@ -28,9 +28,10 @@ def test_vertices_primitives():
 
     vertices, _ = fp.prim_star(dim=3)
     npt.assert_equal(vertices.shape, (12, 3))
-    npt.assert_almost_equal(abs(np.mean(vertices)), 0.11111111)
-    npt.assert_equal(vertices.min(), -3)
-    npt.assert_equal(vertices.max(), 3)
+    npt.assert_almost_equal(np.mean(vertices), 0, decimal=7)
+    # Ensure no coordinate exceeds the specified outer radius
+    npt.assert_(vertices.min() >= -1 / 2)
+    npt.assert_equal(vertices.max(), 1 / 2)
 
 
 def test_vertices_primitives_icosahedron():
