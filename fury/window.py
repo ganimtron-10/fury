@@ -36,7 +36,7 @@ from fury.lib import (
     get_app,
     run,
 )
-from fury.ui import UI, UIContext
+from fury.ui import UI, Anchor, UIContext
 
 
 class Scene(GfxGroup):
@@ -402,19 +402,31 @@ def render_screens(renderer, screens: List[Screen]):
     renderer.flush()
 
 
-def reposition_ui(screens: List[Screen]):
+def reposition_ui(screens: List[Screen], switch_position_anchor: bool = False):
     """Update the positions of all UI elements across multiple screens.
 
     Parameters
     ----------
     screens : list of Screen
         The list of Screen objects containing UI elements to reposition.
+    switch_position_anchor : bool, optional
+        Whether to switch the current position anchor to LEFT, BOTTOM or not.
     """
 
     for screen in screens:
         scene_root = screen.scene
         for child in scene_root.ui_elements:
-            child._update_actors_position()
+            if switch_position_anchor and child._anchors != [
+                Anchor.LEFT,
+                Anchor.BOTTOM,
+            ]:
+                child.set_position(
+                    child.get_position(use_new_ui=True),
+                    x_anchor=Anchor.LEFT,
+                    y_anchor=Anchor.BOTTOM,
+                )
+            else:
+                child._update_actors_position()
 
 
 def calculate_screen_sizes(screens, size):
@@ -498,6 +510,8 @@ class ShowManager:
         An existing QtWidgets QApplication instance (if `window_type` is 'qt').
     qt_parent : QWidget
         An existing QWidget to embed the QtCanvas within (if `window_type` is 'qt').
+    use_old_ui : bool, optional
+        Whether to use old ui with default anchor as LEFT,BOTTOM.
     """
 
     def __init__(
@@ -509,7 +523,7 @@ class ShowManager:
         controller=None,
         title="FURY 2.0",
         size=(800, 800),
-        blend_mode="default",
+        blend_mode="weighted_plus",
         window_type="default",
         pixel_ratio=1,
         camera_light=True,
@@ -517,6 +531,7 @@ class ShowManager:
         enable_events=True,
         qt_app=None,
         qt_parent=None,
+        use_old_ui=False,
     ):
         """Manage the rendering window, scenes, and interactions.
 
@@ -567,12 +582,19 @@ class ShowManager:
             is 'qt' and no global app exists).
         qt_parent : QWidget, optional
             An existing QWidget to embed the QtCanvas within (if `window_type`
-            is 'qt')."""
+            is 'qt').
+        use_old_ui : bool, optional
+            Whether to use old ui with anchor as LEFT, BOTTOM or new with LEFT, TOP.
+        """
         self._size = size
         self._title = title
         self._is_qt = False
         self._qt_app = qt_app
         self._qt_parent = qt_parent
+        self._is_initial_resize = None
+        self._use_old_ui = use_old_ui
+        if use_old_ui:
+            UIContext.enable_v2_ui = False
         self._window_type = self._setup_window(window_type)
 
         if renderer is None:
@@ -707,12 +729,20 @@ class ShowManager:
         ----------
         event : Event
             The PyGfx resize event object."""
+        if self._is_initial_resize is None:
+            self._is_initial_resize = True
+
         UIContext.set_canvas_size((event.width, event.height))
         update_viewports(
             self.screens,
             calculate_screen_sizes(self._screen_config, self.renderer.logical_size),
         )
-        reposition_ui(self.screens)
+        reposition_ui(
+            self.screens,
+            switch_position_anchor=(self._is_initial_resize and self._use_old_ui),
+        )
+        if self._is_initial_resize:
+            self._is_initial_resize = False
         self.render()
 
     async def _handle_key_long_press(self, event):

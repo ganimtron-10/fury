@@ -5,6 +5,7 @@ import abc
 import numpy as np
 
 from fury.decorators import warn_on_args_to_kwargs
+from fury.deprecator import deprecate_with_version
 from fury.geometry import buffer_to_geometry, create_mesh
 from fury.lib import (
     KeyboardEvent,
@@ -124,6 +125,7 @@ class UI(object, metaclass=abc.ABCMeta):
         """
         self._position = np.array([0, 0])
         self._children = []
+        self._anchors = [x_anchor, y_anchor]
 
         self._setup()  # Setup needed actors and sub UI components.
         self.set_position(position, x_anchor, y_anchor)
@@ -158,6 +160,137 @@ class UI(object, metaclass=abc.ABCMeta):
         """
         msg = "Subclasses of UI must implement `_setup(self)`."
         raise NotImplementedError(msg)
+
+    @deprecate_with_version(
+        message=(
+            "The `add_to_scene` method is deprecated as a part of Fury v2. "
+            "This method is no longer needed, as the addition of UI elements "
+            "and their hierarchy into the scene is now automatically handled "
+            "by `fury.window.Scene.add()`."
+        ),
+        since="2.0.0a1",
+        until="2.0.0a1",
+    )
+    def add_to_scene(self, scene):
+        """Allow UI objects to add their own props to the scene.
+
+        Parameters
+        ----------
+        scene : scene
+            The scene object to which the UI element's actors should be added.
+        """
+        scene.add(self)
+
+    @deprecate_with_version(
+        message=(
+            "The `add_callback` method is deprecated as a part of Fury v2. "
+            "This method is no longer needed, as event callbacks are now "
+            "directly added to the actor itself using `handle_events()`."
+        ),
+        since="2.0.0a1",
+        until="2.0.0a1",
+    )
+    def add_callback(self):
+        """Add a callback to a specific event for this UI component."""
+        pass
+
+    @property
+    @deprecate_with_version(
+        message=(
+            "The `position` property getter is deprecated as a part of Fury v2. "
+            "Please use `get_position(x_anchor=Anchor.LEFT, "
+            "y_anchor=Anchor.BOTTOM)` instead."
+        ),
+        since="2.0.0a1",
+        until="2.0.0a1",
+    )
+    def position(self):
+        """Get the position of this UI component.
+
+        Returns
+        -------
+        (float, float)
+            The `(x, y)` pixel coordinates of the UI component's lower-left corner.
+        """
+        return self.get_position(x_anchor=Anchor.LEFT, y_anchor=Anchor.BOTTOM)
+
+    @position.setter
+    @deprecate_with_version(
+        message=(
+            "The `position` property setter is deprecated as a part of Fury v2. "
+            "Please use `set_position(coords=coords, x_anchor=Anchor.LEFT, "
+            "y_anchor=Anchor.BOTTOM)` instead."
+        ),
+        since="2.0.0a1",
+        until="2.0.0a1",
+    )
+    def position(self, coords):
+        """Set the position of this UI component.
+
+        Parameters
+        ----------
+        coords : (float, float)
+            Absolute pixel coordinates `(x, y)` for the UI components lower-left corner.
+        """
+        self.set_position(coords=coords, x_anchor=Anchor.LEFT, y_anchor=Anchor.BOTTOM)
+
+    @property
+    @deprecate_with_version(
+        message=(
+            "The `center` property getter is deprecated as a part of Fury v2. "
+            "Please use `get_position(x_anchor=Anchor.CENTER, "
+            "y_anchor=Anchor.CENTER)` instead."
+        ),
+        since="2.0.0a1",
+        until="2.0.0a1",
+    )
+    def center(self):
+        """Get the center position of this UI component.
+
+        Returns
+        -------
+        (float, float)
+            The `(x, y)` pixel coordinates of the UI component's center.
+        """
+        return self.get_position(x_anchor=Anchor.CENTER, y_anchor=Anchor.CENTER)
+
+    @center.setter
+    @deprecate_with_version(
+        message=(
+            "The `center` property setter is deprecated as a part of Fury v2. "
+            "Please use `set_position(coords=coords, x_anchor=Anchor.CENTER, "
+            "y_anchor=Anchor.CENTER)` instead."
+        ),
+        since="2.0.0a1",
+        until="2.0.0a1",
+    )
+    def center(self, coords):
+        """Set the center of this UI component.
+
+        Parameters
+        ----------
+        coords : (float, float)
+            Absolute pixel coordinates `(x, y)` for the UI components lower-left corner.
+        """
+        self.set_position(coords=coords, x_anchor=Anchor.CENTER, y_anchor=Anchor.CENTER)
+
+    @deprecate_with_version(
+        message=(
+            "The `_set_position` method is deprecated as a part of Fury v2. "
+            "Its functionality is now handled by `_update_actors_position`."
+        ),
+        since="2.0.0a1",
+        until="2.0.0a1",
+    )
+    def _set_position(self, coords):
+        """Update the position of the internal actors.
+
+        Parameters
+        ----------
+        coords : (float, float)
+            Absolute pixel coordinates `(x, y)` for the UI components lower-left corner.
+        """
+        pass
 
     @abc.abstractmethod
     def _get_actors(self):
@@ -212,7 +345,7 @@ class UI(object, metaclass=abc.ABCMeta):
             )
 
     def set_position(
-        self, coords, x_anchor: str = Anchor.LEFT, y_anchor: str = Anchor.BOTTOM
+        self, coords, x_anchor: str = Anchor.LEFT, y_anchor: str = Anchor.TOP
     ):
         """Position this UI component according to the specified anchor.
 
@@ -223,10 +356,10 @@ class UI(object, metaclass=abc.ABCMeta):
             are interpreted based on `x_anchor` and `y_anchor`.
         x_anchor : str, optional
             Define the horizontal anchor point for `coords`. Can be "LEFT",
-            "CENTER", or "RIGHT". Case-insensitive. Defaults to "LEFT".
+            "CENTER", or "RIGHT". Defaults to "LEFT".
         y_anchor : str, optional
-            Define the vertical anchor point for `coords`. Can be "BOTTOM",
-            "CENTER", or "TOP". Case-insensitive. Defaults to "BOTTOM".
+            Define the vertical anchor point for `coords`. Can be "TOP",
+            "CENTER", or "BOTTOM". Defaults to "TOP".
         """
         self.perform_position_validation(x_anchor=x_anchor, y_anchor=y_anchor)
 
@@ -234,19 +367,24 @@ class UI(object, metaclass=abc.ABCMeta):
         self._anchors = [x_anchor.upper(), y_anchor.upper()]
         self._update_actors_position()
 
-    def get_position(self, x_anchor: str = Anchor.LEFT, y_anchor: str = Anchor.TOP):
+    def get_position(
+        self,
+        x_anchor: str = Anchor.LEFT,
+        y_anchor: str = Anchor.TOP,
+        use_new_ui: bool = False,
+    ):
         """Get the position of this UI component according to the specified anchor.
 
         Parameters
         ----------
         x_anchor : str, optional
             Define the horizontal anchor point for the returned coordinates.
-            Can be "LEFT", "CENTER", or "RIGHT".
-            Defaults to "LEFT".
+            Can be "LEFT", "CENTER", or "RIGHT". Defaults to "LEFT".
         y_anchor : str, optional
             Define the vertical anchor point for the returned coordinates.
-            Can be "BOTTOM", "CENTER", or "TOP".
-            Defaults to "TOP".
+            Can be "BOTTOM", "CENTER", or "TOP". Defaults to "TOP".
+        use_new_ui : bool, optional
+            Whether to use the new UI system anchors while computing position or not.
 
         Returns
         -------
@@ -256,8 +394,8 @@ class UI(object, metaclass=abc.ABCMeta):
         ANCHOR_TO_MULTIPLIER = {
             Anchor.LEFT.value: 0.0,
             Anchor.RIGHT.value: 1.0,
-            Anchor.TOP.value: 0.0 if UIContext.get_is_v2_ui() else 1.0,
-            Anchor.BOTTOM.value: 1.0 if UIContext.get_is_v2_ui() else 0.0,
+            Anchor.TOP.value: 0.0 if UIContext.enable_v2_ui or use_new_ui else 1.0,
+            Anchor.BOTTOM.value: 1.0 if UIContext.enable_v2_ui or use_new_ui else 0.0,
             Anchor.CENTER.value: 0.5,
         }
 
@@ -544,11 +682,7 @@ class Rectangle2D(UI):
         opacity : float
             Must take values in [0, 1].
         """
-        super(Rectangle2D, self).__init__(
-            position=position,
-            x_anchor=Anchor.LEFT,
-            y_anchor=Anchor.TOP if UIContext.get_is_v2_ui() else Anchor.BOTTOM,
-        )
+        super(Rectangle2D, self).__init__(position=position)
         self.color = color
         self.opacity = opacity
         self.resize(size)
@@ -700,7 +834,7 @@ class Rectangle2D(UI):
 
         self.actor.local.x = position[0]
         self.actor.local.y = (
-            canvas_size[1] - position[1] if UIContext.get_is_v2_ui() else position[1]
+            canvas_size[1] - position[1] if UIContext.enable_v2_ui else position[1]
         )
 
     @property
@@ -868,7 +1002,7 @@ class Disk2D(UI):
 
         self.actor.local.x = position[0]
         self.actor.local.y = (
-            canvas_size[1] - position[1] if UIContext.get_is_v2_ui() else position[1]
+            canvas_size[1] - position[1] if UIContext.enable_v2_ui else position[1]
         )
 
     @property
