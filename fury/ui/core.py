@@ -5,6 +5,7 @@ import abc
 import numpy as np
 
 from fury.decorators import warn_on_args_to_kwargs
+from fury.deprecator import deprecate_with_version
 from fury.geometry import buffer_to_geometry, create_mesh
 from fury.lib import (
     KeyboardEvent,
@@ -158,6 +159,97 @@ class UI(object, metaclass=abc.ABCMeta):
         """
         msg = "Subclasses of UI must implement `_setup(self)`."
         raise NotImplementedError(msg)
+
+    @deprecate_with_version(
+        message=(
+            "The `add_to_scene` method is deprecated as a part of Fury v2. "
+            "This method is no longer needed, as the addition of UI elements "
+            "and their hierarchy into the scene is now automatically handled "
+            "by `fury.window.Scene.add()`."
+        ),
+        since="2.0.0a1",
+        until="2.0.0a1",
+    )
+    def add_to_scene(self, scene):
+        """Allow UI objects to add their own props to the scene.
+
+        Parameters
+        ----------
+        scene : scene
+            The scene object to which the UI element's actors should be added.
+        """
+        scene.add(self)
+
+    @deprecate_with_version(
+        message=(
+            "The `add_callback` method is deprecated as a part of Fury v2. "
+            "This method is no longer needed, as event callbacks are now "
+            "directly added to the actor itself using `handle_events()`."
+        ),
+        since="2.0.0a1",
+        until="2.0.0a1",
+    )
+    def add_callback(self):
+        """Add a callback to a specific event for this UI component."""
+        pass
+
+    @property
+    @deprecate_with_version(
+        message=(
+            "The `position` property getter is deprecated as a part of Fury v2. "
+            "Please use `get_position(x_anchor=Anchor.LEFT, "
+            "y_anchor=Anchor.BOTTOM)` instead."
+        ),
+        since="2.0.0a1",
+        until="2.0.0a1",
+    )
+    def position(self):
+        """Get the position of this UI component.
+
+        Returns
+        -------
+        (float, float)
+            The `(x, y)` pixel coordinates of the UI component's lower-left corner.
+        """
+        return self.get_position(x_anchor=Anchor.LEFT, y_anchor=Anchor.BOTTOM)
+
+    @position.setter
+    @deprecate_with_version(
+        message=(
+            "The `position` property setter is deprecated as a part of Fury v2. "
+            "Please use `set_position(coords=coords, x_anchor=Anchor.LEFT, "
+            "y_anchor=Anchor.BOTTOM)` instead."
+        ),
+        since="2.0.0a1",
+        until="2.0.0a1",
+    )
+    def position(self, coords):
+        """Set the position of this UI component.
+
+        Parameters
+        ----------
+        coords : (float, float)
+            Absolute pixel coordinates `(x, y)` for the UI components lower-left corner.
+        """
+        self.set_position(coords=coords, x_anchor=Anchor.LEFT, y_anchor=Anchor.BOTTOM)
+
+    @deprecate_with_version(
+        message=(
+            "The `_set_position` method is deprecated as a part of Fury v2. "
+            "Its functionality is now handled by `_update_actors_position`."
+        ),
+        since="2.0.0a1",
+        until="2.0.0a1",
+    )
+    def _set_position(self, coords):
+        """Update the position of the internal actors.
+
+        Parameters
+        ----------
+        coords : (float, float)
+            Absolute pixel coordinates `(x, y)` for the UI components lower-left corner.
+        """
+        pass
 
     @abc.abstractmethod
     def _get_actors(self):
