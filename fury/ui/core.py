@@ -233,6 +233,46 @@ class UI(object, metaclass=abc.ABCMeta):
         """
         self.set_position(coords=coords, x_anchor=Anchor.LEFT, y_anchor=Anchor.BOTTOM)
 
+    @property
+    @deprecate_with_version(
+        message=(
+            "The `center` property getter is deprecated as a part of Fury v2. "
+            "Please use `get_position(x_anchor=Anchor.CENTER, "
+            "y_anchor=Anchor.CENTER)` instead."
+        ),
+        since="2.0.0a1",
+        until="2.0.0a1",
+    )
+    def center(self):
+        """Get the center position of this UI component.
+
+        Returns
+        -------
+        (float, float)
+            The `(x, y)` pixel coordinates of the UI component's center.
+        """
+        return self.get_position(x_anchor=Anchor.CENTER, y_anchor=Anchor.CENTER)
+
+    @center.setter
+    @deprecate_with_version(
+        message=(
+            "The `center` property setter is deprecated as a part of Fury v2. "
+            "Please use `set_position(coords=coords, x_anchor=Anchor.CENTER, "
+            "y_anchor=Anchor.CENTER)` instead."
+        ),
+        since="2.0.0a1",
+        until="2.0.0a1",
+    )
+    def center(self, coords):
+        """Set the center of this UI component.
+
+        Parameters
+        ----------
+        coords : (float, float)
+            Absolute pixel coordinates `(x, y)` for the UI components lower-left corner.
+        """
+        self.set_position(coords=coords, x_anchor=Anchor.CENTER, y_anchor=Anchor.CENTER)
+
     @deprecate_with_version(
         message=(
             "The `_set_position` method is deprecated as a part of Fury v2. "
