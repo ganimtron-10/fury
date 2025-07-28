@@ -124,7 +124,6 @@ class UI(object, metaclass=abc.ABCMeta):
         """
         self._position = np.array([0, 0])
         self._children = []
-        self._actors = []
 
         self._setup()  # Setup needed actors and sub UI components.
         self.set_position(position, x_anchor, y_anchor)
@@ -160,6 +159,12 @@ class UI(object, metaclass=abc.ABCMeta):
         msg = "Subclasses of UI must implement `_setup(self)`."
         raise NotImplementedError(msg)
 
+    @abc.abstractmethod
+    def _get_actors(self):
+        """Get the actors composing this UI component."""
+        msg = "Subclasses of UI must implement `_get_actors(self)`."
+        raise NotImplementedError(msg)
+
     @property
     def actors(self):
         """Get actors composing this UI component.
@@ -169,7 +174,7 @@ class UI(object, metaclass=abc.ABCMeta):
         list
             List of actors composing this UI component.
         """
-        return self._actors
+        return self._get_actors()
 
     @property
     def children(self):
@@ -551,7 +556,7 @@ class Rectangle2D(UI):
     def _setup(self):
         """Set up this UI component.
 
-        Create the polygon actor used internally.
+        Create the plane actor used internally.
         """
         # # Setup four points
         # size = (1, 1)
@@ -594,8 +599,17 @@ class Rectangle2D(UI):
         )
         self.actor = create_mesh(geometry=geo, material=mat)
 
-        self._actors.append(self.actor)
         self.handle_events(self.actor)
+
+    def _get_actors(self):
+        """Get the actors composing this UI component.
+
+        Returns
+        -------
+        list
+            List of actors composing this UI component.
+        """
+        return [self.actor]
 
     def _get_size(self):
         """Get the current size of the rectangle actor.
@@ -823,8 +837,17 @@ class Disk2D(UI):
         )
         self.actor = create_mesh(geometry=geo, material=mat)
 
-        self._actors.append(self.actor)
         self.handle_events(self.actor)
+
+    def _get_actors(self):
+        """Get the actors composing this UI component.
+
+        Returns
+        -------
+        list
+            List of actors composing this UI component.
+        """
+        return [self.actor]
 
     def _get_size(self):
         """Get the current size of the disk.
