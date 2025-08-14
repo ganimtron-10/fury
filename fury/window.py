@@ -416,7 +416,10 @@ def reposition_ui(screens: List[Screen], switch_position_anchor: bool = False):
     for screen in screens:
         scene_root = screen.scene
         for child in scene_root.ui_elements:
-            if switch_position_anchor:
+            if switch_position_anchor and child._anchors != [
+                Anchor.LEFT,
+                Anchor.BOTTOM,
+            ]:
                 child.set_position(
                     child.get_position(use_new_ui=True),
                     x_anchor=Anchor.LEFT,
