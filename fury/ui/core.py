@@ -394,8 +394,8 @@ class UI(object, metaclass=abc.ABCMeta):
         ANCHOR_TO_MULTIPLIER = {
             Anchor.LEFT.value: 0.0,
             Anchor.RIGHT.value: 1.0,
-            Anchor.TOP.value: 0.0 if UIContext.get_is_v2_ui() or use_new_ui else 1.0,
-            Anchor.BOTTOM.value: 1.0 if UIContext.get_is_v2_ui() or use_new_ui else 0.0,
+            Anchor.TOP.value: 0.0 if UIContext.enable_v2_ui or use_new_ui else 1.0,
+            Anchor.BOTTOM.value: 1.0 if UIContext.enable_v2_ui or use_new_ui else 0.0,
             Anchor.CENTER.value: 0.5,
         }
 
@@ -834,7 +834,7 @@ class Rectangle2D(UI):
 
         self.actor.local.x = position[0]
         self.actor.local.y = (
-            canvas_size[1] - position[1] if UIContext.get_is_v2_ui() else position[1]
+            canvas_size[1] - position[1] if UIContext.enable_v2_ui else position[1]
         )
 
     @property
@@ -1002,7 +1002,7 @@ class Disk2D(UI):
 
         self.actor.local.x = position[0]
         self.actor.local.y = (
-            canvas_size[1] - position[1] if UIContext.get_is_v2_ui() else position[1]
+            canvas_size[1] - position[1] if UIContext.enable_v2_ui else position[1]
         )
 
     @property

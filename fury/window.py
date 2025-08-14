@@ -594,7 +594,7 @@ class ShowManager:
         self._is_initial_resize = None
         self._use_old_ui = use_old_ui
         if use_old_ui:
-            UIContext.set_is_v2_ui(False)
+            UIContext.enable_v2_ui = False
         self._window_type = self._setup_window(window_type)
 
         if renderer is None:

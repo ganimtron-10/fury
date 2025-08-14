@@ -13,43 +13,30 @@ from fury.ui.helpers import Anchor
 
 
 @pytest.fixture
-def mock_ui_context_v1():
-    """Mock UIContext for V1 UI (y_anchor BOTTOM)."""
-    with (
-        patch("fury.ui.UIContext.get_is_v2_ui", return_value=False),
-        patch("fury.ui.UIContext.get_canvas_size", return_value=(800, 600)),
-    ):  # Consistent canvas size for positioning
-        yield ui.UIContext
-
-
-@pytest.fixture
 def mock_ui_context_v2():
-    """Mock UIContext for V2 UI (y_anchor TOP)."""
+    """Mock UIContext for V2 UI."""
     with (
-        patch("fury.ui.UIContext.get_is_v2_ui", return_value=True),
-        patch("fury.ui.UIContext.get_canvas_size", return_value=(800, 600)),
-    ):  # Consistent canvas size for positioning
+        patch("fury.ui.UIContext.get_canvas_size", return_value=(800, 800)),
+    ):
         yield ui.UIContext
 
 
-def test_rectangle2d_initialization_default(mock_ui_context_v1):
+def test_rectangle2d_initialization_default(mock_ui_context_v2):
     """
     Test Rectangle2D initialization with default parameters.
     Checks default size, color, opacity, and position.
     """
     rect = ui.Rectangle2D()
-    npt.assert_equal(rect.size, (0, 0))  # Default size
-    npt.assert_array_equal(
-        rect.color, [1, 1, 1, 1]
-    )  # Default color (white, with alpha)
+    npt.assert_equal(rect.size, (0, 0))
+    npt.assert_array_equal(rect.color, [1, 1, 1, 1])
     npt.assert_equal(rect.opacity, 1.0)
     assert isinstance(rect.actor, Mesh)
     assert rect.actor in rect.actors
-    # Default position (0,0) with LEFT, BOTTOM anchor for V1 UI
+
     npt.assert_array_equal(rect.get_position(Anchor.LEFT, Anchor.BOTTOM), [0, 0])
 
 
-def test_rectangle2d_initialization_custom(mock_ui_context_v1):
+def test_rectangle2d_initialization_custom(mock_ui_context_v2):
     """
     Test Rectangle2D initialization with custom parameters.
     Checks custom size, position, color, and opacity.
@@ -68,42 +55,42 @@ def test_rectangle2d_initialization_custom(mock_ui_context_v1):
 
     npt.assert_equal(rect.size, custom_size)
     npt.assert_array_equal(rect.get_position(Anchor.LEFT, Anchor.TOP), custom_position)
-    npt.assert_array_almost_equal(rect.color[:3], custom_color)  # Check RGB part
+    npt.assert_array_almost_equal(rect.color[:3], custom_color)
     npt.assert_almost_equal(rect.opacity, custom_opacity)
     assert isinstance(rect.actor, Mesh)
     assert rect.actor in rect.actors
 
 
-def test_rectangle2d_width_property(mock_ui_context_v1):
+def test_rectangle2d_width_property(mock_ui_context_v2):
     """Test width getter and setter for Rectangle2D."""
     rect = ui.Rectangle2D(size=(100, 50))
     npt.assert_equal(rect.width, 100)
     rect.width = 120
     npt.assert_equal(rect.width, 120)
-    npt.assert_equal(rect.height, 50)  # Height should remain unchanged
+    npt.assert_equal(rect.height, 50)
     npt.assert_equal(rect.size, (120, 50))
 
 
-def test_rectangle2d_height_property(mock_ui_context_v1):
+def test_rectangle2d_height_property(mock_ui_context_v2):
     """Test height getter and setter for Rectangle2D."""
     rect = ui.Rectangle2D(size=(100, 50))
     npt.assert_equal(rect.height, 50)
     rect.height = 70
     npt.assert_equal(rect.height, 70)
-    npt.assert_equal(rect.width, 100)  # Width should remain unchanged
+    npt.assert_equal(rect.width, 100)
     npt.assert_equal(rect.size, (100, 70))
 
 
-def test_rectangle2d_color_property(mock_ui_context_v1):
+def test_rectangle2d_color_property(mock_ui_context_v2):
     """Test color getter and setter for Rectangle2D."""
     rect = ui.Rectangle2D()
-    npt.assert_array_equal(rect.color, [1, 1, 1, 1])  # Default color
+    npt.assert_array_equal(rect.color, [1, 1, 1, 1])
     new_color = (0.1, 0.2, 0.3)
     rect.color = new_color
     npt.assert_array_almost_equal(rect.color[:3], new_color)
 
 
-def test_rectangle2d_opacity_property(mock_ui_context_v1):
+def test_rectangle2d_opacity_property(mock_ui_context_v2):
     """Test opacity getter and setter for Rectangle2D."""
     rect = ui.Rectangle2D()
     npt.assert_equal(rect.opacity, 1.0)
@@ -112,7 +99,7 @@ def test_rectangle2d_opacity_property(mock_ui_context_v1):
     npt.assert_equal(rect.opacity, new_opacity)
 
 
-def test_rectangle2d_resize(mock_ui_context_v1):
+def test_rectangle2d_resize(mock_ui_context_v2):
     """Test resize method for Rectangle2D."""
     rect = ui.Rectangle2D(size=(100, 50))
     new_size = (250, 150)
@@ -120,7 +107,7 @@ def test_rectangle2d_resize(mock_ui_context_v1):
     npt.assert_equal(rect.size, new_size)
 
 
-def test_rectangle2d_set_visibility(mock_ui_context_v1):
+def test_rectangle2d_set_visibility(mock_ui_context_v2):
     """Test set_visibility method for Rectangle2D."""
     rect = ui.Rectangle2D(size=(10, 10))
     rect.set_visibility(False)
@@ -129,26 +116,22 @@ def test_rectangle2d_set_visibility(mock_ui_context_v1):
     assert rect.actor.visible is True
 
 
-def test_disk2d_initialization_default(mock_ui_context_v1):
+def test_disk2d_initialization_default(mock_ui_context_v2):
     """
     Test Disk2D initialization with default parameters.
     Checks default center, color, opacity, and required outer_radius.
     """
     disk_ui = ui.Disk2D(outer_radius=10)
     npt.assert_equal(disk_ui.outer_radius, 10)
-    npt.assert_array_equal(
-        disk_ui.get_position(Anchor.CENTER, Anchor.CENTER), [0, 0]
-    )  # Default center
-    npt.assert_array_equal(
-        disk_ui.color, [1, 1, 1, 1]
-    )  # Default color (white, with alpha)
+    npt.assert_array_equal(disk_ui.get_position(Anchor.CENTER, Anchor.CENTER), [0, 0])
+    npt.assert_array_equal(disk_ui.color, [1, 1, 1, 1])
     npt.assert_equal(disk_ui.opacity, 1.0)
     assert isinstance(disk_ui.actor, Mesh)
     assert disk_ui.actor in disk_ui.actors
-    npt.assert_equal(disk_ui.size, (20, 20))  # Diameter is 2 * radius
+    npt.assert_equal(disk_ui.size, (20, 20))
 
 
-def test_disk2d_initialization_custom(mock_ui_context_v1):
+def test_disk2d_initialization_custom(mock_ui_context_v2):
     """
     Test Disk2D initialization with custom parameters.
     Checks custom outer_radius, center, color, and opacity.
@@ -173,21 +156,21 @@ def test_disk2d_initialization_custom(mock_ui_context_v1):
     npt.assert_almost_equal(disk_ui.opacity, custom_opacity)
     assert isinstance(disk_ui.actor, Mesh)
     assert disk_ui.actor in disk_ui.actors
-    npt.assert_equal(disk_ui.size, (50, 50))  # Diameter is 2 * radius
+    npt.assert_equal(disk_ui.size, (50, 50))
 
 
-def test_disk2d_outer_radius_property(mock_ui_context_v1):
+def test_disk2d_outer_radius_property(mock_ui_context_v2):
     """Test outer_radius getter and setter for Disk2D."""
     disk_ui = ui.Disk2D(outer_radius=10)
     npt.assert_equal(disk_ui.outer_radius, 10)
-    npt.assert_equal(disk_ui.size, (20, 20))  # Diameter
+    npt.assert_equal(disk_ui.size, (20, 20))
 
     disk_ui.outer_radius = 15
     npt.assert_equal(disk_ui.outer_radius, 15)
-    npt.assert_equal(disk_ui.size, (30, 30))  # New diameter
+    npt.assert_equal(disk_ui.size, (30, 30))
 
 
-def test_disk2d_inner_radius_property(mock_ui_context_v1):
+def test_disk2d_inner_radius_property(mock_ui_context_v2):
     """Test inner_radius getter and setter for Disk2D."""
     disk_ui = ui.Disk2D(outer_radius=20, inner_radius=10)
     npt.assert_equal(disk_ui.inner_radius, 10)
@@ -199,7 +182,7 @@ def test_disk2d_inner_radius_property(mock_ui_context_v1):
         disk_ui.inner_radius = 25
 
 
-def test_disk2d_color_property(mock_ui_context_v1):
+def test_disk2d_color_property(mock_ui_context_v2):
     """Test color getter and setter for Disk2D."""
     disk_ui = ui.Disk2D(outer_radius=10)
     npt.assert_array_almost_equal(disk_ui.color, [1, 1, 1, 1])
@@ -208,7 +191,7 @@ def test_disk2d_color_property(mock_ui_context_v1):
     npt.assert_array_almost_equal(disk_ui.color[:3], new_color)
 
 
-def test_disk2d_opacity_property(mock_ui_context_v1):
+def test_disk2d_opacity_property(mock_ui_context_v2):
     """Test opacity getter and setter for Disk2D."""
     disk_ui = ui.Disk2D(outer_radius=10)
     npt.assert_almost_equal(disk_ui.opacity, 1.0)
@@ -217,7 +200,7 @@ def test_disk2d_opacity_property(mock_ui_context_v1):
     npt.assert_almost_equal(disk_ui.opacity, new_opacity)
 
 
-def test_disk2d_set_visibility(mock_ui_context_v1):
+def test_disk2d_set_visibility(mock_ui_context_v2):
     """Test set_visibility method for Disk2D."""
     disk_ui = ui.Disk2D(outer_radius=10)
     disk_ui.set_visibility(False)
@@ -226,7 +209,7 @@ def test_disk2d_set_visibility(mock_ui_context_v1):
     assert disk_ui.actor.visible is True
 
 
-def test_rectangle2d_visual_snapshot(mock_ui_context_v1):
+def test_rectangle2d_visual_snapshot(mock_ui_context_v2):
     """Visual test for Rectangle2D."""
     rect_size = (50, 50)
     rect_pos_ui = (75, 75)
@@ -258,7 +241,6 @@ def test_rectangle2d_visual_snapshot(mock_ui_context_v1):
     npt.assert_almost_equal(mean_b, 0, decimal=0)
     assert 0 < mean_r <= 255
 
-    # Creating new scene because if we reuse previous scene a new camera is again added
     scene = window.Scene()
     scene.add(rect)
 
@@ -277,7 +259,7 @@ def test_rectangle2d_visual_snapshot(mock_ui_context_v1):
     npt.assert_almost_equal(mean_b_hidden, 0, decimal=0)
 
 
-def test_disk2d_visual_snapshot(mock_ui_context_v1):
+def test_disk2d_visual_snapshot(mock_ui_context_v2):
     """Visual test for Disk2D."""
     disk_radius = 25
     disk_center_ui = (100, 100)
@@ -308,7 +290,6 @@ def test_disk2d_visual_snapshot(mock_ui_context_v1):
     npt.assert_almost_equal(mean_b, 0, decimal=0)
     assert 0 < mean_g <= 255
 
-    # Creating new scene because if we reuse previous scene a new camera is again added
     scene = window.Scene()
     scene.add(disk)
 
