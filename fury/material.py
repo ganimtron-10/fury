@@ -701,3 +701,88 @@ class SphGlyphMaterial(MeshPhongMaterial):
             raise ValueError("scale must be a number.")
         self.uniform_buffer.data["scale"] = float(value)
         self.uniform_buffer.update_full()
+
+
+class StreamlinesMaterial(LineMaterial):
+    """Initialize the Streamlines Material.
+
+    Parameters
+    ----------
+    outline_thickness : float, optional
+        The thickness of the outline.
+    outline_color : tuple, optional
+        The color of the outline as an RGBA tuple.
+    **kwargs : dict
+        Additional keyword arguments for the material.
+    """
+
+    uniform_type = dict(
+        LineMaterial.uniform_type,
+        outline_thickness="f4",
+        outline_color="4xf4",
+    )
+
+    def __init__(self, outline_thickness=0.0, outline_color=(0, 0, 0), **kwargs):
+        """Initialize the Streamline Material.
+
+        Parameters
+        ----------
+        outline_thickness : float, optional
+            The thickness of the outline.
+        outline_color : tuple, optional
+            The color of the outline as an RGBA tuple.
+        **kwargs : dict
+            Additional keyword arguments for the material.
+        """
+        super().__init__(**kwargs)
+        self.outline_thickness = outline_thickness
+        self.outline_color = outline_color
+
+    @property
+    def outline_thickness(self):
+        """Get the outline thickness.
+
+        Returns
+        -------
+        float
+            The thickness of the outline.
+        """
+        return float(self.uniform_buffer.data["outline_thickness"])
+
+    @outline_thickness.setter
+    def outline_thickness(self, value):
+        """Set the outline thickness.
+
+        Parameters
+        ----------
+        value : float
+            The thickness of the outline.
+        """
+        self.uniform_buffer.data["outline_thickness"] = float(value)
+        self.uniform_buffer.update_full()
+
+    @property
+    def outline_color(self):
+        """Get the outline color.
+
+        Returns
+        -------
+        tuple
+            The color of the outline as an RGBA tuple.
+        """
+        return self.uniform_buffer.data["outline_color"][:3]
+
+    @outline_color.setter
+    def outline_color(self, value):
+        """Set the outline color.
+
+        Parameters
+        ----------
+        value : tuple
+            The color of the outline as an RGB or RGBA tuple.
+        """
+        if len(value) == 3:
+            value = (*value, 1.0)
+
+        self.uniform_buffer.data["outline_color"] = value
+        self.uniform_buffer.update_full()

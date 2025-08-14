@@ -182,6 +182,20 @@ class VectorFieldShader(LineShader):
         return load_wgsl("vector_field_render.wgsl", package_name="fury.wgsl")
 
 
+class StreamlinesShader(LineShader):
+    """Shader for StreamlineActor."""
+
+    def get_code(self):
+        """Get the WGSL code for the streamline render shader.
+
+        Returns
+        -------
+        str
+            The WGSL code as a string.
+        """
+        return load_wgsl("streamline_render.wgsl", package_name="fury.wgsl")
+
+
 class VectorFieldArrowShader(VectorFieldShader):
     """Shader for VectorFieldArrowActor.
 
