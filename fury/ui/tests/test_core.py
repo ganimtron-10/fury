@@ -67,9 +67,7 @@ def test_rectangle2d_initialization_custom(mock_ui_context_v1):
     )
 
     npt.assert_equal(rect.size, custom_size)
-    npt.assert_array_equal(
-        rect.get_position(Anchor.LEFT, Anchor.BOTTOM), custom_position
-    )
+    npt.assert_array_equal(rect.get_position(Anchor.LEFT, Anchor.TOP), custom_position)
     npt.assert_array_almost_equal(rect.color[:3], custom_color)  # Check RGB part
     npt.assert_almost_equal(rect.opacity, custom_opacity)
     assert isinstance(rect.actor, Mesh)
