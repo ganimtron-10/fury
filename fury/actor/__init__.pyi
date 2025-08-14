@@ -36,11 +36,12 @@ __all__ = [
     "VectorField",
     "volume_slicer",
     "peaks_slicer",
+    "streamlines",
 ]
 
 from .bio import peaks_slicer, volume_slicer
 from .core import actor_from_primitive, arrow, axes, line
-from .curved import cone, cylinder, ellipsoid, sphere
+from .curved import cone, cylinder, ellipsoid, sphere, streamlines
 from .planar import disk, image, marker, point, ring, square, star, text, triangle
 from .polyhedron import (
     box,
