@@ -11,16 +11,12 @@ some geometric shapes from FURY UI elements.
 ##############################################################################
 # First, a bunch of imports
 
-from fury.ui import Rectangle2D, Disk2D, UIContext
+from fury.ui import Rectangle2D, Disk2D
 from fury.window import (
     Scene,
     ShowManager,
 )
 
-##############################################################################
-# Using UI v2
-
-UIContext.set_is_v2_ui(True)
 
 ##############################################################################
 # Creating a Scene
@@ -45,6 +41,9 @@ scene.add(disk)
 if __name__ == "__main__":
     current_size = (800, 800)
     show_manager = ShowManager(
-        scene=scene, size=current_size, title="FURY 2.0: Shapes Example"
+        scene=scene,
+        size=current_size,
+        title="FURY 2.0: Shapes Example",
+        use_old_ui=False,
     )
     show_manager.start()
