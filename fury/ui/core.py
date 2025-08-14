@@ -383,7 +383,7 @@ class UI(object, metaclass=abc.ABCMeta):
         y_anchor : str, optional
             Define the vertical anchor point for the returned coordinates.
             Can be "BOTTOM", "CENTER", or "TOP". Defaults to "TOP".
-        use_new_ui: bool, optional
+        use_new_ui : bool, optional
             Whether to use the new UI system anchors while computing position or not.
 
         Returns
