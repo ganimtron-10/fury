@@ -93,7 +93,8 @@ class UIContextClass:
         """
         return self._canvas_size
 
-    def get_is_v2_ui(self):
+    @property
+    def enable_v2_ui(self):
         """Get the currently active UI mode.
 
         Returns
@@ -103,7 +104,8 @@ class UIContextClass:
         """
         return self._use_v2
 
-    def set_is_v2_ui(self, use_v2_ui):
+    @enable_v2_ui.setter
+    def enable_v2_ui(self, use_v2_ui):
         """Set the UI mode to V1 or V2.
 
         Parameters
