@@ -25,7 +25,7 @@ class UIContextClass:
         """Initialize the UIContext singleton."""
         if self._initialized:
             return
-        self._use_v2 = False
+        self._use_v2 = True
         self._hot_ui = None
         self._active_ui = None
         self._canvas_size = np.zeros(2)
