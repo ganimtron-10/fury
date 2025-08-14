@@ -125,6 +125,7 @@ class UI(object, metaclass=abc.ABCMeta):
         """
         self._position = np.array([0, 0])
         self._children = []
+        self._anchors = [x_anchor, y_anchor]
 
         self._setup()  # Setup needed actors and sub UI components.
         self.set_position(position, x_anchor, y_anchor)
