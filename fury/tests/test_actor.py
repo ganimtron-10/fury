@@ -958,7 +958,7 @@ def test_SphGlyph_parameter_combinations():
     # Test basis types
     for basis in ["standard", "descoteaux07"]:
         glyph = actor.SphGlyph(coeffs, sphere=sphere, basis_type=basis)
-        assert hasattr(glyph.material, "l_max")
+        assert hasattr(glyph.material, "n_coeffs")
 
     # Test color types
     glyph_sign = actor.SphGlyph(coeffs, sphere=sphere, color_type="sign")
@@ -993,4 +993,4 @@ def test_SphGlyph_geometry_properties():
 
     # Check SH coefficients
     assert glyph.sh_coeff.shape[0] == 3 * 3 * 3 * 9
-    assert glyph.sf_func.shape[0] == 200 * ((glyph.material.l_max + 1) ** 2)
+    assert glyph.sf_func.shape[0] == 200 * glyph.material.n_coeffs

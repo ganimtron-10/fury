@@ -600,7 +600,7 @@ class SphGlyphMaterial(MeshPhongMaterial):
 
     Parameters
     ----------
-    l_max : int, optional
+    n_coeffs : int, optional
         The maximum spherical harmonic degree.
     scale : int, optional
         The scale factor.
@@ -616,14 +616,14 @@ class SphGlyphMaterial(MeshPhongMaterial):
 
     uniform_type = dict(
         MeshPhongMaterial.uniform_type,
-        l_max="i4",
+        n_coeffs="i4",
         scale="f4",
     )
 
     def __init__(
         self,
-        l_max=4,
-        scale=2,
+        n_coeffs=-1,
+        scale=1,
         shininess=30,
         emissive="#000",
         specular="#494949",
@@ -633,8 +633,10 @@ class SphGlyphMaterial(MeshPhongMaterial):
 
         Parameters
         ----------
-        l_max : int, optional
-            The maximum spherical harmonic degree.
+        n_coeffs : int, optional
+            The maximum spherical harmonic degree. This value will limit the number of
+            spherical harmonic coefficients that can be used from the data.
+            If -1, no limit is applied.
         scale : int, optional
             The scale factor.
         shininess : int, optional
@@ -647,32 +649,32 @@ class SphGlyphMaterial(MeshPhongMaterial):
             Additional keyword arguments for the material.
         """
         super().__init__(shininess, emissive, specular, **kwargs)
-        self.l_max = l_max
+        self.n_coeffs = n_coeffs
         self.scale = scale
 
     @property
-    def l_max(self):
-        """Get the maximum spherical harmonic degree.
+    def n_coeffs(self):
+        """Get the maximum number of spherical harmonic coefficients.
 
         Returns
         -------
         int
-            The maximum spherical harmonic degree.
+            The maximum number of spherical harmonic coefficients.
         """
-        return self.uniform_buffer.data["l_max"]
+        return self.uniform_buffer.data["n_coeffs"]
 
-    @l_max.setter
-    def l_max(self, value):
-        """Set the maximum spherical harmonic degree.
+    @n_coeffs.setter
+    def n_coeffs(self, value):
+        """Set the maximum number of spherical harmonic coefficients.
 
         Parameters
         ----------
         value : int
-            The maximum spherical harmonic degree.
+            The maximum number of spherical harmonic coefficients.
         """
         if not isinstance(value, int):
-            raise ValueError("l_max must be an integer.")
-        self.uniform_buffer.data["l_max"] = value
+            raise ValueError("n_coeffs must be an integer.")
+        self.uniform_buffer.data["n_coeffs"] = value
         self.uniform_buffer.update_full()
 
     @property
@@ -697,5 +699,5 @@ class SphGlyphMaterial(MeshPhongMaterial):
         """
         if not isinstance(value, (int, float)):
             raise ValueError("scale must be a number.")
-        self.uniform_buffer.data["scale"] = value
+        self.uniform_buffer.data["scale"] = float(value)
         self.uniform_buffer.update_full()
