@@ -656,6 +656,35 @@ def get_lmax(n_coeffs, *, basis_type="standard"):
         return int(np.rint(np.sqrt(2 * n_coeffs - 0.5) - 1.5))
 
 
+def get_n_coeffs(l_max, *, basis_type="standard"):
+    """Get the number of spherical harmonic coefficients from the maximum degree.
+
+    Parameters
+    ----------
+    l_max : int
+        The maximum spherical harmonic degree.
+    basis_type : str, optional
+        The type of spherical harmonic basis.
+        Can be "standard" or "descoteaux07". If None, defaults to "standard".
+
+    Returns
+    -------
+    int
+        The number of spherical harmonic coefficients.
+    """
+
+    if not isinstance(l_max, int) or l_max < 0:
+        raise ValueError("l_max must be a non-negative integer.")
+
+    if basis_type not in ("standard", "descoteaux07"):
+        raise ValueError("basis_type must be one of 'standard' or 'descoteaux07'.")
+
+    if basis_type == "standard":
+        return (l_max + 1) ** 2
+    elif basis_type == "descoteaux07":
+        return int((l_max + 1.5) ** 2 + 0.5) // 2
+
+
 def get_transformed_cube_bounds(affine_matrix, vertex1, vertex2):
     """Get the min and max ranges of a transformed cube.
 

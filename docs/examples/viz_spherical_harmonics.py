@@ -45,8 +45,9 @@ coefficients[6, 0, 0, 15] = 1.0
 
 #############################################################################
 # Now we can create a spherical glyph actor to visualize these coefficients.
+# Update the `sphere` parameter to change the resolution of the sph glyphs.
 
-sph_glyph = actor.sph_glyph(coefficients, sphere=(100, 100))
+sph_glyph = actor.sph_glyph(coefficients, sphere=(50, 50))
 
 #############################################################################
 # Let's create text actors to label the degree and order of the spherical
