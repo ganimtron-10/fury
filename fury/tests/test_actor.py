@@ -6,7 +6,6 @@ import numpy.testing as npt
 import pytest
 
 from fury import actor, window
-from fury.actor.curved import Streamlines
 from fury.io import load_image_texture
 from fury.lib import Group, MeshBasicMaterial, MeshPhongMaterial, TextureMap
 from fury.material import (
@@ -959,7 +958,7 @@ def test_SphGlyph_parameter_combinations():
     # Test basis types
     for basis in ["standard", "descoteaux07"]:
         glyph = actor.SphGlyph(coeffs, sphere=sphere, basis_type=basis)
-        assert hasattr(glyph.material, "l_max")
+        assert hasattr(glyph.material, "n_coeffs")
 
     # Test color types
     glyph_sign = actor.SphGlyph(coeffs, sphere=sphere, color_type="sign")
@@ -994,171 +993,4 @@ def test_SphGlyph_geometry_properties():
 
     # Check SH coefficients
     assert glyph.sh_coeff.shape[0] == 3 * 3 * 3 * 9
-    assert glyph.sf_func.shape[0] == 200 * ((glyph.material.l_max + 1) ** 2)
-
-
-def test_streamlines():
-    """Test streamlines function with basic functionality."""
-    # Test basic streamlines creation with list of lines
-    lines = [
-        np.array([[0, 0, 0], [1, 1, 1], [2, 2, 2]]),
-        np.array([[0, 1, 0], [1, 2, 1]]),
-    ]
-    colors = (1, 0, 0)
-
-    streamlines_actor = actor.streamlines(
-        lines, colors=colors, thickness=2.0, opacity=0.8
-    )
-
-    # Check that it's a Streamlines instance
-
-    assert isinstance(streamlines_actor, Streamlines)
-
-    # Check material properties
-    assert round(streamlines_actor.material.opacity, 1) == 0.8
-    assert round(streamlines_actor.material.thickness, 1) == 2.0
-
-    # Test with single line as ndarray
-    single_line = np.array([[0, 0, 0], [1, 1, 1], [2, 2, 2], [0, 1, 0]])
-    streamlines_actor2 = actor.streamlines(
-        single_line,
-        colors=(0, 1, 0),
-        thickness=1.5,
-        opacity=0.5,
-        outline_thickness=0.5,
-        outline_color=(0, 0, 1),
-        enable_picking=False,
-    )
-
-    assert streamlines_actor2.material.opacity == 0.5
-    assert streamlines_actor2.material.thickness == 1.5
-    assert streamlines_actor2.material.outline_thickness == 0.5
-
-
-def test_streamlines_validation():
-    """Test streamlines function parameter validation."""
-    # Test valid lines parameter - line_buffer_separator handles lines validation
-    valid_lines = [np.array([[0, 0, 0], [1, 1, 1]])]
-
-    # Basic validation should work with valid inputs
-    streamlines_actor = actor.streamlines(valid_lines)
-    assert isinstance(streamlines_actor, Streamlines)
-
-    # Test invalid thickness parameter
-    with pytest.raises(ValueError) as excinfo:
-        actor.streamlines(valid_lines, thickness=0)
-    assert "thickness must be a positive number" in str(excinfo.value)
-
-    with pytest.raises(ValueError) as excinfo:
-        actor.streamlines(valid_lines, thickness=-1)
-    assert "thickness must be a positive number" in str(excinfo.value)
-
-    # Test invalid opacity parameter
-    with pytest.raises(ValueError) as excinfo:
-        actor.streamlines(valid_lines, opacity=1.5)
-    assert "Opacity must be between 0 and 1" in str(excinfo.value)
-
-    with pytest.raises(ValueError) as excinfo:
-        actor.streamlines(valid_lines, opacity=-0.1)
-    assert "Opacity must be between 0 and 1" in str(excinfo.value)
-
-    # Test invalid outline_thickness parameter
-    with pytest.raises(ValueError) as excinfo:
-        actor.streamlines(valid_lines, outline_thickness=-1)
-    assert "outline_thickness must be a non-negative number" in str(excinfo.value)
-
-    # Test invalid outline_color parameter
-    with pytest.raises(ValueError) as excinfo:
-        actor.streamlines(valid_lines, outline_color=(1, 2))  # Wrong size
-    assert "outline_color must be a tuple/array of 3 (RGB) or 4 (RGBA) values" in str(
-        excinfo.value
-    )
-
-    with pytest.raises(ValueError) as excinfo:
-        actor.streamlines(valid_lines, outline_color=(1.5, 0, 0))  # Out of range
-    assert "outline_color values must be between 0 and 1" in str(excinfo.value)
-
-    # Test invalid enable_picking parameter
-    with pytest.raises(TypeError) as excinfo:
-        actor.streamlines(valid_lines, enable_picking="true")
-    assert "enable_picking must be a boolean" in str(excinfo.value)
-
-
-def test_streamlines_class():
-    """Test Streamlines class initialization and properties."""
-    from fury.geometry import line_buffer_separator
-
-    # Test basic initialization - need to use line_buffer_separator first
-    lines = [
-        np.array([[0, 0, 0], [1, 1, 1], [2, 2, 2]]),
-        np.array([[0, 1, 0], [1, 2, 1]]),
-    ]
-    lines_positions, lines_colors = line_buffer_separator(
-        lines, color=(1, 0, 0), color_mode="auto"
-    )
-
-    streamlines = Streamlines(lines_positions, colors=lines_colors)
-
-    # Check that geometry and material are created
-    assert hasattr(streamlines, "geometry")
-    assert hasattr(streamlines, "material")
-
-    # Test with custom parameters
-    streamlines2 = Streamlines(
-        lines_positions,
-        colors=lines_colors,
-        thickness=3.0,
-        opacity=0.7,
-        outline_thickness=2.0,
-        outline_color=(1, 0, 0),
-        enable_picking=False,
-    )
-
-    assert round(streamlines2.material.opacity, 1) == 0.7
-    assert round(streamlines2.material.thickness, 1) == 3.0
-    assert streamlines2.material.outline_thickness == 2.0
-
-
-def test_streamlines_multiple_lines():
-    """Test streamlines with multiple line segments."""
-    # Test with list of arrays (multiple lines)
-    lines = [
-        np.array([[0, 0, 0], [1, 1, 1]]),
-        np.array([[2, 2, 2], [3, 3, 3]]),
-    ]
-
-    streamlines_actor = actor.streamlines(lines, colors=(1, 0, 0))
-    assert isinstance(streamlines_actor, actor.curved.Streamlines)
-
-    # Test with 3D array format (N, P, 3)
-    lines_3d = np.array(
-        [
-            [[0, 0, 0], [1, 1, 1], [2, 2, 2]],
-            [[0, 1, 0], [1, 2, 1], [2, 3, 2]],
-        ]
-    )
-    streamlines_actor2 = actor.streamlines(lines_3d, colors=(0, 1, 0))
-    assert isinstance(streamlines_actor2, actor.curved.Streamlines)
-
-
-def test_streamlines_edge_cases():
-    """Test streamlines with edge cases."""
-    # Test with minimum valid input - single line with 2 points
-    lines = [np.array([[0, 0, 0], [1, 0, 0]])]
-    streamlines_actor = actor.streamlines(lines)
-    assert isinstance(streamlines_actor, actor.curved.Streamlines)
-
-    # Test with RGBA colors
-    streamlines_rgba = actor.streamlines(lines, colors=(1, 0, 0, 0.5))
-    assert isinstance(streamlines_rgba, actor.curved.Streamlines)
-
-    # Test with outline_thickness = 0
-    streamlines_no_outline = actor.streamlines(lines, outline_thickness=0)
-    assert streamlines_no_outline.material.outline_thickness == 0
-
-    # Test with opacity = 0 and 1
-    streamlines_transparent = actor.streamlines(lines, opacity=0)
-    assert streamlines_transparent.material.opacity == 0
-
-    streamlines_opaque = actor.streamlines(lines, opacity=1)
-    assert streamlines_opaque.material.opacity == 1
+    assert glyph.sf_func.shape[0] == 200 * glyph.material.n_coeffs

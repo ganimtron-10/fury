@@ -300,6 +300,7 @@ class SphGlyphComputeShader(BaseShader):
         # To share the bindings across compute and render shaders, we need to
         # define the bindings exactly the same way in both shaders.
         geometry = wobject.geometry
+        material = wobject.material
 
         bindings = {
             0: Binding(
@@ -320,6 +321,9 @@ class SphGlyphComputeShader(BaseShader):
                 "buffer/storage",
                 Buffer(wobject.scaled_vertices),
                 "COMPUTE",
+            ),
+            8: Binding(
+                "u_material", "buffer/uniform", material.uniform_buffer, "COMPUTE"
             ),
         }
         self.define_bindings(0, bindings)

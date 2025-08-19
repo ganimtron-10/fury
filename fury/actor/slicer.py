@@ -33,6 +33,7 @@ from fury.shader import (
 from fury.utils import (
     create_sh_basis_matrix,
     get_lmax,
+    get_n_coeffs,
     set_group_opacity,
     set_group_visibility,
     show_slices,
@@ -566,7 +567,8 @@ class SphGlyph(Mesh):
 
         self.n_coeff = coeffs.shape[-1]
         self.data_shape = coeffs.shape[:3]
-        l_max = get_lmax(self.n_coeff, basis_type=basis_type)
+        self.basis_type = basis_type
+        self._l_max = get_lmax(self.n_coeff, basis_type=basis_type)
         self.color_type = 0 if color_type == "sign" else 1
 
         vertices, faces = sphere[0], sphere[1]
@@ -595,7 +597,7 @@ class SphGlyph(Mesh):
         )
 
         mat = SphGlyphMaterial(
-            l_max=l_max,
+            n_coeffs=self.n_coeff,
             color_mode="vertex",
             flat_shading=False,
             shininess=shininess,
@@ -603,12 +605,64 @@ class SphGlyph(Mesh):
             side="front",
         )
 
-        B_mat = create_sh_basis_matrix(vertices, l_max)
+        B_mat = create_sh_basis_matrix(vertices, self._l_max)
         self.sh_coeff = coeffs.reshape(-1).astype("float32")
         self.sf_func = B_mat.reshape(-1).astype("float32")
         self.sphere = vertices.astype("float32")
 
         super().__init__(geometry=geo, material=mat)
+
+    @property
+    def l_max(self):
+        """Get the maximum degree of the spherical harmonics.
+
+        Returns
+        -------
+        int
+            The maximum degree of the spherical harmonics used in the glyph.
+        """
+        return self._l_max
+
+    @l_max.setter
+    def l_max(self, value):
+        """Set the maximum degree of the spherical harmonics.
+
+        Parameters
+        ----------
+        value : int
+            The maximum degree of the spherical harmonics to set.
+
+        Raises
+        ------
+        ValueError
+            If the provided value is not a positive integer.
+        """
+        if not isinstance(value, int) or value < 0:
+            raise ValueError("The attribute 'l_max' must be a positive integer.")
+        self._l_max = value
+        self.material.n_coeffs = get_n_coeffs(value, basis_type=self.basis_type)
+
+    @property
+    def scale(self):
+        """Get the scale of the spherical glyph.
+
+        Returns
+        -------
+        float
+            The scale of the spherical glyph.
+        """
+        return self.material.scale
+
+    @scale.setter
+    def scale(self, value):
+        """Set the scale of the spherical glyph.
+
+        Parameters
+        ----------
+        value : float
+            The scale of the spherical glyph to set.
+        """
+        self.material.scale = value
 
 
 def sph_glyph(

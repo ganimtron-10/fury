@@ -479,27 +479,27 @@ def test_SphGlyphMaterial_initialization_defaults():
     """SphGlyphMaterial: Test initialization with default parameters."""
     material = SphGlyphMaterial()
 
-    assert material.l_max == 4
-    assert material.scale == 2
+    assert material.n_coeffs == -1
+    assert material.scale == 1
     assert material.shininess == 30
     assert material.emissive == "#000"
     assert material.specular == "#494949"
 
 
-def test_SphGlyphMaterial_l_max_property():
-    """SphGlyphMaterial: Test l_max property validation and updates."""
+def test_SphGlyphMaterial_n_coeffs_property():
+    """SphGlyphMaterial: Test n_coeffs property validation and updates."""
     material = SphGlyphMaterial()
 
-    # Test valid even integers
-    for value in [2, 4, 6, 8]:
-        material.l_max = value
-        assert material.l_max == value
+    # Test valid integer values
+    for value in [1, 4, 9, 16, 25, 36]:
+        material.n_coeffs = value
+        assert material.n_coeffs == value
 
     # Test invalid values
     with pytest.raises(ValueError):
-        material.l_max = "4"  # Not integer
+        material.n_coeffs = "4"  # Not integer
     with pytest.raises(ValueError):
-        material.l_max = 4.5  # Float
+        material.n_coeffs = 4.5  # Float
 
 
 def test_SphGlyphMaterial_scale_property():
@@ -521,7 +521,7 @@ def test_SphGlyphMaterial_scale_property():
 def test_SphGlyphMaterial_custom_initialization():
     """SphGlyphMaterial: Test initialization with custom parameters."""
     material = SphGlyphMaterial(
-        l_max=6,
+        n_coeffs=36,
         scale=3.5,
         shininess=50,
         emissive="#111",
@@ -529,7 +529,7 @@ def test_SphGlyphMaterial_custom_initialization():
         flat_shading=True,
     )
 
-    assert material.l_max == 6
+    assert material.n_coeffs == 36
     assert material.scale == 3.5
     assert material.shininess == 50
     assert material.emissive == "#111"
@@ -539,9 +539,9 @@ def test_SphGlyphMaterial_custom_initialization():
 
 def test_SphGlyphMaterial_uniform_type():
     """SphGlyphMaterial: Test uniform_type contains expected fields."""
-    assert "l_max" in SphGlyphMaterial.uniform_type
+    assert "n_coeffs" in SphGlyphMaterial.uniform_type
     assert "scale" in SphGlyphMaterial.uniform_type
-    assert SphGlyphMaterial.uniform_type["l_max"] == "i4"
+    assert SphGlyphMaterial.uniform_type["n_coeffs"] == "i4"
     assert SphGlyphMaterial.uniform_type["scale"] == "f4"
 
     # Check inheritance from MeshPhongMaterial
