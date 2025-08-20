@@ -275,11 +275,11 @@ def update_camera(camera, size, target):
         The size (width, height) of the viewport, used if the target is empty.
     target : Object or Scene
         The PyGfx object or scene the camera should focus on."""
-    if (isinstance(target, Scene) and len(target.children) > 3) or not isinstance(
-        target, Scene
+    if (isinstance(target, Scene) and len(target.children) > 3) or (
+        not isinstance(target, Scene) and target is not None
     ):
         camera.show_object(target)
-    else:
+    elif size is not None:
         camera.width = size[0]
         camera.height = size[1]
 
