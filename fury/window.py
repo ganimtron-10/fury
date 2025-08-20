@@ -523,7 +523,7 @@ class ShowManager:
         controller=None,
         title="FURY 2.0",
         size=(800, 800),
-        blend_mode="default",
+        blend_mode="weighted_plus",
         window_type="default",
         pixel_ratio=1,
         camera_light=True,
