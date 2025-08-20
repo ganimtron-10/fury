@@ -3,7 +3,11 @@
 import numpy as np
 
 from fury.actor import actor_from_primitive
+from fury.geometry import buffer_to_geometry, line_buffer_separator
+from fury.lib import Line, register_wgpu_render_function
+from fury.material import StreamlinesMaterial, validate_opacity
 import fury.primitive as fp
+from fury.shader import StreamlinesShader
 
 
 def sphere(
@@ -370,3 +374,168 @@ def cone(
         material=material,
         enable_picking=enable_picking,
     )
+
+
+class Streamlines(Line):
+    """
+    Create a streamline representation.
+
+    Parameters
+    ----------
+    lines : ndarray, shape (N, 3)
+        The positions of the points along the streamline.
+    colors : ndarray, shape (N, 3) or (N, 4), optional
+        RGB or RGBA (for opacity) R, G, B and A should be at the range [0, 1].
+    thickness : float, optional
+        The thickness of the streamline.
+    opacity : float, optional
+        The opacity of the streamline.
+    outline_thickness : float, optional
+        The thickness of the outline.
+    outline_color : tuple, optional
+        The color of the outline.
+    enable_picking : bool, optional
+        Whether the streamline should be pickable in a 3D scene, by default True.
+    """
+
+    def __init__(
+        self,
+        lines,
+        *,
+        colors=None,
+        thickness=2.0,
+        opacity=1.0,
+        outline_thickness=1.0,
+        outline_color=(1, 0, 0),
+        enable_picking=True,
+    ):
+        """
+        Create a streamline representation.
+
+        Parameters
+        ----------
+        lines : ndarray, shape (N, 3)
+            The positions of the points along the streamline.
+        colors : ndarray, shape (N, 3) or (N, 4), optional
+            RGB or RGBA (for opacity) R, G, B and A should be at the range [0, 1].
+        thickness : float, optional
+            The thickness of the streamline.
+        opacity : float, optional
+            The opacity of the streamline.
+        outline_thickness : float, optional
+            The thickness of the outline.
+        outline_color : tuple, optional
+            The color of the outline.
+        enable_picking : bool, optional
+            Whether the streamline should be pickable in a 3D scene.
+
+        Raises
+        ------
+        ValueError
+            If lines is not a valid numpy array with shape (N, 3).
+        ValueError
+            If colors is not a valid color tuple or array.
+        ValueError
+            If thickness or outline_thickness is not a positive number.
+        ValueError
+            If opacity is not between 0 and 1.
+        TypeError
+            If enable_picking is not a boolean.
+        """
+        super().__init__()
+
+        if not isinstance(thickness, (int, float)) or thickness <= 0:
+            raise ValueError("thickness must be a positive number")
+
+        opacity = validate_opacity(opacity)
+
+        if not isinstance(outline_thickness, (int, float)) or outline_thickness < 0:
+            raise ValueError("outline_thickness must be a non-negative number")
+
+        outline_color = np.asarray(outline_color, dtype=np.float32)
+        if outline_color.size not in (3, 4):
+            raise ValueError(
+                "outline_color must be a tuple/array of 3 (RGB) or 4 (RGBA) values"
+            )
+        if not np.all((outline_color >= 0) & (outline_color <= 1)):
+            raise ValueError("outline_color values must be between 0 and 1")
+
+        if not isinstance(enable_picking, bool):
+            raise TypeError("enable_picking must be a boolean")
+
+        self.geometry = buffer_to_geometry(
+            positions=lines.astype("float32"), colors=colors.astype("float32")
+        )
+
+        self.material = StreamlinesMaterial(
+            outline_thickness=outline_thickness,
+            outline_color=outline_color,
+            pick_write=enable_picking,
+            opacity=opacity,
+            thickness=thickness,
+            color_mode="vertex",
+        )
+
+
+def streamlines(
+    lines,
+    *,
+    colors=(1, 0, 0),
+    thickness=2.0,
+    opacity=1.0,
+    outline_thickness=1.0,
+    outline_color=(0, 0, 0),
+    enable_picking=True,
+):
+    """Create a streamline representation.
+
+    Parameters
+    ----------
+    lines : list of ndarray of shape (P, 3) or ndarray of shape (N, P, 3)
+        Lines points.
+    colors : ndarray, shape (N, 3) or (N, 4) or tuple (3,) or tuple (4,), optional
+        RGB or RGBA (for opacity) R, G, B and A should be at the range [0, 1].
+    thickness : float, optional
+        The thickness of the streamline.
+    opacity : float, optional
+        The opacity of the streamline.
+    outline_thickness : float, optional
+        The thickness of the outline.
+    outline_color : tuple, optional
+        The color of the outline.
+    enable_picking : bool, optional
+        Whether the streamline should be pickable in a 3D scene.
+
+    Returns
+    -------
+    Streamline
+        The created streamline object.
+    """
+    lines_positions, lines_colors = line_buffer_separator(lines, color=colors)
+
+    return Streamlines(
+        lines_positions,
+        colors=lines_colors,
+        thickness=thickness,
+        opacity=opacity,
+        outline_thickness=outline_thickness,
+        outline_color=outline_color,
+        enable_picking=enable_picking,
+    )
+
+
+@register_wgpu_render_function(Streamlines, StreamlinesMaterial)
+def register_render_streamline(wobject):
+    """Register the streamline render function.
+
+    Parameters
+    ----------
+    wobject : Streamline
+        The streamline object to register.
+
+    Returns
+    -------
+    StreamlineShader
+        The created streamline shader.
+    """
+    return StreamlinesShader(wobject)
