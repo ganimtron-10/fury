@@ -203,9 +203,7 @@ def test_streamline_shader_get_code():
     """Test StreamlineShader.get_code()."""
     # Create sample lines data for Streamline constructor
     lines = [np.array([[0, 0, 0], [1, 0, 0], [2, 0, 0]])]
-    lines_positions, lines_colors = line_buffer_separator(
-        lines, color=(1, 0, 0), color_mode="auto"
-    )
+    lines_positions, lines_colors = line_buffer_separator(lines, color=(1, 0, 0))
     print(lines_positions)
     wobject = Streamlines(lines_positions, colors=lines_colors)
     shader = StreamlinesShader(wobject)

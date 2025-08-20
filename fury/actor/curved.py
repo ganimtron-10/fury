@@ -463,34 +463,17 @@ class Streamlines(Line):
         if not isinstance(enable_picking, bool):
             raise TypeError("enable_picking must be a boolean")
 
-        if colors is None:
-            material_mode = "auto"
-            material_colors = np.asarray((1, 1, 1), dtype=np.float32)
-        else:
-            material_mode = "vertex"
-            material_colors = colors
-
         self.geometry = buffer_to_geometry(
-            positions=lines.astype("float32"),
-            colors=colors.astype("float32")
-            if colors is not None
-            else np.empty_like(lines),
+            positions=lines.astype("float32"), colors=colors.astype("float32")
         )
-
-        args = {
-            "pick_write": enable_picking,
-            "opacity": opacity,
-            "thickness": thickness,
-            "color_mode": material_mode,
-        }
-
-        if material_mode == "auto":
-            args["color"] = material_colors
 
         self.material = StreamlinesMaterial(
             outline_thickness=outline_thickness,
             outline_color=outline_color,
-            **args,
+            pick_write=enable_picking,
+            opacity=opacity,
+            thickness=thickness,
+            color_mode="vertex",
         )
 
 
@@ -528,9 +511,7 @@ def streamlines(
     Streamline
         The created streamline object.
     """
-    lines_positions, lines_colors = line_buffer_separator(
-        lines, color=colors, color_mode="auto"
-    )
+    lines_positions, lines_colors = line_buffer_separator(lines, color=colors)
 
     return Streamlines(
         lines_positions,

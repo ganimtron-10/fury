@@ -102,7 +102,7 @@ def create_line(geometry, material):
     return line
 
 
-def line_buffer_separator(line_vertices, color=None, color_mode="auto"):
+def line_buffer_separator(line_vertices, color=None):
     """
     Create a line buffer with separators between segments.
 
@@ -112,11 +112,6 @@ def line_buffer_separator(line_vertices, color=None, color_mode="auto"):
         The line vertices as a list of segments (each segment is an array of points).
     color : array_like, optional
         The color of the line segments.
-    color_mode : str, optional
-        The color mode, can be 'auto', 'vertex', or 'line'.
-        - 'auto': Automatically determine based on color array shape
-        - 'vertex': One color per vertex (must match total vertex count)
-        - 'line': One color per line segment
 
     Returns
     -------
@@ -125,31 +120,33 @@ def line_buffer_separator(line_vertices, color=None, color_mode="auto"):
     colors : array_like, optional
         The colors buffer with NaN separators (if color is provided).
     """
-    # Calculate total size including separators
+
+    line_vertices = np.asarray(line_vertices, dtype=np.float32)
     total_vertices = sum(len(segment) for segment in line_vertices)
     total_size = total_vertices + len(line_vertices) - 1
 
     positions_result = np.empty((total_size, 3), dtype=np.float32)
-    colors_result = None
 
-    if color is not None:
-        colors_result = np.empty((total_size, 3), dtype=np.float32)
-        if color_mode == "auto":
-            if len(color) == len(line_vertices) and (
-                len(color[0]) == 3 or len(color[0]) == 4
-            ):
-                color_mode = "line"
-            elif len(color) == total_vertices:
-                color_mode = "vertex_flattened"
-            elif len(color) == len(line_vertices):
-                color_mode = "vertex"
-            elif len(color) == 3 or len(color) == 4:
-                color = None
-            else:
-                raise ValueError(
-                    "Color array size doesn't match "
-                    "either vertex count or segment count"
-                )
+    if color is None:
+        color = np.asarray((1, 1, 1, 1), dtype=np.float32)
+    else:
+        color = np.asarray(color, dtype=np.float32)
+
+    if (len(color) == 3 or len(color) == 4) and color.ndim == 1:
+        color = np.tile(color, (len(line_vertices), 1))
+        color_mode = "line"
+    elif len(color) == len(line_vertices) and color.ndim == 2:
+        color_mode = "line"
+    elif len(color) == len(line_vertices) and color.ndim == line_vertices.ndim:
+        color_mode = "vertex"
+    elif len(color) == total_vertices:
+        color_mode = "vertex_flattened"
+    else:
+        raise ValueError(
+            "Color array size doesn't match either vertex count or segment count"
+        )
+
+    colors_result = np.empty((total_size, color.shape[-1]), dtype=np.float32)
 
     idx = 0
     color_idx = 0
@@ -159,32 +156,28 @@ def line_buffer_separator(line_vertices, color=None, color_mode="auto"):
 
         positions_result[idx : idx + segment_length] = segment
 
-        if color is not None:
-            if color_mode == "vertex":
-                colors_result[idx : idx + segment_length] = color[i]
-                color_idx += segment_length
+        if color_mode == "vertex":
+            colors_result[idx : idx + segment_length] = color[i]
+            color_idx += segment_length
 
-            elif color_mode == "line":
-                colors_result[idx : idx + segment_length] = np.tile(
-                    color[i], (segment_length, 1)
-                )
-            elif color_mode == "vertex_flattened":
-                colors_result[idx : idx + segment_length] = color[
-                    color_idx : color_idx + segment_length
-                ]
-                color_idx += segment_length
-            else:
-                raise ValueError("Invalid color mode")
+        elif color_mode == "line":
+            colors_result[idx : idx + segment_length] = np.tile(
+                color[i], (segment_length, 1)
+            )
+        elif color_mode == "vertex_flattened":
+            colors_result[idx : idx + segment_length] = color[
+                color_idx : color_idx + segment_length
+            ]
+            color_idx += segment_length
 
         idx += segment_length
 
         if i < len(line_vertices) - 1:
             positions_result[idx] = np.nan
-            if color is not None:
-                colors_result[idx] = np.nan
+            colors_result[idx] = np.nan
             idx += 1
 
-    return positions_result, colors_result if color is not None else None
+    return positions_result, colors_result
 
 
 def create_point(geometry, material):

@@ -290,30 +290,18 @@ def line(
     >>> show_manager.start()
     """
 
-    lines_positions, lines_colors = line_buffer_separator(
-        lines, color=colors, color_mode="auto"
-    )
+    lines_positions, lines_colors = line_buffer_separator(lines, color=colors)
 
     geo = buffer_to_geometry(
         positions=lines_positions.astype("float32"),
-        colors=lines_colors.astype("float32")
-        if lines_colors is not None
-        else np.empty_like(lines_positions),
+        colors=lines_colors.astype("float32"),
     )
-
-    if lines_colors is None:
-        material_mode = "auto"
-        material_colors = None
-    else:
-        material_mode = "vertex"
-        material_colors = lines_colors
 
     mat = _create_line_material(
         material=material,
         enable_picking=enable_picking,
-        mode=material_mode,
+        mode="vertex",
         opacity=opacity,
-        color=material_colors,
     )
 
     obj = create_line(geometry=geo, material=mat)
