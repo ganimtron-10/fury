@@ -18,6 +18,8 @@ import re
 import subprocess
 import sys
 
+from packaging.version import Version
+
 
 def run(cmd, *, check=True):
     """Run a shell command and print it to the console.
@@ -56,7 +58,7 @@ def get_latest_tag_from_series(*, series=None):
     # Loop through each series from the given series down to 0
     for i in range(current_series, -1, -1):
         # Define the pattern to match the tags in the current series
-        pattern = rf"^v{i}\.\d+.\d+$"
+        pattern = rf"^v{i}\.\d+\.\d+([a-zA-Z0-9]+)?(-\S+)?$"
 
         try:
             # Get the list of tags from the Git repository
@@ -67,7 +69,7 @@ def get_latest_tag_from_series(*, series=None):
 
             if series_tags:
                 # Sort the tags in version order and get the latest one
-                series_tags.sort(key=lambda v: list(map(int, v.lstrip("v").split("."))))
+                series_tags.sort(key=lambda v: Version(v.lstrip("v")))
                 return series_tags[-1]
 
         except subprocess.CalledProcessError:
@@ -326,31 +328,37 @@ def main():
     # 1. Find last tag and show changes
     last = get_latest_tag_from_series(series=series)
     print(f"Last tag: {last}")
-    # print("--- Update .mailmap file ---")
-    # input("please, check duplicated and unknown names, then update the .mailmap file."
-    #       " okay? Press Enter to continue...")
-    # run(f"git shortlog -nse {last}..HEAD")
+    print("--- Update .mailmap file ---")
+    input(
+        "please, check duplicated and unknown names, then update the .mailmap file."
+        " okay? Press Enter to continue..."
+    )
+    run(f"git shortlog -nse {last}..HEAD")
 
-    # # 2. Update AUTHORS file
-    # update_authors()
+    # 2. Update AUTHORS file
+    update_authors()
 
-    # # 3. Check LICENSE year
-    # check_license_year()
+    # 3. Check LICENSE year
+    check_license_year()
 
-    # # 4. Generate release notes
-    last_version_parts = last.lstrip("v").split(".")
-    major, minor, patch = map(int, last_version_parts)
+    # 4. Generate release notes
+    last_version = Version(last.lstrip("v"))
+    major, minor, patch = last_version.release
     proposed_version = f"v{major}.{minor + 1}.0"
 
     new_version_v = get_new_version(proposed_version)
     new_version = new_version_v.lstrip("v")
-    # print(f"--- Generating release notes for {new_version_v} ---")
-    # run(f"python docs/source/ext/github_tools.py --tag={last} "
-    #     f"--save --version={new_version}")
-    # print("→ Release notes created")
-    # print(f"Please, go to docs/release_notes/release{new_version_v}.rst and update"
-    #       " 'Quick overview' section.")
-    # input("Press Enter when done...")
+    print(f"--- Generating release notes for {new_version_v} ---")
+    run(
+        f"python docs/source/ext/github_tools.py --tag={last} "
+        f"--save --version={new_version}"
+    )
+    print("→ Release notes created")
+    print(
+        f"Please, go to docs/release_notes/release{new_version_v}.rst and update"
+        " 'Quick overview' section."
+    )
+    input("Press Enter when done...")
 
     # 5. Remind to update release-history.rst
     update_release_history()
