@@ -1,10 +1,13 @@
 import numpy as np
 
 from fury.actor import SphGlyph, VectorField
+from fury.actor.curved import Streamlines
+from fury.geometry import line_buffer_separator
 from fury.lib import load_wgsl
 from fury.primitive import prim_sphere
 from fury.shader import (
     SphGlyphComputeShader,
+    StreamlinesShader,
     VectorFieldArrowShader,
     VectorFieldComputeShader,
     VectorFieldShader,
@@ -194,3 +197,16 @@ def test_SphGlyphComputeShader_get_code():
     code = shader.get_code()
     assert isinstance(code, str)
     assert load_wgsl("sph_glyph_compute.wgsl", package_name="fury.wgsl") == code
+
+
+def test_streamline_shader_get_code():
+    """Test StreamlineShader.get_code()."""
+    # Create sample lines data for Streamline constructor
+    lines = [np.array([[0, 0, 0], [1, 0, 0], [2, 0, 0]])]
+    lines_positions, lines_colors = line_buffer_separator(lines, color=(1, 0, 0))
+    print(lines_positions)
+    wobject = Streamlines(lines_positions, colors=lines_colors)
+    shader = StreamlinesShader(wobject)
+    code = shader.get_code()
+    assert isinstance(code, str)
+    assert load_wgsl("streamline_render.wgsl", package_name="fury.wgsl") == code
