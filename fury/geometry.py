@@ -121,7 +121,6 @@ def line_buffer_separator(line_vertices, color=None):
         The colors buffer with NaN separators (if color is provided).
     """
 
-    line_vertices = np.asarray(line_vertices, dtype=np.float32)
     total_vertices = sum(len(segment) for segment in line_vertices)
     total_size = total_vertices + len(line_vertices) - 1
 
@@ -137,7 +136,7 @@ def line_buffer_separator(line_vertices, color=None):
         color_mode = "line"
     elif len(color) == len(line_vertices) and color.ndim == 2:
         color_mode = "line"
-    elif len(color) == len(line_vertices) and color.ndim == line_vertices.ndim:
+    elif len(color) == len(line_vertices) and color.ndim > 2:
         color_mode = "vertex"
     elif len(color) == total_vertices:
         color_mode = "vertex_flattened"
