@@ -36,7 +36,7 @@ def test_create_mesh():
 def test_line_buffer_separator():
     line_vertices = [
         np.array([[0, 0, 0], [1, 1, 1]], dtype=np.float32),
-        np.array([[2, 2, 2], [3, 3, 3]], dtype=np.float32),
+        np.array([[2, 2, 2], [3, 3, 3], [4, 4, 4]], dtype=np.float32),
     ]
     positions, colors = geometry.line_buffer_separator(line_vertices)
     # Check positions
@@ -48,6 +48,7 @@ def test_line_buffer_separator():
             [1, 1, 1, 1],
             [1, 1, 1, 1],
             [np.nan, np.nan, np.nan, np.nan],
+            [1, 1, 1, 1],
             [1, 1, 1, 1],
             [1, 1, 1, 1],
         ],
