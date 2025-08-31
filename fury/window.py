@@ -36,7 +36,7 @@ from fury.lib import (
     get_app,
     run,
 )
-from fury.ui import UI, Anchor, UIContext
+from fury.ui import UI, UIContext
 
 
 class Scene(GfxGroup):
@@ -277,7 +277,7 @@ def add_ui_to_scene(ui_scene: GfxScene, ui_obj: UI):
     if ui_obj.actors:
         ui_scene.add(*ui_obj.actors)
 
-    for child in ui_obj.children:
+    for child in ui_obj._children:
         add_ui_to_scene(ui_scene, child)
 
 
@@ -294,7 +294,7 @@ def remove_ui_from_scene(ui_scene: GfxScene, ui_obj: UI):
     if ui_obj.actors:
         ui_scene.remove(*ui_obj.actors)
 
-    for child in ui_obj.children:
+    for child in ui_obj._children:
         remove_ui_from_scene(ui_scene, child)
 
 
@@ -402,31 +402,22 @@ def render_screens(renderer, screens: List[Screen]):
     renderer.flush()
 
 
-def reposition_ui(screens: List[Screen], switch_position_anchor: bool = False):
+def reposition_ui(screens: List[Screen], switch_ui_mode: bool = False):
     """Update the positions of all UI elements across multiple screens.
 
     Parameters
     ----------
     screens : list of Screen
         The list of Screen objects containing UI elements to reposition.
-    switch_position_anchor : bool, optional
+    switch_ui_mode : bool, optional
         Whether to switch the current position anchor to LEFT, BOTTOM or not.
     """
 
     for screen in screens:
         scene_root = screen.scene
         for child in scene_root.ui_elements:
-            if switch_position_anchor and child._anchors != [
-                Anchor.LEFT,
-                Anchor.BOTTOM,
-            ]:
-                child.set_position(
-                    child.get_position(use_new_ui=True),
-                    x_anchor=Anchor.LEFT,
-                    y_anchor=Anchor.BOTTOM,
-                )
-            else:
-                child._update_actors_position()
+            child._update_ui_mode(switch_to_old_ui=switch_ui_mode)
+            child._update_actors_position()
 
 
 def calculate_screen_sizes(screens, size):
@@ -602,7 +593,9 @@ class ShowManager:
         self.renderer = renderer
         self.renderer.pixel_ratio = pixel_ratio
         self.renderer.blend_mode = blend_mode
-        self.renderer.add_event_handler(self._resize, "resize")
+        self.renderer.add_event_handler(
+            lambda event: self._resize(size=(event.width, event.height)), "resize"
+        )
         self.renderer.add_event_handler(
             self._set_key_long_press_event, "key_down", "key_up"
         )
@@ -619,6 +612,7 @@ class ShowManager:
 
         self.enable_events = enable_events
         self._key_long_press = None
+        self._resize(self._size)
 
     def _screen_setup(self, scene, camera, controller, camera_light):
         """Prepare scene, camera, controller, and light lists for screen creation.
@@ -722,24 +716,25 @@ class ShowManager:
             )
         return screens
 
-    def _resize(self, event):
+    def _resize(self, size):
         """Handle window resize events by updating viewports and re-rendering.
 
         Parameters
         ----------
-        event : Event
-            The PyGfx resize event object."""
+        size : tuple
+            The size (width, height) of the window in pixels.
+        """
         if self._is_initial_resize is None:
             self._is_initial_resize = True
 
-        UIContext.set_canvas_size((event.width, event.height))
+        UIContext.set_canvas_size(size=size)
         update_viewports(
             self.screens,
             calculate_screen_sizes(self._screen_config, self.renderer.logical_size),
         )
         reposition_ui(
             self.screens,
-            switch_position_anchor=(self._is_initial_resize and self._use_old_ui),
+            switch_ui_mode=(self._is_initial_resize and self._use_old_ui),
         )
         if self._is_initial_resize:
             self._is_initial_resize = False

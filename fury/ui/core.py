@@ -1,6 +1,7 @@
 """UI core module that describe UI abstract class."""
 
 import abc
+from typing import List
 
 import numpy as np
 
@@ -18,7 +19,7 @@ from fury.material import (
 )
 from fury.primitive import prim_ring
 from fury.ui import UIContext
-from fury.ui.helpers import Anchor
+from fury.ui.helpers import Anchor, get_anchor_to_multiplier
 
 # from fury.interactor import CustomInteractorStyle
 # from fury.io import load_image
@@ -123,8 +124,9 @@ class UI(object, metaclass=abc.ABCMeta):
             Define the vertical anchor point for `position`. Can be "BOTTOM",
             "CENTER", or "TOP". Defaults to "BOTTOM".
         """
+        self.use_y_down = True
         self._position = np.array([0, 0])
-        self._children = []
+        self._children: List[UI] = []
         self._anchors = [x_anchor, y_anchor]
 
         self._setup()  # Setup needed actors and sub UI components.
@@ -309,17 +311,6 @@ class UI(object, metaclass=abc.ABCMeta):
         """
         return self._get_actors()
 
-    @property
-    def children(self):
-        """Get children composing this UI component.
-
-        Returns
-        -------
-        list
-            A list of child UI components.
-        """
-        return self._children
-
     def perform_position_validation(self, x_anchor, y_anchor):
         """Perform validation checks for anchor string and the 'size' property.
 
@@ -343,6 +334,63 @@ class UI(object, metaclass=abc.ABCMeta):
             raise ValueError(
                 f"y_anchor should be one of these {', '.join([Anchor.TOP, Anchor.CENTER, Anchor.BOTTOM])} but received {y_anchor}"  # noqa: E501
             )
+
+    def set_actor_position(self, actor: Mesh, center_position):
+        """Set the position of the PyGfx actor.
+
+        Parameters
+        ----------
+        actor : Mesh
+            The PyGfx mesh actor whose position needs to be set.
+        center_position : tuple or ndarray
+            A 2-element array `(x, y)` representing the desired center
+            position of the actor.
+        """
+        canvas_size = UIContext.get_canvas_size()
+
+        actor.local.x = center_position[0]
+        actor.local.y = (
+            canvas_size[1] - center_position[1]
+            if self.use_y_down
+            else center_position[1]
+        )
+
+    def _update_ui_mode(self, switch_to_old_ui: bool):
+        """Update the UI element's internal state when the UI system mode changes.
+
+        Parameters
+        ----------
+        switch_to_old_ui : bool
+            A flag indicating whether to use the V1 (legacy) UI mode.
+        """
+
+        def invert_y_anchor(y_anchor: Anchor):
+            """Invert the Y-axis anchor string.
+
+            Parameters
+            ----------
+            y_anchor : Anchor
+                The anchor to be inverted.
+
+            Returns
+            -------
+            Anchor
+                The inverted anchor.
+            """
+            if y_anchor in (Anchor.TOP, Anchor.BOTTOM):
+                return Anchor.BOTTOM
+            else:
+                return Anchor.CENTER
+
+        if switch_to_old_ui:
+            current_position = self.get_position(
+                self._anchors[0], invert_y_anchor(self._anchors[1])
+            )
+            self.use_y_down = not switch_to_old_ui
+            self.set_position(current_position, self._anchors[0], self._anchors[1])
+
+            for child in self._children:
+                child._update_ui_mode(switch_to_old_ui=switch_to_old_ui)
 
     def set_position(
         self, coords, x_anchor: str = Anchor.LEFT, y_anchor: str = Anchor.TOP
@@ -371,7 +419,6 @@ class UI(object, metaclass=abc.ABCMeta):
         self,
         x_anchor: str = Anchor.LEFT,
         y_anchor: str = Anchor.TOP,
-        use_new_ui: bool = False,
     ):
         """Get the position of this UI component according to the specified anchor.
 
@@ -383,21 +430,14 @@ class UI(object, metaclass=abc.ABCMeta):
         y_anchor : str, optional
             Define the vertical anchor point for the returned coordinates.
             Can be "BOTTOM", "CENTER", or "TOP". Defaults to "TOP".
-        use_new_ui : bool, optional
-            Whether to use the new UI system anchors while computing position or not.
 
         Returns
         -------
         (float, float)
             The (x, y) pixel coordinates of the specified anchor point.
         """
-        ANCHOR_TO_MULTIPLIER = {
-            Anchor.LEFT.value: 0.0,
-            Anchor.RIGHT.value: 1.0,
-            Anchor.TOP.value: 0.0 if UIContext.enable_v2_ui or use_new_ui else 1.0,
-            Anchor.BOTTOM.value: 1.0 if UIContext.enable_v2_ui or use_new_ui else 0.0,
-            Anchor.CENTER.value: 0.5,
-        }
+
+        ANCHOR_TO_MULTIPLIER = get_anchor_to_multiplier(use_y_down=self.use_y_down)
 
         self.perform_position_validation(x_anchor=x_anchor, y_anchor=y_anchor)
 
@@ -830,12 +870,8 @@ class Rectangle2D(UI):
     def _update_actors_position(self):
         """Set the position of the internal actor."""
         position = self.get_position(x_anchor=Anchor.CENTER, y_anchor=Anchor.CENTER)
-        canvas_size = UIContext.get_canvas_size()
 
-        self.actor.local.x = position[0]
-        self.actor.local.y = (
-            canvas_size[1] - position[1] if UIContext.enable_v2_ui else position[1]
-        )
+        self.set_actor_position(self.actor, position)
 
     @property
     def color(self):
@@ -998,12 +1034,8 @@ class Disk2D(UI):
     def _update_actors_position(self):
         """Set the position of the internal actor."""
         position = self.get_position(x_anchor=Anchor.CENTER, y_anchor=Anchor.CENTER)
-        canvas_size = UIContext.get_canvas_size()
 
-        self.actor.local.x = position[0]
-        self.actor.local.y = (
-            canvas_size[1] - position[1] if UIContext.enable_v2_ui else position[1]
-        )
+        self.set_actor_position(self.actor, position)
 
     @property
     def color(self):
