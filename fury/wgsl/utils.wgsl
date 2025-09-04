@@ -29,6 +29,27 @@ fn is_point_on_plane_equation(plane: vec4<f32>, point: vec3<f32>, scale: f32) ->
     return abs(normalizedDistance) <= scale / 2.0;
 }
 
+fn crosssect_plane(plane: vec4<f32>, p0: vec3<f32>, p1: vec3<f32>) -> f32 {
+    let num = -1 * (plane.x * p0.x + plane.y * p0.y + plane.z * p0.z + plane.w);
+    let denom = plane.x * (p1.x - p0.x) + plane.y * (p1.y - p0.y) + plane.z * (p1.z - p0.z);
+    if (denom == 0.0) {
+        return -1.0;
+    }
+    let t = num / denom;
+    return t;
+}
+
+fn intersect_plane(t: f32, p0: vec3<f32>, p1: vec3<f32>) -> vec3<f32> {
+    return p0 + t * (p1 - p0);
+}
+
+fn perpendicular_point(point_on_plane: vec3<f32>, plane_normal: vec3<f32>, distance: f32) -> vec3<f32> {
+    let direction = normalize(plane_normal);
+    let offset = direction * distance;
+    let new_point = point_on_plane + offset;
+    return new_point;
+}
+
 fn visible_range(center: vec3<i32>, low_range: vec3<i32>, high_range: vec3<i32>) -> bool {
     let xVal = center.x >= low_range.x && center.x <= high_range.x;
     let yVal = center.y >= low_range.y && center.y <= high_range.y;

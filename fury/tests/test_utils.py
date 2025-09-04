@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from fury.actor import data_slicer
+from fury.actor import data_slicer, line_projection
 from fury.lib import AffineTransform, Group, Mesh, RecursiveTransform, WorldObject
 from fury.utils import (
     apply_affine_to_actor,
@@ -27,6 +27,45 @@ def actor():
 def group_slicer():
     data = np.random.rand(10, 20, 30)
     return data_slicer(data)
+
+
+@pytest.fixture
+def group_line_projection():
+    lines = [
+        np.asarray([[0, 20, -2], [0, 20, 3]]),
+        np.asarray([[0, 0, -2], [0, 0, 3]]),
+        np.asarray([[0, -20, -2], [0, -20, 3]]),
+    ]
+    projection_z = line_projection(
+        lines,
+        plane=(0, 0, -1, 0),
+        colors=[(1, 0, 0), (0, 1, 0), (0, 0, 1)],
+        thickness=10,
+        outline_thickness=1,
+        outline_color=(1, 1, 1),
+    )
+    projection_y = line_projection(
+        lines,
+        plane=(0, -1, 0, 0),
+        colors=[(1, 0, 0), (0, 1, 0), (0, 0, 1)],
+        thickness=10,
+        outline_thickness=1,
+        outline_color=(1, 1, 1),
+    )
+    projection_x = line_projection(
+        lines,
+        plane=(-1, 0, 0, 0),
+        colors=[(1, 0, 0), (0, 1, 0), (0, 0, 1)],
+        thickness=10,
+        outline_thickness=1,
+        outline_color=(1, 1, 1),
+    )
+
+    obj = Group()
+    obj.add(projection_z)
+    obj.add(projection_y)
+    obj.add(projection_x)
+    return obj
 
 
 # Test cases for set_group_visibility
@@ -102,7 +141,7 @@ def test_show_slices_type_error():
         show_slices("not a group", (1, 2, 3))
 
 
-def test_show_slices_valid(group_slicer):
+def test_show_slices_valid(group_slicer, group_line_projection):
     for child in group_slicer.children:
         child.material.plane = (1, 2, 3, 0)
     position = (10, 20, 30)
@@ -110,6 +149,14 @@ def test_show_slices_valid(group_slicer):
     for i, child in enumerate(group_slicer.children):
         expected_plane = (1, 2, 3, position[i])
         np.testing.assert_equal(child.material.plane, expected_plane)
+
+    for child in group_line_projection.children:
+        child.plane = (1, 2, 3, 0)
+    position = (10, 20, 30)
+    show_slices(group_line_projection, position)
+    for i, child in enumerate(group_line_projection.children):
+        expected_plane = (1, 2, 3, position[i])
+        np.testing.assert_equal(child.plane, expected_plane)
 
 
 def test_show_slices_with_list(group_slicer):

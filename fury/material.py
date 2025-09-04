@@ -343,7 +343,7 @@ def _create_points_material(
         If an unsupported material type is specified.
     """
     opacity = validate_opacity(opacity)
-    color = validate_color(color, opacity, mode)
+    color = validate_color(color, 1.0, mode)
 
     if material == "basic":
         return PointsMaterial(
@@ -353,6 +353,7 @@ def _create_points_material(
             map=map,
             aa=aa,
             pick_write=enable_picking,
+            opacity=opacity,
         )
     elif material == "gaussian":
         return PointsGaussianBlobMaterial(
@@ -362,6 +363,7 @@ def _create_points_material(
             map=map,
             aa=aa,
             pick_write=enable_picking,
+            opacity=opacity,
         )
     elif material == "marker":
         return PointsMarkerMaterial(
@@ -372,6 +374,7 @@ def _create_points_material(
             edge_width=edge_width,
             pick_write=enable_picking,
             color_mode=mode,
+            opacity=opacity,
         )
     else:
         raise ValueError(f"Unsupported material type: {material}")

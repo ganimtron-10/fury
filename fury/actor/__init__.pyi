@@ -38,12 +38,24 @@ __all__ = [
     "volume_slicer",
     "peaks_slicer",
     "streamlines",
+    "line_projection",
 ]
 
 from .bio import peaks_slicer, volume_slicer
 from .core import actor_from_primitive, arrow, axes, line
 from .curved import cone, cylinder, ellipsoid, sphere, streamlines, streamtube
-from .planar import disk, image, marker, point, ring, square, star, text, triangle
+from .planar import (
+    disk,
+    image,
+    line_projection,
+    marker,
+    point,
+    ring,
+    square,
+    star,
+    text,
+    triangle,
+)
 from .polyhedron import (
     box,
     frustum,

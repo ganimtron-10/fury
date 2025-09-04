@@ -434,7 +434,10 @@ def validate_slices_group(group):
             f"Group must contain exactly 3 children. {len(group.children)}"
         )
 
-    if not hasattr(group.children[0].material, "plane"):
+    if not (
+        hasattr(group.children[0].material, "plane")
+        or hasattr(group.children[0], "plane")
+    ):
         raise AttributeError(
             "Children do not have the required material plane attribute for slices."
         )
@@ -470,8 +473,12 @@ def show_slices(group, position):
     validate_slices_group(group)
 
     for i, child in enumerate(group.children):
-        a, b, c, _ = child.material.plane
-        child.material.plane = (a, b, c, position[i])
+        if hasattr(child, "plane"):
+            a, b, c, _ = child.plane
+            child.plane = (a, b, c, position[i])
+        else:
+            a, b, c, _ = child.material.plane
+            child.material.plane = (a, b, c, position[i])
 
 
 def apply_affine_to_group(group, affine):
