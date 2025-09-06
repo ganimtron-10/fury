@@ -169,7 +169,6 @@ class Panel2D(UI):
         coords = self.get_position()
         self.background.set_position(coords)
         for element, offset in self.element_offsets:
-            print(offset)
             element.set_position(coords + offset)
 
     def set_visibility(self, visibility):
@@ -236,7 +235,6 @@ class Panel2D(UI):
         offset = element.get_position() - self.get_position()
         self.element_offsets.append((element, offset))
         self._children.append(element)
-        print(self.element_offsets)
 
     def remove_element(self, element):
         """Remove a UI component from the panel.
@@ -271,13 +269,11 @@ class Panel2D(UI):
         self.add_element(element, coords, anchor=anchor)
 
     def left_button_pressed(self, event):
-        print("lbp")
         click_pos = np.array([event.x, event.y])
         self._drag_offset = click_pos - self.get_position()
         event.cancel()  # Stop propagating the event.
 
     def left_button_dragged(self, event):
-        print("lbd")
         if self._drag_offset is not None:
             click_position = np.array([event.x, event.y])
             new_position = click_position - self._drag_offset

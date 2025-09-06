@@ -47,8 +47,3 @@ if __name__ == "__main__":
         title="FURY 2.0: Panel2D Example",
     )
     show_manager.start()
-    print(
-        panel.get_position(),
-        rect.get_position(),
-        disk.get_position(),
-    )
