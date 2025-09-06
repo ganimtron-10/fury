@@ -33,6 +33,7 @@ from fury.shader import (
 from fury.utils import (
     create_sh_basis_matrix,
     get_lmax,
+    get_n_coeffs,
     set_group_opacity,
     set_group_visibility,
     show_slices,
@@ -210,7 +211,6 @@ class VectorField(WorldObject):
 
         self.vectors = field.reshape(total_vectors, 3).astype(np.float32)
         self.field_shape = field.shape[:3]
-        self.visibility = visibility
         if field.ndim == 4:
             self.vectors_per_voxel = 1
         else:
@@ -239,6 +239,7 @@ class VectorField(WorldObject):
         self.geometry = buffer_to_geometry(positions=pts, colors=colors)
         self.material = _create_vector_field_material(
             (0, 0, 0),
+            visibility=visibility,
             material=actor_type,
             thickness=thickness,
             opacity=opacity,
@@ -248,6 +249,20 @@ class VectorField(WorldObject):
             self.cross_section = np.asarray([-2, -2, -2], dtype=np.int32)
         else:
             self.cross_section = cross_section
+
+    def get_bounding_box(self):
+        """Get the bounding box of the vector field.
+
+        Returns
+        -------
+        list
+            A list containing two elements, each a list of three floats representing
+            the minimum and maximum coordinates of the bounding box.
+        """
+        return [
+            [0, 0, 0],
+            [self.field_shape[0] - 1, self.field_shape[1] - 1, self.field_shape[2] - 1],
+        ]
 
     @property
     def cross_section(self):
@@ -276,14 +291,37 @@ class VectorField(WorldObject):
             )
         if len(value) != 3:
             raise ValueError(f"Cross section must have length 3, but got {len(value)}")
-        if self.visibility is None:
-            self.material.cross_section = np.asarray([-2, -2, -2], dtype=np.int32)
-            return
-        value = np.asarray(value, dtype=np.int32)
-        value = np.minimum(np.asarray(self.field_shape) - 1, value)
-        value = np.maximum(value, np.zeros((3,), dtype=np.int32))
-        value = np.where(self.visibility, value, -1)
-        self.material.cross_section = value
+        value = np.asarray(value, dtype=np.float32)
+        bounds = self.get_bounding_box()
+        value = np.maximum(bounds[0], value)
+        value = np.minimum(bounds[1], value)
+        self.material.cross_section = value.astype(np.int32)
+
+    @property
+    def visibility(self):
+        """Get the visibility of the vector field.
+
+        Returns
+        -------
+        tuple
+            A tuple of three boolean values indicating the visibility of the slices
+            in the x, y, and z dimensions, respectively.
+        """
+        return self.material.visibility
+
+    @visibility.setter
+    def visibility(self, value):
+        """Set the visibility of the vector field.
+
+        Parameters
+        ----------
+        value : tuple
+            A tuple of three boolean values indicating the visibility of the slices
+            in the x, y, and z dimensions, respectively.
+        """
+        if not isinstance(value, (list, tuple)) or len(value) != 3:
+            raise ValueError("Visibility must be a tuple of three boolean values.")
+        self.material.visibility = value
 
 
 def vector_field(
@@ -529,7 +567,8 @@ class SphGlyph(Mesh):
 
         self.n_coeff = coeffs.shape[-1]
         self.data_shape = coeffs.shape[:3]
-        l_max = get_lmax(self.n_coeff, basis_type=basis_type)
+        self.basis_type = basis_type
+        self._l_max = get_lmax(self.n_coeff, basis_type=basis_type)
         self.color_type = 0 if color_type == "sign" else 1
 
         vertices, faces = sphere[0], sphere[1]
@@ -558,7 +597,7 @@ class SphGlyph(Mesh):
         )
 
         mat = SphGlyphMaterial(
-            l_max=l_max,
+            n_coeffs=self.n_coeff,
             color_mode="vertex",
             flat_shading=False,
             shininess=shininess,
@@ -566,12 +605,64 @@ class SphGlyph(Mesh):
             side="front",
         )
 
-        B_mat = create_sh_basis_matrix(vertices, l_max)
+        B_mat = create_sh_basis_matrix(vertices, self._l_max)
         self.sh_coeff = coeffs.reshape(-1).astype("float32")
         self.sf_func = B_mat.reshape(-1).astype("float32")
         self.sphere = vertices.astype("float32")
 
         super().__init__(geometry=geo, material=mat)
+
+    @property
+    def l_max(self):
+        """Get the maximum degree of the spherical harmonics.
+
+        Returns
+        -------
+        int
+            The maximum degree of the spherical harmonics used in the glyph.
+        """
+        return self._l_max
+
+    @l_max.setter
+    def l_max(self, value):
+        """Set the maximum degree of the spherical harmonics.
+
+        Parameters
+        ----------
+        value : int
+            The maximum degree of the spherical harmonics to set.
+
+        Raises
+        ------
+        ValueError
+            If the provided value is not a positive integer.
+        """
+        if not isinstance(value, int) or value < 0:
+            raise ValueError("The attribute 'l_max' must be a positive integer.")
+        self._l_max = value
+        self.material.n_coeffs = get_n_coeffs(value, basis_type=self.basis_type)
+
+    @property
+    def scale(self):
+        """Get the scale of the spherical glyph.
+
+        Returns
+        -------
+        float
+            The scale of the spherical glyph.
+        """
+        return self.material.scale
+
+    @scale.setter
+    def scale(self, value):
+        """Set the scale of the spherical glyph.
+
+        Parameters
+        ----------
+        value : float
+            The scale of the spherical glyph to set.
+        """
+        self.material.scale = value
 
 
 def sph_glyph(

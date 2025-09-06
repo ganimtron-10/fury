@@ -18,6 +18,7 @@ __all__ = [
     "rhombicuboctahedron",
     "frustum",
     "superquadric",
+    "streamtube",
     "disk",
     "image",
     "marker",
@@ -35,11 +36,13 @@ __all__ = [
     "data_slicer",
     "VectorField",
     "volume_slicer",
+    "peaks_slicer",
+    "streamlines",
 ]
 
-from .bio import volume_slicer
+from .bio import peaks_slicer, volume_slicer
 from .core import actor_from_primitive, arrow, axes, line
-from .curved import cone, cylinder, ellipsoid, sphere
+from .curved import cone, cylinder, ellipsoid, sphere, streamlines, streamtube
 from .planar import disk, image, marker, point, ring, square, star, text, triangle
 from .polyhedron import (
     box,

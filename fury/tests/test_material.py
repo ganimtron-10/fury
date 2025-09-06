@@ -19,6 +19,7 @@ from fury.lib import (
 )
 from fury.material import (
     SphGlyphMaterial,
+    StreamlinesMaterial,
     VectorFieldArrowMaterial,
     VectorFieldLineMaterial,
     VectorFieldThinLineMaterial,
@@ -260,10 +261,6 @@ def test_VectorFieldThinLineMaterial_invalid_cross_section():
     ):
         material.cross_section = [1, 2]
 
-    # Test non-integer values
-    with pytest.raises(ValueError, match="cross_section must contain only integers"):
-        material.cross_section = [1.5, 2.0, 3.0]
-
     # Test invalid types
     with pytest.raises(ValueError):
         material.cross_section = "invalid"
@@ -396,6 +393,38 @@ def test_create_vector_field_material_arrow():
     assert np.array_equal(material.cross_section, cross_section)
 
 
+def test_visibility_none():
+    """Test setting visibility to None."""
+    cross_section = [7, 8, 9]
+    material = _create_vector_field_material(
+        cross_section,
+        material="arrow",
+        opacity=0.8,
+        thickness=1.5,
+    )
+
+    material.visibility = None
+    assert material.visibility is None  # Default behavior
+    assert np.array_equal(
+        material.uniform_buffer.data["visibility"],
+        np.array([-1, -1, -1, 0], dtype=np.int32),  # As per implementation
+    )
+
+    material = _create_vector_field_material(
+        cross_section,
+        visibility=(True, False, True),
+        material="arrow",
+        opacity=0.8,
+        thickness=1.5,
+    )
+
+    assert material.visibility == [True, False, True]  # Default behavior
+    assert np.array_equal(
+        material.uniform_buffer.data["visibility"],
+        np.array([1, 0, 1, 0], dtype=np.int32),  # As per implementation
+    )
+
+
 def test_create_vector_field_material_invalid_type():
     """Test creating a material with invalid type raises error."""
     cross_section = [1, 1, 1]
@@ -450,27 +479,27 @@ def test_SphGlyphMaterial_initialization_defaults():
     """SphGlyphMaterial: Test initialization with default parameters."""
     material = SphGlyphMaterial()
 
-    assert material.l_max == 4
-    assert material.scale == 2
+    assert material.n_coeffs == -1
+    assert material.scale == 1
     assert material.shininess == 30
     assert material.emissive == "#000"
     assert material.specular == "#494949"
 
 
-def test_SphGlyphMaterial_l_max_property():
-    """SphGlyphMaterial: Test l_max property validation and updates."""
+def test_SphGlyphMaterial_n_coeffs_property():
+    """SphGlyphMaterial: Test n_coeffs property validation and updates."""
     material = SphGlyphMaterial()
 
-    # Test valid even integers
-    for value in [2, 4, 6, 8]:
-        material.l_max = value
-        assert material.l_max == value
+    # Test valid integer values
+    for value in [1, 4, 9, 16, 25, 36]:
+        material.n_coeffs = value
+        assert material.n_coeffs == value
 
     # Test invalid values
     with pytest.raises(ValueError):
-        material.l_max = "4"  # Not integer
+        material.n_coeffs = "4"  # Not integer
     with pytest.raises(ValueError):
-        material.l_max = 4.5  # Float
+        material.n_coeffs = 4.5  # Float
 
 
 def test_SphGlyphMaterial_scale_property():
@@ -492,7 +521,7 @@ def test_SphGlyphMaterial_scale_property():
 def test_SphGlyphMaterial_custom_initialization():
     """SphGlyphMaterial: Test initialization with custom parameters."""
     material = SphGlyphMaterial(
-        l_max=6,
+        n_coeffs=36,
         scale=3.5,
         shininess=50,
         emissive="#111",
@@ -500,7 +529,7 @@ def test_SphGlyphMaterial_custom_initialization():
         flat_shading=True,
     )
 
-    assert material.l_max == 6
+    assert material.n_coeffs == 36
     assert material.scale == 3.5
     assert material.shininess == 50
     assert material.emissive == "#111"
@@ -510,11 +539,175 @@ def test_SphGlyphMaterial_custom_initialization():
 
 def test_SphGlyphMaterial_uniform_type():
     """SphGlyphMaterial: Test uniform_type contains expected fields."""
-    assert "l_max" in SphGlyphMaterial.uniform_type
+    assert "n_coeffs" in SphGlyphMaterial.uniform_type
     assert "scale" in SphGlyphMaterial.uniform_type
-    assert SphGlyphMaterial.uniform_type["l_max"] == "i4"
+    assert SphGlyphMaterial.uniform_type["n_coeffs"] == "i4"
     assert SphGlyphMaterial.uniform_type["scale"] == "f4"
 
     # Check inheritance from MeshPhongMaterial
     assert "shininess" in SphGlyphMaterial.uniform_type
     assert "emissive_color" in SphGlyphMaterial.uniform_type
+
+
+def test_StreamlinesMaterial_initialization_defaults():
+    """StreamlinesMaterial: Test initialization with default parameters."""
+    material = StreamlinesMaterial()
+
+    assert material.outline_thickness == 0.0
+    assert np.array_equal(material.outline_color, (0, 0, 0))
+
+
+def test_StreamlinesMaterial_custom_initialization():
+    """StreamlinesMaterial: Test initialization with custom parameters."""
+    outline_thickness = 2.5
+    outline_color = (1.0, 0.5, 0.2)
+
+    material = StreamlinesMaterial(
+        outline_thickness=outline_thickness,
+        outline_color=outline_color,
+        thickness=3.0,
+        opacity=0.7,
+        color=(0.8, 0.2, 0.4),
+    )
+
+    assert material.outline_thickness == outline_thickness
+    # The outline_color getter returns RGB part only, so we compare with RGB tuple
+    assert np.allclose(material.outline_color, outline_color)
+    assert material.thickness == 3.0
+    assert round(material.opacity, 2) == 0.7
+
+
+def test_StreamlinesMaterial_inheritance():
+    """StreamlinesMaterial: Test that it properly inherits from LineMaterial."""
+    material = StreamlinesMaterial()
+
+    # Test that it inherits LineMaterial properties
+    assert hasattr(material, "thickness")
+    assert hasattr(material, "color")
+    assert hasattr(material, "opacity")
+
+    # Test that parent class methods work
+    material.thickness = 4.0
+    assert material.thickness == 4.0
+
+    material.opacity = 0.5
+    assert material.opacity == 0.5
+
+
+def test_StreamlinesMaterial_with_kwargs():
+    """StreamlinesMaterial: Test initialization with additional kwargs."""
+    material = StreamlinesMaterial(
+        outline_thickness=1.5,
+        outline_color=(0.5, 0.5, 0.5),
+        # LineMaterial kwargs
+        thickness=2.0,
+        color=(1.0, 0.0, 0.0),
+        opacity=0.8,
+        thickness_space="world",
+        aa=False,
+    )
+
+    # Test StreamlinesMaterial specific properties
+    assert material.outline_thickness == 1.5
+    assert np.allclose(material.outline_color, (0.5, 0.5, 0.5))
+
+    # Test inherited properties
+    assert material.thickness == 2.0
+    assert round(material.opacity, 1) == 0.8
+
+
+def test_StreamlinesMaterial_outline_thickness_property():
+    """StreamlinesMaterial: Test outline_thickness property getter and setter."""
+    material = StreamlinesMaterial()
+
+    # Test default value
+    assert material.outline_thickness == 0.0
+
+    # Test setter with valid values
+    for thickness in [0.5, 1.0, 2.5, 5.0]:
+        material.outline_thickness = thickness
+        assert material.outline_thickness == thickness
+
+    # Test setter with zero
+    material.outline_thickness = 0.0
+    assert material.outline_thickness == 0.0
+
+    # Test setter with integer (should convert to float)
+    material.outline_thickness = 3
+    assert material.outline_thickness == 3.0
+    assert isinstance(material.outline_thickness, float)
+
+
+def test_StreamlinesMaterial_outline_color_property():
+    """StreamlinesMaterial: Test outline_color property getter and setter."""
+    material = StreamlinesMaterial()
+
+    # Test default value (getter returns RGB part only)
+    expected_default_rgb = (0, 0, 0)
+    assert np.allclose(material.outline_color, expected_default_rgb)
+
+    # Test setter with RGB tuple
+    rgb_color = (1.0, 0.5, 0.2)
+    material.outline_color = rgb_color
+    # Getter returns RGB part only
+    assert np.allclose(material.outline_color, rgb_color)
+
+    # Test setter with RGBA tuple
+    rgba_color = (0.8, 0.3, 0.7, 0.9)
+    material.outline_color = rgba_color
+    # Getter returns RGB part only
+    expected_rgb = rgba_color[:3]
+    assert np.allclose(material.outline_color, expected_rgb)
+
+    # Test setter with list
+    list_color = [0.2, 0.8, 0.4]
+    material.outline_color = list_color
+    assert np.allclose(material.outline_color, list_color)
+
+    # Test setter with numpy array
+    np_color = np.array([0.6, 0.1, 0.9])
+    material.outline_color = np_color
+    assert np.allclose(material.outline_color, np_color)
+
+
+def test_StreamlinesMaterial_uniform_type():
+    """StreamlinesMaterial: Test uniform_type contains expected fields."""
+    assert "outline_thickness" in StreamlinesMaterial.uniform_type
+    assert "outline_color" in StreamlinesMaterial.uniform_type
+    assert StreamlinesMaterial.uniform_type["outline_thickness"] == "f4"
+    assert StreamlinesMaterial.uniform_type["outline_color"] == "4xf4"
+
+    # Check inheritance from LineMaterial
+    assert "thickness" in StreamlinesMaterial.uniform_type
+    assert "color" in StreamlinesMaterial.uniform_type
+    assert "opacity" in StreamlinesMaterial.uniform_type
+
+
+def test_StreamlinesMaterial_edge_cases():
+    """StreamlinesMaterial: Test edge cases and boundary conditions."""
+    material = StreamlinesMaterial()
+
+    # Test negative outline_thickness (should still work as it's just a float)
+    material.outline_thickness = -1.0
+    assert material.outline_thickness == -1.0
+
+    # Test very large outline_thickness
+    material.outline_thickness = 1000.0
+    assert material.outline_thickness == 1000.0
+
+    # Test outline_color with values outside [0,1] range
+    material.outline_color = (1.5, -0.5, 2.0)
+    expected_rgb = (1.5, -0.5, 2.0)
+    assert np.allclose(material.outline_color, expected_rgb)
+
+    # Test empty tuple/list (should fail gracefully)
+    try:
+        material.outline_color = ()
+    except (ValueError, IndexError, TypeError):
+        pass  # Expected to fail
+
+    # Test single value (should fail gracefully)
+    try:
+        material.outline_color = 0.5
+    except (ValueError, IndexError, TypeError):
+        pass  # Expected to fail

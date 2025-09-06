@@ -61,7 +61,7 @@
 $$ if colormap_dim
     {$ include 'pygfx.colormap.wgsl' $}
 $$ endif
-{$ include 'fury.utils.wgsl' $}
+
 
 
 // -------------------- functions --------------------
@@ -136,14 +136,11 @@ struct VertexInput {
 $$ if instanced
 struct InstanceInfo {
     transform: mat4x4<f32>,
-    id: u32,
+    global_id: u32,
 };
 @group(1) @binding(0)
 var<storage,read> s_instance_infos: array<InstanceInfo>;
 $$ endif
-
-const NUM_VECTORS = i32({{ num_vectors }});
-const DATA_SHAPE = vec3<i32>{{ data_shape }};
 
 @vertex
 fn vs_main(in: VertexInput) -> Varyings {
@@ -164,11 +161,7 @@ fn vs_main(in: VertexInput) -> Varyings {
 
     // Indexing
     let index = i32(in.index);
-
-
     var node_index = index / 6;
-
-
     let vertex_index = index % 6;
     let vertex_num = vertex_index + 1;
     var face_index = node_index;  // corrected below if necessary, depending on configuration
@@ -222,44 +215,6 @@ fn vs_main(in: VertexInput) -> Varyings {
     var pos_s_node = (pos_n_node.xy / pos_n_node.w + 1.0) * screen_factor;
     var pos_s_next = (pos_n_next.xy / pos_n_next.w + 1.0) * screen_factor;
 
-    let center = flatten_to_3d(node_index / (NUM_VECTORS * 2), DATA_SHAPE);
-    var w_center = world_transform * vec4<f32>(vec3<f32>(center), 1.0);
-    let cross_section = u_material.cross_section.xyz;
-    let visibility = u_material.visibility.xyz;
-    let diff = pos_w_node.xyz - w_center.xyz;
-
-    if (!all(visibility == vec3<i32>(-1))) {
-        let is_near_x_plane = is_point_on_plane_equation(
-            vec4<f32>(-1.0, 0.0, 0.0, f32(cross_section.x)),
-            vec3<f32>(w_center.xyz),
-            abs(world_transform[0][0])
-        );
-        if is_near_x_plane {
-            pos_w_node.x = f32(cross_section.x) + diff.x;
-            w_center.x = f32(cross_section.x);
-        }
-
-        let is_near_y_plane = is_point_on_plane_equation(
-            vec4<f32>(0.0, -1.0, 0.0, f32(cross_section.y)),
-            vec3<f32>(w_center.xyz),
-            abs(world_transform[1][1])
-        );
-        if is_near_y_plane {
-            pos_w_node.y = f32(cross_section.y) + diff.y;
-            w_center.y = f32(cross_section.y);
-        }
-
-        let is_near_z_plane = is_point_on_plane_equation(
-            vec4<f32>(0.0, 0.0, -1.0, f32(cross_section.z)),
-            vec3<f32>(w_center.xyz),
-            abs(world_transform[2][2])
-        );
-        if is_near_z_plane {
-            pos_w_node.z = f32(cross_section.z) + diff.z;
-            w_center.z = f32(cross_section.z);
-        }
-    }
-
     $$ if line_type == 'infsegment'
     let can_move_backwards = {{ 'true' if (start_is_infinite and end_is_infinite) else 'false' }};
     let prev_node_ori = pos_n_node;
@@ -305,7 +260,6 @@ fn vs_main(in: VertexInput) -> Varyings {
     var angle1 = atan2(vec_s_prev.y, vec_s_prev.x);
     var angle3 = atan2(vec_s_next.y, vec_s_next.x);
 
-    // The thickness of the line in terms of geometry is a little bit thicker.
     // Just enough so that fragments that are partially on the line, are also included
     // in the fragment shader. That way we can do aa without making the lines thinner.
     // All logic in this function works with the ticker line width. But we pass the real line width as a varying.
@@ -337,12 +291,13 @@ fn vs_main(in: VertexInput) -> Varyings {
     $$ endif
     let min_size_for_pixel = 1.415 / l2p;  // For minimum pixel coverage. Use sqrt(2) to take diagonals into account.
     $$ if aa
-    let thickness:f32 = u_material.thickness / thickness_ratio;  // Logical pixels
-    let half_thickness = 0.5 * max(min_size_for_pixel, thickness + 1.0 / l2p);  // add 0.5 physical pixel on each side.
+    let total_thickness:f32 = (u_material.thickness + u_material.outline_thickness * 2.0) / thickness_ratio;  // Logical pixels
+    let half_thickness = 0.5 * max(min_size_for_pixel, total_thickness + 1.0 / l2p);  // add 0.5 physical pixel on each side.
     $$ else
-    let thickness:f32 = max(min_size_for_pixel, u_material.thickness / thickness_ratio);  // non-aa lines get no thinner than 1 px
-    let half_thickness = 0.5 * thickness;
+    let total_thickness:f32 = (u_material.thickness + u_material.outline_thickness * 2.0) / thickness_ratio;  // non-aa lines get no thinner than 1 px
+    let half_thickness = 0.5 * max(min_size_for_pixel, total_thickness);
     $$ endif
+    let thickness:f32 = u_material.thickness / thickness_ratio;
 
     // Declare vertex cords (x along segment, y perpendicular to it).
     // The coords 1 and 5 have a positive y coord, the coords 2 and 6 negative.
@@ -704,9 +659,12 @@ fn vs_main(in: VertexInput) -> Varyings {
     // Position
     varyings.position = vec4<f32>(the_pos_n);
     varyings.world_pos = vec3<f32>(ndc_to_world_pos(the_pos_n));
+    varyings.elementIndex = u32(face_index);
+
     //  Thickness and segment coord. These are corrected for perspective, otherwise the dashes are malformed in 3D.
     varyings.w = f32(w);
     varyings.thickness_pw = f32(thickness * l2p * w);  // the real thickness, in physical coords
+    varyings.outline_thickness_pw = f32(u_material.outline_thickness / thickness_ratio * l2p * w);  // the real outline thickness, in physical coords
     varyings.segment_coord_pw = vec2<f32>(the_coord * half_thickness * l2p * w);  // uses a slightly wider thickness
     // Coords related to joins
     varyings.join_coord = f32(join_coord);
@@ -775,10 +733,6 @@ fn vs_main(in: VertexInput) -> Varyings {
         $$ endif
     $$ endif
 
-
-    varyings.center = vec3<f32>(w_center.xyz);
-    varyings.cross_section = vec3<f32>(cross_section);
-    varyings.visibility = vec3<i32>(visibility);
     return varyings;
 }
 
@@ -798,15 +752,10 @@ fn fs_main(varyings: Varyings, @builtin(front_facing) is_front: bool) -> Fragmen
     // clipping planes
     {$ include 'pygfx.clipping_planes.wgsl' $}
 
-    let cross_section = varyings.cross_section;
-    let visibility = varyings.visibility;
-    if !all(visibility == vec3<i32>(-1)) && !visible_cross_section(varyings.center, cross_section, visibility) {
-        discard;
-    }
-
     // Get the half-thickness in physical coordinates. This is the reference thickness.
     // If aa is used, the line is actually a bit thicker, leaving space to do aa.
     let half_thickness_p = 0.5 * varyings.thickness_pw / varyings.w;
+    let outline_thickness_p = varyings.outline_thickness_pw / varyings.w;
 
     // Discard invalid faces. These are faces for which *all* 3 verts are set to zero. (trick 5b and 7c)
     if (varyings.valid_if_nonzero == 0.0) {
@@ -847,6 +796,7 @@ fn fs_main(varyings: Varyings, @builtin(front_facing) is_front: bool) -> Fragmen
 
     // Calculate the distance to the stroke's edge. Negative means inside, positive means outside. Just like SDF.
     var dist_to_stroke_p = length(segment_coord_p) - half_thickness_p;
+    let dist_to_outline_p = dist_to_stroke_p - outline_thickness_p;
 
     $$ if dashing
 
@@ -989,46 +939,45 @@ fn fs_main(varyings: Varyings, @builtin(front_facing) is_front: bool) -> Fragmen
     // it relies on a good blend method, and the object gets drawn twice.
     var alpha: f32 = 1.0;
     $$ if aa
-        if (half_thickness_p > 0.5) {
-            alpha = clamp(0.5 - dist_to_stroke_p, 0.0, 1.0);
-        } else {
-            // Thin lines stay one physical pixel wide, but scale alpha as they get thinner
-            let alpha_base = (1.0 - length(segment_coord_p));
-            let thickness_scale = max(0.01, half_thickness_p * 2.0);
-            alpha = alpha_base * thickness_scale;
-            $$ if dashing
-                alpha = alpha * clamp(0.5 - dist_to_stroke_dash_p, 0.0, 1.0);
-            $$ endif
-        }
+        let aa_width = 1.0;
+        let fill_alpha = smoothstep(aa_width, 0.0, dist_to_stroke_p);
+        let total_alpha = smoothstep(aa_width, 0.0, dist_to_outline_p);
+        alpha = total_alpha;
         alpha = sqrt(alpha);  // this prevents aa lines from looking thinner
         if (alpha <= 0.0) { discard; }
     $$ else
         if (dist_to_stroke_p > 0.0) { discard; }
     $$ endif
 
-    // Determine srgb color
+    // Determine the srgb color by mixing the outline and fill colors based on their alphas.
+    var fill_color_srgb = u_material.color;
     $$ if color_mode == 'vertex'
         var color = varyings.color_vert;
         if (is_join) {
             let color_segment = varyings.color_node - (varyings.color_node - varyings.color_vert) / (1.0 - abs(join_coord_lin));
             color = mix(color_segment, varyings.color_node, abs(join_coord_fan));
         }
+        fill_color_srgb = color;
     $$ elif color_mode == 'face'
-        let color = varyings.color_vert;
+        fill_color_srgb = varyings.color_vert;
     $$ elif color_mode == 'vertex_map'
         var texcoord = varyings.texcoord_vert;
         if (is_join) {
             let texcoord_segment = varyings.texcoord_node - (varyings.texcoord_node - varyings.texcoord_vert) / (1.0 - abs(join_coord_lin));
             texcoord = mix(texcoord_segment, varyings.texcoord_node, abs(join_coord_fan));
         }
-        let color = sample_colormap(texcoord);
+        fill_color_srgb = sample_colormap(texcoord);
     $$ elif color_mode == 'face_map'
-        let color = sample_colormap(varyings.texcoord_vert);
-    $$ else
-        let color = u_material.color;
+        fill_color_srgb = sample_colormap(varyings.texcoord_vert);
     $$ endif
-    var physical_color = srgb2physical(color.rgb);
 
+    // Convert from sRGB to physical color space for correct blending.
+    let physical_fill = srgb2physical(fill_color_srgb.rgb);
+    let physical_outline = srgb2physical(u_material.outline_color.rgb);
+
+    // Mix the outline and fill colors.
+    // When fill_alpha is 1, we see 100% fill. When it's 0, we see 100% outline.
+    let physical_color = mix(physical_outline, physical_fill, sqrt(fill_alpha));
     $$ if false
         // Alternative debug options during dev.
         physical_color = vec3<f32>(abs(dist_to_dash_p) / 20.0, 0.0, 0.0);

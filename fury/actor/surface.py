@@ -20,6 +20,7 @@ def surface(
     colors=None,
     texture=None,
     texture_axis="xy",
+    texture_coords=None,
     opacity=1.0,
 ):
     """Create a surface mesh actor from vertices and faces.
@@ -40,6 +41,9 @@ def surface(
     texture_axis : str, optional
         The axis to generate UV coordinates for the texture. Options are 'xy', 'yz',
         and 'xz'. This option only works with texture is passed.
+    texture_coords : ndarray, shape (N, 2), optional
+        Predefined UV coordinates for the texture mapping. If not provided, they will
+        be generated based on the `texture_axis`.
     opacity : float, optional
         Takes values from 0 (fully transparent) to 1 (opaque).
 
@@ -87,11 +91,19 @@ def surface(
         )
 
         tex = load_image_texture(texture)
-        texcoords = generate_planar_uvs(vertices, axis=texture_axis)
+        if texture_coords is None:
+            texture_coords = generate_planar_uvs(vertices, axis=texture_axis)
+        elif (
+            texture_coords.shape[0] != vertices.shape[0] or texture_coords.shape[1] != 2
+        ):
+            raise ValueError(
+                "texture_coords must be an ndarray with shape (N, 2) "
+                "where N is the number of vertices."
+            )
         geo = buffer_to_geometry(
             positions=vertices.astype("float32"),
             indices=faces.astype("int32"),
-            texcoords=texcoords.astype("float32"),
+            texcoords=texture_coords.astype("float32"),
         )
         mat = MeshBasicMaterial(map=tex, opacity=opacity)
     else:

@@ -224,6 +224,7 @@ def _create_line_material(
 def _create_vector_field_material(
     cross_section,
     *,
+    visibility=None,
     material="thin_line",
     enable_picking=True,
     opacity=1.0,
@@ -239,6 +240,9 @@ def _create_vector_field_material(
     cross_section : list or tuple, shape (3,), optional
         A list or tuple representing the cross section dimensions.
         If None, the cross section will be ignored and complete field will be shown.
+    visibility : list or tuple, shape (3,), optional
+        A list or tuple representing the visibility in the x, y, and z dimensions.
+        If None, the visibility will be set to (-1, -1, -1) to show the complete field.
     material : str, optional
         The type of vector field material to create. Options are 'thin_line' (default),
         'line', 'arrow'.
@@ -273,11 +277,11 @@ def _create_vector_field_material(
     }
 
     if material == "thin_line":
-        return VectorFieldThinLineMaterial(cross_section, **args)
+        return VectorFieldThinLineMaterial(cross_section, visibility=visibility, **args)
     elif material == "line":
-        return VectorFieldLineMaterial(cross_section, **args)
+        return VectorFieldLineMaterial(cross_section, visibility=visibility, **args)
     elif material == "arrow":
-        return VectorFieldArrowMaterial(cross_section, **args)
+        return VectorFieldArrowMaterial(cross_section, visibility=visibility, **args)
     else:
         raise ValueError(f"Unsupported material type: {material}")
 
@@ -473,27 +477,78 @@ class VectorFieldThinLineMaterial(LineMaterial):
     ----------
     cross_section : {list, tuple, ndarray}
         A list or tuple  or ndarray representing the cross section dimensions.
+    visibility : {list, tuple, ndarray}, optional
+        A list or tuple  or ndarray representing the visibility in the 3D.
+        If None, the visibility will be set to (-1, -1, -1) to show the complete field.
     **kwargs : dict
             Additional keyword arguments for the material.
     """
 
     uniform_type = dict(
         LineThinSegmentMaterial.uniform_type,
-        cross_section="4xi4",  # vec3<i32>
+        cross_section="4xf4",  # vec4<i32>
+        visibility="4xi4",  # vec4<i32>
     )
 
-    def __init__(self, cross_section, **kwargs):
+    def __init__(self, cross_section, *, visibility=None, **kwargs):
         """Initialize the VectorFieldMaterial.
 
         Parameters
         ----------
         cross_section : {list, tuple, ndarray}
             A list or tuple  or ndarray representing the cross section dimensions.
+        visibility : {list, tuple, ndarray}, optional
+            A list or tuple  or ndarray representing the visibility in the 3D.
+            If None, the visibility will be set to (-1, -1, -1) to show the complete
+            field.
         **kwargs : dict
             Additional keyword arguments for the material.
         """
         super().__init__(color_mode="vertex", **kwargs)
         self.cross_section = cross_section
+        self.visibility = visibility
+
+    @property
+    def visibility(self):
+        """Get the visibility of the vector field in each dimension.
+
+        Returns
+        -------
+        list
+            A list representing the visibility in the x, y, and z dimensions.
+        """
+        vis = self.uniform_buffer.data["visibility"][:3]
+        if all(vis == (-1, -1, -1)):
+            return None
+        return [bool(i) for i in vis]
+
+    @visibility.setter
+    def visibility(self, visibility):
+        """Set the visibility of the vector field in each dimension.
+
+        Parameters
+        ----------
+        visibility : list or tuple
+            A list or tuple representing the visibility in the x, y, and z dimensions.
+        """
+        if visibility is None:
+            self.uniform_buffer.data["visibility"] = np.asarray(
+                [-1, -1, -1, 0], dtype=np.int32
+            )
+        else:
+            if len(visibility) != 3:
+                raise ValueError("visibility must have exactly 3 dimensions.")
+            if not all(
+                isinstance(i, bool)
+                or (hasattr(i, "item") and isinstance(i.item(), bool))
+                for i in visibility
+            ):
+                raise ValueError("visibility must contain only booleans.")
+
+            self.uniform_buffer.data["visibility"] = np.asarray(
+                [*visibility, 0], dtype=np.int32
+            )
+        self.uniform_buffer.update_full()
 
     @property
     def cross_section(self):
@@ -517,11 +572,6 @@ class VectorFieldThinLineMaterial(LineMaterial):
         """
         if len(cross_section) != 3:
             raise ValueError("cross_section must have exactly 3 dimensions.")
-        if not all(
-            isinstance(i, int) or (hasattr(i, "item") and isinstance(i.item(), int))
-            for i in cross_section
-        ):
-            raise ValueError("cross_section must contain only integers.")
 
         self.uniform_buffer.data["cross_section"] = np.asarray(
             [*cross_section, 0], dtype=np.int32
@@ -550,7 +600,7 @@ class SphGlyphMaterial(MeshPhongMaterial):
 
     Parameters
     ----------
-    l_max : int, optional
+    n_coeffs : int, optional
         The maximum spherical harmonic degree.
     scale : int, optional
         The scale factor.
@@ -566,14 +616,14 @@ class SphGlyphMaterial(MeshPhongMaterial):
 
     uniform_type = dict(
         MeshPhongMaterial.uniform_type,
-        l_max="i4",
+        n_coeffs="i4",
         scale="f4",
     )
 
     def __init__(
         self,
-        l_max=4,
-        scale=2,
+        n_coeffs=-1,
+        scale=1,
         shininess=30,
         emissive="#000",
         specular="#494949",
@@ -583,8 +633,10 @@ class SphGlyphMaterial(MeshPhongMaterial):
 
         Parameters
         ----------
-        l_max : int, optional
-            The maximum spherical harmonic degree.
+        n_coeffs : int, optional
+            The maximum spherical harmonic degree. This value will limit the number of
+            spherical harmonic coefficients that can be used from the data.
+            If -1, no limit is applied.
         scale : int, optional
             The scale factor.
         shininess : int, optional
@@ -597,32 +649,32 @@ class SphGlyphMaterial(MeshPhongMaterial):
             Additional keyword arguments for the material.
         """
         super().__init__(shininess, emissive, specular, **kwargs)
-        self.l_max = l_max
+        self.n_coeffs = n_coeffs
         self.scale = scale
 
     @property
-    def l_max(self):
-        """Get the maximum spherical harmonic degree.
+    def n_coeffs(self):
+        """Get the maximum number of spherical harmonic coefficients.
 
         Returns
         -------
         int
-            The maximum spherical harmonic degree.
+            The maximum number of spherical harmonic coefficients.
         """
-        return self.uniform_buffer.data["l_max"]
+        return self.uniform_buffer.data["n_coeffs"]
 
-    @l_max.setter
-    def l_max(self, value):
-        """Set the maximum spherical harmonic degree.
+    @n_coeffs.setter
+    def n_coeffs(self, value):
+        """Set the maximum number of spherical harmonic coefficients.
 
         Parameters
         ----------
         value : int
-            The maximum spherical harmonic degree.
+            The maximum number of spherical harmonic coefficients.
         """
         if not isinstance(value, int):
-            raise ValueError("l_max must be an integer.")
-        self.uniform_buffer.data["l_max"] = value
+            raise ValueError("n_coeffs must be an integer.")
+        self.uniform_buffer.data["n_coeffs"] = value
         self.uniform_buffer.update_full()
 
     @property
@@ -647,5 +699,90 @@ class SphGlyphMaterial(MeshPhongMaterial):
         """
         if not isinstance(value, (int, float)):
             raise ValueError("scale must be a number.")
-        self.uniform_buffer.data["scale"] = value
+        self.uniform_buffer.data["scale"] = float(value)
+        self.uniform_buffer.update_full()
+
+
+class StreamlinesMaterial(LineMaterial):
+    """Initialize the Streamlines Material.
+
+    Parameters
+    ----------
+    outline_thickness : float, optional
+        The thickness of the outline.
+    outline_color : tuple, optional
+        The color of the outline as an RGBA tuple.
+    **kwargs : dict
+        Additional keyword arguments for the material.
+    """
+
+    uniform_type = dict(
+        LineMaterial.uniform_type,
+        outline_thickness="f4",
+        outline_color="4xf4",
+    )
+
+    def __init__(self, outline_thickness=0.0, outline_color=(0, 0, 0), **kwargs):
+        """Initialize the Streamline Material.
+
+        Parameters
+        ----------
+        outline_thickness : float, optional
+            The thickness of the outline.
+        outline_color : tuple, optional
+            The color of the outline as an RGBA tuple.
+        **kwargs : dict
+            Additional keyword arguments for the material.
+        """
+        super().__init__(**kwargs)
+        self.outline_thickness = outline_thickness
+        self.outline_color = outline_color
+
+    @property
+    def outline_thickness(self):
+        """Get the outline thickness.
+
+        Returns
+        -------
+        float
+            The thickness of the outline.
+        """
+        return float(self.uniform_buffer.data["outline_thickness"])
+
+    @outline_thickness.setter
+    def outline_thickness(self, value):
+        """Set the outline thickness.
+
+        Parameters
+        ----------
+        value : float
+            The thickness of the outline.
+        """
+        self.uniform_buffer.data["outline_thickness"] = float(value)
+        self.uniform_buffer.update_full()
+
+    @property
+    def outline_color(self):
+        """Get the outline color.
+
+        Returns
+        -------
+        tuple
+            The color of the outline as an RGBA tuple.
+        """
+        return self.uniform_buffer.data["outline_color"][:3]
+
+    @outline_color.setter
+    def outline_color(self, value):
+        """Set the outline color.
+
+        Parameters
+        ----------
+        value : tuple
+            The color of the outline as an RGB or RGBA tuple.
+        """
+        if len(value) == 3:
+            value = (*value, 1.0)
+
+        self.uniform_buffer.data["outline_color"] = value
         self.uniform_buffer.update_full()

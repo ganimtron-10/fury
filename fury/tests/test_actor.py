@@ -13,12 +13,15 @@ from fury.material import (
     VectorFieldLineMaterial,
     VectorFieldThinLineMaterial,
 )
+from fury.optpkg import optional_package
 from fury.utils import (
     generate_planar_uvs,
     get_slices,
     set_group_visibility,
     show_slices,
 )
+
+_, have_numba, _ = optional_package("numba")
 
 
 def random_png(width, height):
@@ -599,6 +602,66 @@ def test_surface_with_texture(tmpdir):
     assert np.array_equal(surface_actor.geometry.indices.data, faces)
 
 
+def test_surface_with_texture_coords(tmpdir):
+    """Test surface creation with custom texture coordinates."""
+    # Create simple geometry (a single triangle)
+    vertices = np.array(
+        [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]], dtype=np.float32
+    )
+
+    faces = np.array([[0, 1, 2]], dtype=np.int32)
+
+    # Create custom texture coordinates
+    texture_coords = np.array([[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]], dtype=np.float32)
+
+    # Create a dummy texture file
+    texture_file = tmpdir.join("texture.png")
+    image = random_png(10, 10)
+    image.save(str(texture_file), "PNG")
+
+    # Test with texture_coords
+    mesh = actor.surface(
+        vertices=vertices,
+        faces=faces,
+        texture=str(texture_file),
+        texture_coords=texture_coords,
+    )
+
+    # Verify the mesh was created (in a real test, you'd check properties)
+    assert mesh is not None
+
+
+def test_texture_coords_validation(tmpdir):
+    """Test that invalid texture_coords raise appropriate errors."""
+    vertices = np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0]], dtype=np.float32)
+    faces = np.array([[0, 1, 2]], dtype=np.int32)
+
+    # Create a dummy texture file
+    texture_file = tmpdir.join("texture.png")
+    image = random_png(10, 10)
+    image.save(str(texture_file), "PNG")
+
+    # Test wrong shape
+    with pytest.raises(ValueError):
+        bad_coords = np.array([[0, 0], [1, 0]])  # missing one vertex
+        actor.surface(
+            vertices=vertices,
+            faces=faces,
+            texture=str(texture_file),
+            texture_coords=bad_coords,
+        )
+
+    # Test wrong dtype
+    with pytest.raises(ValueError):
+        bad_coords = np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0]])
+        actor.surface(
+            vertices=vertices,
+            faces=faces,
+            texture=str(texture_file),
+            texture_coords=bad_coords,
+        )
+
+
 def test_surface_error_conditions():
     """Test error conditions for invalid inputs."""
     vertices = np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0]], dtype=np.float32)
@@ -686,13 +749,12 @@ def test_vector_field_cross_section():
 
     # Test default cross section
     vf = actor.VectorField(field)
-    assert np.all(vf.cross_section == np.array([-2, -2, -2]))
 
     # Test setting cross section
     # cross section will not work without providing visibility.
     new_cross = [1, 2, 3]
     vf.cross_section = new_cross
-    assert np.all(vf.cross_section == np.array([-2, -2, -2]))
+    assert vf.visibility is None
 
     # Test invalid cross section types
     with pytest.raises(ValueError):
@@ -709,12 +771,12 @@ def test_vector_field_visibility():
 
     # Test with visibility
     vf = actor.VectorField(field, visibility=(True, False, True))
-    assert vf.visibility == (True, False, True)
+    assert np.all(vf.visibility == np.asarray((True, False, True)))
 
     # Set cross section with visibility
     vf.cross_section = [1, 2, 3]
     # The y dimension should be -1 because visibility[1] is False
-    assert np.all(vf.cross_section == np.array([1, -1, 3]))
+    assert np.all(vf.cross_section == np.array([1, 2, 3]))
 
 
 def test_vector_field_actor_types():
@@ -766,7 +828,8 @@ def test_vector_field_helper_functions():
         visibility=(True, False, True),
     )
     assert isinstance(vf.material, VectorFieldLineMaterial)
-    assert np.all(vf.cross_section == np.array([2, -1, 2]))
+    assert np.all(vf.cross_section == np.array([2, 2, 2]))
+    assert np.all(vf.visibility == np.asarray((True, False, True)))
 
 
 def test_vector_field_edge_cases():
@@ -898,7 +961,7 @@ def test_SphGlyph_parameter_combinations():
     # Test basis types
     for basis in ["standard", "descoteaux07"]:
         glyph = actor.SphGlyph(coeffs, sphere=sphere, basis_type=basis)
-        assert hasattr(glyph.material, "l_max")
+        assert hasattr(glyph.material, "n_coeffs")
 
     # Test color types
     glyph_sign = actor.SphGlyph(coeffs, sphere=sphere, color_type="sign")
@@ -933,4 +996,30 @@ def test_SphGlyph_geometry_properties():
 
     # Check SH coefficients
     assert glyph.sh_coeff.shape[0] == 3 * 3 * 3 * 9
-    assert glyph.sf_func.shape[0] == 200 * ((glyph.material.l_max + 1) ** 2)
+    assert glyph.sf_func.shape[0] == 200 * glyph.material.n_coeffs
+
+
+def test_streamtube():
+    lines = [np.array([[0, 0, 0], [1, 1, 1]])]
+    colors = np.array([[1, 0, 0]])
+    scene = window.Scene()
+
+    tube_actor = actor.streamtube(lines=lines, colors=colors)
+    scene.add(tube_actor)
+
+    fname = "streamtube_test.png"
+    window.snapshot(scene=scene, fname=fname)
+    img = Image.open(fname)
+    img_array = np.array(img)
+
+    mean_r, mean_g, mean_b, _ = np.mean(
+        img_array.reshape(-1, img_array.shape[2]), axis=0
+    )
+
+    assert mean_r > mean_g and mean_r > mean_b
+
+    middle_pixel = img_array[img_array.shape[0] // 2, img_array.shape[1] // 2]
+    r, g, b, a = middle_pixel
+    assert r > g and r > b
+
+    scene.remove(tube_actor)

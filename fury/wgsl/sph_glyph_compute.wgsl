@@ -9,7 +9,11 @@ const COLOR_TYPE = i32({{ color_type }});
 
 fn calculate_deformation(first_coeff_id: i32, sphere_vertex_id: i32) -> f32 {
     var radii: f32 = 0.0;
-    for (var i: i32 = 0; i < NUM_COEFFS; i++) {
+    var n_coeffs = NUM_COEFFS;
+    if (u_material.n_coeffs != -1) {
+        n_coeffs = u_material.n_coeffs;
+    }
+    for (var i: i32 = 0; i < n_coeffs; i++) {
         radii += s_coeffs[first_coeff_id + i] * s_sf_func[sphere_vertex_id + i];
     }
     return radii;
@@ -102,7 +106,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
         radii = abs(radii);
         radii = min(radii, 1.0);
-        let position = calculate_position_from_deformation(i, radii, 1.0, center);
+        let position = calculate_position_from_deformation(i, radii, u_material.scale, center);
 
         s_positions[current_vertex] = position.x;
         s_positions[current_vertex + 1] = position.y;

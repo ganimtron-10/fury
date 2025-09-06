@@ -269,6 +269,10 @@ def test_show_manager_update_camera(sample_actor):
     """Test updating the camera to face the target and show the size if empty scene."""
     scene = Scene()
     show_m = ShowManager(scene=scene, window_type="offscreen")
+    update_camera(show_m.screens[0].camera, None, None)
+
+    scene = Scene()
+    show_m = ShowManager(scene=scene, window_type="offscreen")
     update_camera(show_m.screens[0].camera, show_m.size, scene)
     assert show_m.screens[0].camera.width == 800
     assert show_m.screens[0].camera.height == 800

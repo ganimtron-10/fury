@@ -182,6 +182,20 @@ class VectorFieldShader(LineShader):
         return load_wgsl("vector_field_render.wgsl", package_name="fury.wgsl")
 
 
+class StreamlinesShader(LineShader):
+    """Shader for StreamlineActor."""
+
+    def get_code(self):
+        """Get the WGSL code for the streamline render shader.
+
+        Returns
+        -------
+        str
+            The WGSL code as a string.
+        """
+        return load_wgsl("streamline_render.wgsl", package_name="fury.wgsl")
+
+
 class VectorFieldArrowShader(VectorFieldShader):
     """Shader for VectorFieldArrowActor.
 
@@ -286,6 +300,7 @@ class SphGlyphComputeShader(BaseShader):
         # To share the bindings across compute and render shaders, we need to
         # define the bindings exactly the same way in both shaders.
         geometry = wobject.geometry
+        material = wobject.material
 
         bindings = {
             0: Binding(
@@ -306,6 +321,9 @@ class SphGlyphComputeShader(BaseShader):
                 "buffer/storage",
                 Buffer(wobject.scaled_vertices),
                 "COMPUTE",
+            ),
+            8: Binding(
+                "u_material", "buffer/uniform", material.uniform_buffer, "COMPUTE"
             ),
         }
         self.define_bindings(0, bindings)

@@ -362,11 +362,11 @@ def update_camera(camera, size, target):
     if isinstance(target, Scene):
         target = target.main_scene
 
-    if (isinstance(target, GfxScene) and len(target.children) > 3) or not isinstance(  # type: ignore [misc]
-        target, GfxScene
+    if (isinstance(target, GfxScene) and len(target.children) > 3) or (  # type: ignore [misc]
+        not isinstance(target, GfxScene) and target is not None  # type: ignore [misc]
     ):
         camera.show_object(target)
-    else:
+    elif size is not None:
         camera.width = size[0]
         camera.height = size[1]
 
@@ -514,7 +514,7 @@ class ShowManager:
         controller=None,
         title="FURY 2.0",
         size=(800, 800),
-        blend_mode="default",
+        blend_mode="weighted_plus",
         window_type="default",
         pixel_ratio=1,
         camera_light=True,
