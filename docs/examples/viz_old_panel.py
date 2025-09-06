@@ -248,6 +248,7 @@ class Panel2D(UI):
         self._elements.append(element)
         offset = element.position - self.position
         self.element_offsets.append((element, offset))
+        self._children.append(element)
 
     def remove_element(self, element):
         """Remove a UI component from the panel.
