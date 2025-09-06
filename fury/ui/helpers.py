@@ -227,3 +227,15 @@ def rotate_2d(vertices, angle):
     new_vertices = np.matmul(vertices, rotation_matrix)
 
     return new_vertices
+
+
+def get_anchor_to_multiplier(use_y_down: bool = True):
+    """TODO:Add docs"""
+
+    return {
+        Anchor.LEFT.value: 0.0,
+        Anchor.RIGHT.value: 1.0,
+        Anchor.TOP.value: 0.0 if use_y_down else 1.0,
+        Anchor.BOTTOM.value: 1.0 if use_y_down else 0.0,
+        Anchor.CENTER.value: 0.5,
+    }
