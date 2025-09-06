@@ -24,7 +24,7 @@ scene = Scene()
 ###############################################################################
 # Create a Panel2D.
 
-panel = Panel2D(size=(500, 500), color=(0, 0, 1))
+panel = Panel2D(size=(300, 300), color=(0.2, 0.2, 0.2), has_border=True, border_width=5)
 
 ###############################################################################
 # Let's add some simple shapes to the panel.
