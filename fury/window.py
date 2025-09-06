@@ -277,7 +277,7 @@ def add_ui_to_scene(ui_scene: GfxScene, ui_obj: UI):
     if ui_obj.actors:
         ui_scene.add(*ui_obj.actors)
 
-    for child in ui_obj.children:
+    for child in ui_obj._children:
         add_ui_to_scene(ui_scene, child)
 
 
@@ -402,7 +402,7 @@ def render_screens(renderer, screens: List[Screen]):
     renderer.flush()
 
 
-def reposition_ui(screens: List[Screen], switch_position_anchor: bool = False):
+def reposition_ui(screens: List[Screen], switch_ui_mode: bool = False):
     """Update the positions of all UI elements across multiple screens.
 
     Parameters
@@ -416,17 +416,8 @@ def reposition_ui(screens: List[Screen], switch_position_anchor: bool = False):
     for screen in screens:
         scene_root = screen.scene
         for child in scene_root.ui_elements:
-            if switch_position_anchor and child._anchors != [
-                Anchor.LEFT,
-                Anchor.BOTTOM,
-            ]:
-                child.set_position(
-                    child.get_position(use_new_ui=True),
-                    x_anchor=Anchor.LEFT,
-                    y_anchor=Anchor.BOTTOM,
-                )
-            else:
-                child._update_actors_position()
+            child._update_ui_mode(switch_to_old_ui=switch_ui_mode)
+            child._update_actors_position()
 
 
 def calculate_screen_sizes(screens, size):
@@ -739,7 +730,7 @@ class ShowManager:
         )
         reposition_ui(
             self.screens,
-            switch_position_anchor=(self._is_initial_resize and self._use_old_ui),
+            switch_ui_mode=(self._is_initial_resize and self._use_old_ui),
         )
         if self._is_initial_resize:
             self._is_initial_resize = False
