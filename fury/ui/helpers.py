@@ -230,7 +230,20 @@ def rotate_2d(vertices, angle):
 
 
 def get_anchor_to_multiplier(use_y_down: bool = True):
-    """TODO:Add docs"""
+    """Return a dictionary of anchor multipliers based on the Y-axis convention.
+
+    Parameters
+    ----------
+    use_y_down : bool, optional
+        If True, the multipliers for the Y-axis are set for a top-down
+        coordinate system (e.g., "TOP" maps to 0.0). If False, the multipliers
+        are set for a bottom-up coordinate system (e.g., "BOTTOM" maps to 0.0).
+
+    Returns
+    -------
+    dict
+        A dictionary mapping `Anchor` string values to float multipliers.
+    """
 
     return {
         Anchor.LEFT.value: 0.0,

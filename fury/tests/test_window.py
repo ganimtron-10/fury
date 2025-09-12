@@ -354,9 +354,9 @@ def test_add_remove_ui_to_from_scene(sample_actor):
     subchild_21 = Rectangle2D()
     subchild_31, subchild_32 = Rectangle2D(), Rectangle2D()
 
-    parent.children.extend([child_1, child_2, child_3])
-    child_2.children.append(subchild_21)
-    child_3.children.extend([subchild_31, subchild_32])
+    parent._children.extend([child_1, child_2, child_3])
+    child_2._children.append(subchild_21)
+    child_3._children.extend([subchild_31, subchild_32])
 
     all_ui_objects = [
         parent,

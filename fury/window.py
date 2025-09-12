@@ -36,7 +36,7 @@ from fury.lib import (
     get_app,
     run,
 )
-from fury.ui import UI, Anchor, UIContext
+from fury.ui import UI, UIContext
 
 
 class Scene(GfxGroup):
@@ -294,7 +294,7 @@ def remove_ui_from_scene(ui_scene: GfxScene, ui_obj: UI):
     if ui_obj.actors:
         ui_scene.remove(*ui_obj.actors)
 
-    for child in ui_obj.children:
+    for child in ui_obj._children:
         remove_ui_from_scene(ui_scene, child)
 
 
@@ -409,7 +409,7 @@ def reposition_ui(screens: List[Screen], switch_ui_mode: bool = False):
     ----------
     screens : list of Screen
         The list of Screen objects containing UI elements to reposition.
-    switch_position_anchor : bool, optional
+    switch_ui_mode : bool, optional
         Whether to switch the current position anchor to LEFT, BOTTOM or not.
     """
 

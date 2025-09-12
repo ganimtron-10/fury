@@ -336,7 +336,16 @@ class UI(object, metaclass=abc.ABCMeta):
             )
 
     def set_actor_position(self, actor: Mesh, center_position):
-        """TODO: Add docs"""
+        """Set the position of the PyGfx actor.
+
+        Parameters
+        ----------
+        actor : Mesh
+            The PyGfx mesh actor whose position needs to be set.
+        center_position : tuple or ndarray
+            A 2-element array `(x, y)` representing the desired center
+            position of the actor.
+        """
         canvas_size = UIContext.get_canvas_size()
 
         actor.local.x = center_position[0]
@@ -351,11 +360,23 @@ class UI(object, metaclass=abc.ABCMeta):
 
         Parameters
         ----------
-        use_old_ui : bool
+        switch_to_old_ui : bool
             A flag indicating whether to use the V1 (legacy) UI mode.
         """
 
         def invert_y_anchor(y_anchor: Anchor):
+            """Invert the Y-axis anchor string.
+
+            Parameters
+            ----------
+            y_anchor : Anchor
+                The anchor to be inverted.
+
+            Returns
+            -------
+            Anchor
+                The inverted anchor.
+            """
             if y_anchor in (Anchor.TOP, Anchor.BOTTOM):
                 return Anchor.BOTTOM
             else:
@@ -398,7 +419,6 @@ class UI(object, metaclass=abc.ABCMeta):
         self,
         x_anchor: str = Anchor.LEFT,
         y_anchor: str = Anchor.TOP,
-        # use_new_ui: bool = False,
     ):
         """Get the position of this UI component according to the specified anchor.
 
@@ -410,8 +430,6 @@ class UI(object, metaclass=abc.ABCMeta):
         y_anchor : str, optional
             Define the vertical anchor point for the returned coordinates.
             Can be "BOTTOM", "CENTER", or "TOP". Defaults to "TOP".
-        # use_new_ui : bool, optional
-        #     Whether to use the new UI system anchors while computing position or not.
 
         Returns
         -------
