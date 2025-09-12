@@ -593,7 +593,9 @@ class ShowManager:
         self.renderer = renderer
         self.renderer.pixel_ratio = pixel_ratio
         self.renderer.blend_mode = blend_mode
-        self.renderer.add_event_handler(self._resize, "resize")
+        self.renderer.add_event_handler(
+            lambda event: self._resize(size=(event.width, event.height)), "resize"
+        )
         self.renderer.add_event_handler(
             self._set_key_long_press_event, "key_down", "key_up"
         )
@@ -610,6 +612,7 @@ class ShowManager:
 
         self.enable_events = enable_events
         self._key_long_press = None
+        self._resize(self._size)
 
     def _screen_setup(self, scene, camera, controller, camera_light):
         """Prepare scene, camera, controller, and light lists for screen creation.
@@ -713,17 +716,18 @@ class ShowManager:
             )
         return screens
 
-    def _resize(self, event):
+    def _resize(self, size):
         """Handle window resize events by updating viewports and re-rendering.
 
         Parameters
         ----------
-        event : Event
-            The PyGfx resize event object."""
+        size : tuple
+            The size (width, height) of the window in pixels.
+        """
         if self._is_initial_resize is None:
             self._is_initial_resize = True
 
-        UIContext.set_canvas_size((event.width, event.height))
+        UIContext.set_canvas_size(size=size)
         update_viewports(
             self.screens,
             calculate_screen_sizes(self._screen_config, self.renderer.logical_size),
