@@ -88,6 +88,9 @@ LineDebugMaterial = gfx.LineDebugMaterial
 
 DirectionalLight = gfx.DirectionalLight
 OrbitController = gfx.OrbitController
+TrackballController = gfx.TrackballController
+PanZoomController = gfx.PanZoomController
+OrthographicCamera = gfx.OrthographicCamera
 PerspectiveCamera = gfx.PerspectiveCamera
 Renderer = gfx.WgpuRenderer
 run = run
@@ -103,7 +106,6 @@ ThinLineSegmentShader = gfx.renderers.wgpu.shaders.lineshader.ThinLineSegmentSha
 PrimitiveTopology = wgpu.PrimitiveTopology
 CullMode = wgpu.CullMode
 Binding = gfx.renderers.wgpu.Binding
-RenderMask = gfx.renderers.wgpu.RenderMask
 Buffer = gfx.Buffer
 register_wgpu_render_function = gfx.renderers.wgpu.register_wgpu_render_function
 load_wgsl = gfx.renderers.wgpu.load_wgsl
