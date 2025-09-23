@@ -1,7 +1,7 @@
 """
-============================
+=============================
 Line Projection Visualization
-============================
+=============================
 
 This tutorial demonstrates how to use FURY's `actor.line_projection` to visualize the
 planar projection of 3D lines onto a specified plane. This is useful for understanding
@@ -49,7 +49,7 @@ line_actor = actor.streamlines(lines, colors=colors, thickness=10, opacity=0.25)
 
 projection = actor.line_projection(
     lines,
-    plane=(0, 0, -1, 0),  # Plane equation: z = 0 or XY plane
+    plane="XY",
     colors=colors,
     thickness=10,
     outline_thickness=3,

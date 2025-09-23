@@ -1061,6 +1061,27 @@ def test_line_projection():
     assert projection_actor.num_lines == 2
     npt.assert_array_equal(projection_actor.offsets, offsets)
 
+    # Test plane as string 'XY'
+    projection_actor = actor.line_projection(lines, plane="XY")
+    npt.assert_array_equal(projection_actor.plane, [0, 0, -1, 0])
+
+    # Test plane as string 'XZ'
+    projection_actor = actor.line_projection(lines, plane="XZ")
+    npt.assert_array_equal(projection_actor.plane, [0, -1, 0, 0])
+
+    # Test plane as string 'YZ'
+    projection_actor = actor.line_projection(lines, plane="YZ")
+    npt.assert_array_equal(projection_actor.plane, [-1, 0, 0, 0])
+
+    # Test invalid plane string
+    import pytest
+
+    with pytest.raises(
+        ValueError,
+        match=("Plane must be 'XY', 'XZ', 'YZ' or a tuple of 4 elements"),
+    ):
+        actor.line_projection(lines, plane="INVALID")
+
 
 def test_line_projection_class():
     """Test LineProjection class initialization and properties."""

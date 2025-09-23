@@ -959,7 +959,7 @@ class LineProjection(Points):
 def line_projection(
     lines,
     *,
-    plane=(0, 0, -1, 0),
+    plane="XY",
     colors=(1, 0, 0),
     lengths=None,
     offsets=None,
@@ -978,7 +978,7 @@ def line_projection(
     ----------
     lines : sequence
         A list of lines to be projected.
-    plane : tuple, optional
+    plane : {str, tuple}, optional
         The plane equation (a, b, c, d) for the projection.
     colors : {tuple, list, ndarray}, optional
         The color of the cross-section point. It can be a single color or
@@ -1004,6 +1004,18 @@ def line_projection(
     LineProjection
         The created line projection object.
     """
+
+    if isinstance(plane, str):
+        if plane.upper() == "XY":
+            plane = (0, 0, -1, 0)
+        elif plane.upper() == "XZ":
+            plane = (0, -1, 0, 0)
+        elif plane.upper() == "YZ":
+            plane = (-1, 0, 0, 0)
+        else:
+            raise ValueError(
+                f"Plane must be 'XY', 'XZ', 'YZ' or a tuple of 4 elements. Got {plane}."
+            )
     return LineProjection(
         lines,
         plane=plane,
