@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """Planar actors for rendering 2D shapes in 3D space."""
 
 import logging
@@ -716,7 +717,7 @@ class LineProjection(Points):
 
     Parameters
     ----------
-    lines : list
+    lines : sequence
         A list of lines to be projected.
     plane : tuple, optional
         The plane equation (a, b, c, d) for the projection.
@@ -757,13 +758,13 @@ class LineProjection(Points):
         outline_color=(0, 0, 0),
         outline_thickness=0.2,
         opacity=1.0,
-        lift=-0.2,
+        lift=0.0,
     ):
         """Initialize the line projection object.
 
         Parameters
         ----------
-        lines : list
+        lines : sequence
             A list of lines to be projected.
         plane : tuple, optional
             The plane equation (a, b, c, d) for the projection.
@@ -813,8 +814,8 @@ class LineProjection(Points):
             )
 
         if lift is None:
-            lift = -0.2
-            logging.info("No lift provided, defaulting to -0.2.")
+            lift = 0.0
+            logging.info("No lift provided, defaulting to 0.0.")
         elif not isinstance(lift, (int, float)):
             raise ValueError(f"Lift must be a single float value. Got {lift}.")
 
@@ -966,7 +967,7 @@ def line_projection(
     outline_color=(0, 0, 0),
     outline_thickness=0.2,
     opacity=1.0,
-    lift=-0.2,
+    lift=0.0,
 ):
     """Initialize the line projection object.
 
@@ -975,7 +976,7 @@ def line_projection(
 
     Parameters
     ----------
-    lines : list
+    lines : sequence
         A list of lines to be projected.
     plane : tuple, optional
         The plane equation (a, b, c, d) for the projection.

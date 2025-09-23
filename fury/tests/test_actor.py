@@ -1076,35 +1076,35 @@ def test_line_projection_class():
     assert projection.num_lines == 2
     assert len(projection.lines) > 0
     npt.assert_array_equal(projection.plane, [0, 0, -1, 0])
-    assert projection.lift == -0.2
+    assert projection.lift == 0.0
 
     # Test with custom plane
     plane = (1, 0, 0, -2)
     projection = LineProjection(lines, plane=plane)
     npt.assert_array_equal(projection.plane, plane)
-    assert projection.lift == -0.2
+    assert projection.lift == 0.0
 
     # Test plane property setter
     new_plane = (0, 1, 0, 1)
     projection.plane = new_plane
     npt.assert_array_equal(projection.plane, new_plane)
-    assert projection.lift == -0.2
+    assert projection.lift == 0.0
 
     # Test plane setter with None (should default)
     projection.plane = None
     npt.assert_array_equal(projection.plane, [0, 0, -1, 0])
-    assert projection.lift == -0.2
+    assert projection.lift == 0.0
 
     # Test with custom colors
     colors = [(1, 0, 0), (0, 1, 0)]
     projection = LineProjection(lines, colors=colors)
     assert projection.geometry.colors.data.shape[0] == 2
-    assert projection.lift == -0.2
+    assert projection.lift == 0.0
 
     # Test with single color for all lines
     projection = LineProjection(lines, colors=(0, 0, 1))
     assert projection.geometry.colors.data.shape[0] == 2
-    assert projection.lift == -0.2
+    assert projection.lift == 0.0
 
     # Test with custom lengths and offsets
     lengths = [2, 2]
@@ -1112,7 +1112,7 @@ def test_line_projection_class():
     projection = LineProjection(lines, lengths=lengths, offsets=offsets)
     npt.assert_array_equal(projection.lengths, lengths)
     npt.assert_array_equal(projection.offsets, offsets)
-    assert projection.lift == -0.2
+    assert projection.lift == 0.0
 
     # Test with custom lift value
     custom_lift = 0.5
