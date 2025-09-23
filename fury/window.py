@@ -24,11 +24,11 @@ from fury.lib import (
     DirectionalLight,
     JupyterCanvas,
     OffscreenCanvas,
-    OrbitController,
     PerspectiveCamera,
     QtCanvas,
     Renderer,
     Scene as GfxScene,  # type: ignore
+    TrackballController,
     Viewport,
     get_app,
     run,
@@ -253,7 +253,7 @@ def create_screen(
             scene.add(camera)
 
     if controller is None:
-        controller = OrbitController(camera, register_events=vp)
+        controller = TrackballController(camera, register_events=vp)
 
     screen = Screen(vp, scene, camera, controller)
     update_camera(camera, screen.size, scene)
@@ -377,8 +377,6 @@ class ShowManager:
         The title of the window.
     size : tuple
         The size (width, height) of the window in pixels.
-    blend_mode : str
-        The blending mode used by the renderer.
     window_type : str
         The type of window canvas to create ('default', 'qt', 'jupyter', 'offscreen').
     pixel_ratio : float
@@ -405,7 +403,6 @@ class ShowManager:
         controller=None,
         title="FURY 2.0",
         size=(800, 800),
-        blend_mode="default",
         window_type="default",
         pixel_ratio=1,
         camera_light=True,
@@ -439,10 +436,6 @@ class ShowManager:
             The title displayed in the window's title bar. Defaults to "FURY 2.0".
         size : tuple, optional
             The initial size (width, height) of the window in pixels.
-        blend_mode : str, optional
-            The blending mode used by the renderer. Accepted values include
-            'default', 'additive', 'opaque', 'ordered1', 'ordered2', 'weighted',
-            'weighted_depth', 'weighted_plus'.
         window_type : str, optional
             The type of window canvas to create. Accepted values are 'default'
             (or 'glfw'), 'qt', 'jupyter', 'offscreen'.
@@ -475,7 +468,6 @@ class ShowManager:
             renderer = Renderer(self.window)
         self.renderer = renderer
         self.renderer.pixel_ratio = pixel_ratio
-        self.renderer.blend_mode = blend_mode
         self.renderer.add_event_handler(self._resize, "resize")
         self.renderer.add_event_handler(
             self._set_key_long_press_event, "key_down", "key_up"
