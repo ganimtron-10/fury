@@ -271,9 +271,9 @@ class clear_and_catch_warnings(warnings.catch_warnings):
     Examples
     --------
     >>> import warnings
-    >>> with clear_and_catch_warnings(modules=[np.core.fromnumeric]):
+    >>> with clear_and_catch_warnings(modules=[np.random.rand]):
     ...     warnings.simplefilter('always')
-    ...     # do something that raises a warning in np.core.fromnumeric
+    ...     # do something that raises a warning in np.random.rand
     """
 
     class_modules = ()
@@ -351,3 +351,19 @@ def setup_test():
         and LooseVersion(scipy.version.short_version) <= "1.1.0"
     ):
         warnings.simplefilter("default")
+
+
+def check_for_warnings(warn_printed, w_msg):
+    """Check for specific warnings in the warning registry.
+
+    Parameters
+    ----------
+    warn_printed : list
+        List of captured warnings.
+    w_msg : str
+        Warning message to check for.
+    """
+    selected_w = [w for w in warn_printed if issubclass(w.category, UserWarning)]
+    assert len(selected_w) >= 1
+    msg = [str(m.message) for m in selected_w]
+    assert_equal(w_msg in msg, True)

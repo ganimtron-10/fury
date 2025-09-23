@@ -536,6 +536,8 @@ class SphGlyph(Mesh):
             The shininess of the material for the spherical glyph.
         """
 
+        super().__init__()
+
         if not isinstance(coeffs, np.ndarray):
             raise TypeError("The attribute 'coeffs' must be a numpy ndarray.")
         elif coeffs.ndim != 4:
@@ -589,14 +591,14 @@ class SphGlyph(Mesh):
             end = start + faces.shape[0]
             indices[start:end] += (i // faces.shape[0]) * self.vertices_per_glyph
 
-        geo = buffer_to_geometry(
+        self.geometry = buffer_to_geometry(
             positions=positions.astype("float32"),
             indices=indices.astype("int32"),
             colors=np.ones_like(positions, dtype="float32"),
             normals=np.zeros_like(positions).astype("float32"),
         )
 
-        mat = SphGlyphMaterial(
+        self.material = SphGlyphMaterial(
             n_coeffs=self.n_coeff,
             color_mode="vertex",
             flat_shading=False,
@@ -609,8 +611,6 @@ class SphGlyph(Mesh):
         self.sh_coeff = coeffs.reshape(-1).astype("float32")
         self.sf_func = B_mat.reshape(-1).astype("float32")
         self.sphere = vertices.astype("float32")
-
-        super().__init__(geometry=geo, material=mat)
 
     @property
     def l_max(self):

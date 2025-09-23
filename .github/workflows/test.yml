@@ -55,6 +55,7 @@ jobs:
       PRE_WHEELS: "https://pypi.anaconda.org/scipy-wheels-nightly/simple"
       QT_QPA_PLATFORM: "offscreen"
       FURY_OFFSCREEN: true
+      FURY_WERRORS: true
       # EAGER_IMPORT: 1  # to explore what is the issue.
 
 
