@@ -103,6 +103,7 @@ MeshShader = gfx.renderers.wgpu.shaders.meshshader.MeshShader
 LineShader = gfx.renderers.wgpu.shaders.lineshader.LineShader
 LineArrowShader = gfx.renderers.wgpu.shaders.lineshader.LineArrowShader
 ThinLineSegmentShader = gfx.renderers.wgpu.shaders.lineshader.ThinLineSegmentShader
+PointsShader = gfx.renderers.wgpu.shaders.pointsshader.PointsShader
 PrimitiveTopology = wgpu.PrimitiveTopology
 CullMode = wgpu.CullMode
 Binding = gfx.renderers.wgpu.Binding

@@ -87,27 +87,12 @@ def test_create_mesh_material():
 
     scene.add(obj)
 
-    # window.snapshot(scene=scene, fname="mat_test_1.png")
-    #
-    # img = Image.open("mat_test_1.png")
-    # img_array = np.array(img)
-    #
-    # mean_r, mean_g, mean_b, _ = np.mean(
-    #     img_array.reshape(-1, img_array.shape[2]), axis=0
-    # )
-    #
-    # assert 0 <= mean_r <= 255 and 0 <= mean_g <= 255 and 0 <= mean_b <= 255
-    #
-    # assert sum([mean_r, mean_g, mean_b]) > 0
-
 
 def test_create_point_material():
     color = (1, 0, 0)
-    mat = material._create_points_material(
-        material="basic", color=color, opacity=0.5, mode="auto"
-    )
+    mat = material._create_points_material(material="basic", color=color, mode="auto")
     assert isinstance(mat, PointsMaterial)
-    assert mat.color == color + (0.5,)
+    assert mat.color == color
     assert mat.color_mode == "auto"
 
     color = (1, 0, 0)
@@ -115,15 +100,16 @@ def test_create_point_material():
         material="gaussian", color=color, opacity=0.5, mode="auto"
     )
     assert isinstance(mat, PointsGaussianBlobMaterial)
-    assert mat.color == color + (0.5,)
+    assert mat.color == color
     assert mat.color_mode == "auto"
+    assert np.round(mat.opacity, 1) == 0.5
 
     color = (1, 0, 0)
     mat = material._create_points_material(
         material="marker", color=color, opacity=0.5, mode="auto"
     )
     assert isinstance(mat, PointsMarkerMaterial)
-    assert mat.color == color + (0.5,)
+    assert mat.color == color
     assert mat.color_mode == "auto"
 
     color = (1, 0, 0, 0.5)
@@ -131,7 +117,7 @@ def test_create_point_material():
         material="basic", color=color, opacity=0.5, mode="auto"
     )
     assert isinstance(mat, PointsMaterial)
-    assert mat.color == (1, 0, 0, 0.25)
+    assert mat.color == (1, 0, 0, 0.5)
     assert mat.color_mode == "auto"
 
     color = (1, 0, 0)

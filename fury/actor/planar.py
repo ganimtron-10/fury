@@ -1,16 +1,34 @@
+# -*- coding: utf-8 -*-
 """Planar actors for rendering 2D shapes in 3D space."""
+
+import logging
 
 import numpy as np
 from scipy.spatial.transform import Rotation as R
 
 from fury.actor import actor_from_primitive
-from fury.geometry import buffer_to_geometry, create_image, create_point, create_text
+from fury.geometry import (
+    buffer_to_geometry,
+    create_image,
+    create_point,
+    create_text,
+    line_buffer_separator,
+)
+from fury.lib import (
+    Points,
+    PointsMarkerMaterial,
+    PointsMaterial,
+    PointsShader,
+    register_wgpu_render_function,
+)
 from fury.material import (
     _create_image_material,
     _create_points_material,
     _create_text_material,
+    validate_opacity,
 )
 import fury.primitive as fp
+from fury.shader import LineProjectionComputeShader
 
 
 def square(
@@ -692,3 +710,338 @@ def ring(
         material=material,
         enable_picking=enable_picking,
     )
+
+
+class LineProjection(Points):
+    """Initialize the line projection object.
+
+    Parameters
+    ----------
+    lines : sequence
+        A list of lines to be projected.
+    plane : tuple, optional
+        The plane equation (a, b, c, d) for the projection.
+    colors : tuple, optional
+        The color of the lines.
+    lengths : list, optional
+        A list of lengths for each line.
+    offsets : list, optional
+        A list of offsets for each line.
+    thickness : float, optional
+        Thickness of the cross-section.
+    outline_color : tuple, optional
+        The color of the outline.
+    outline_thickness : float, optional
+        The thickness of the outline.
+    opacity : float, optional
+        The opacity of the lines.
+    lift : float, optional
+        A small lift applied to the projected points along the plane normal
+        to avoid z-fighting.
+    """
+
+    uniform_type = dict(
+        Points.uniform_type,
+        plane="4xf4",  # (a, b, c, d) plane equation ax + by + cz + d = 0
+        lift="f4",
+    )
+
+    def __init__(
+        self,
+        lines,
+        *,
+        plane=(0, 0, -1, 0),
+        colors=(1, 0, 0),
+        lengths=None,
+        offsets=None,
+        thickness=1.0,
+        outline_color=(0, 0, 0),
+        outline_thickness=0.2,
+        opacity=1.0,
+        lift=0.0,
+    ):
+        """Initialize the line projection object.
+
+        Parameters
+        ----------
+        lines : sequence
+            A list of lines to be projected.
+        plane : tuple, optional
+            The plane equation (a, b, c, d) for the projection.
+        colors : {tuple, list, ndarray}, optional
+            The color of the cross-section point. It can be a single color or
+            a list of colors for each line.
+        lengths : list, optional
+            A list of lengths for each line.
+        offsets : list, optional
+            A list of offsets for each line.
+        thickness : float, optional
+            Thickness of the cross-section.
+        outline_color : tuple, optional
+            The color of the outline.
+        outline_thickness : float, optional
+            The thickness of the outline.
+        opacity : float, optional
+            The opacity of the lines.
+        lift : float, optional
+            A small lift applied to the projected points along the plane normal
+            to avoid z-fighting.
+
+        Raises
+        ------
+        ValueError
+            If any of the input parameters are invalid.
+        """
+        super().__init__()
+
+        self.num_lines = len(lines)
+
+        if lengths is None:
+            lengths = np.asarray([len(line) for line in lines], dtype="int32")
+        elif len(lengths) != self.num_lines:
+            raise ValueError(
+                f"Lengths must have a length of {self.num_lines}. Got {lengths}."
+            )
+
+        if offsets is None:
+            offsets = np.zeros((self.num_lines,), dtype="int32")
+
+            for i in range(1, self.num_lines):
+                offsets[i] = len(lines[i - 1]) + offsets[i - 1]
+        elif len(offsets) != self.num_lines:
+            raise ValueError(
+                f"Offsets must have a length of {self.num_lines}. Got {offsets}."
+            )
+
+        if lift is None:
+            lift = 0.0
+            logging.info("No lift provided, defaulting to 0.0.")
+        elif not isinstance(lift, (int, float)):
+            raise ValueError(f"Lift must be a single float value. Got {lift}.")
+
+        self.plane = plane
+        self.lengths = lengths
+        self.offsets = offsets
+        self.lift = lift
+
+        self.lines, _ = line_buffer_separator(lines)
+
+        if colors is None:
+            colors = np.ones((self.num_lines, 4), dtype="float32")
+        else:
+            colors = np.asarray(colors, dtype="float32")
+
+        if colors.ndim == 1:
+            colors = np.tile(colors, (self.num_lines, 1))
+
+        if colors.shape[0] != self.num_lines or colors.shape[-1] not in (3, 4):
+            raise ValueError(
+                f"colors must have a length of 1 or {self.num_lines}"
+                f" with 3 or 4 channels. Got {colors.shape}."
+            )
+        elif colors.shape[0] == self.num_lines and colors.shape[-1] == 3:
+            colors = np.concatenate(
+                [colors, np.ones((self.num_lines, 1), dtype="float32")], axis=-1
+            )
+
+        if outline_color is None:
+            outline_color = np.ones((self.num_lines, 4), dtype="float32")
+        else:
+            outline_color = np.asarray(outline_color, dtype="float32")
+
+        if outline_color.ndim == 1:
+            outline_color = np.tile(outline_color, (self.num_lines, 1))
+
+        if outline_color.shape[0] != self.num_lines or outline_color.shape[-1] not in (
+            3,
+            4,
+        ):
+            raise ValueError(
+                f"outline_color must have a length of 1 or {self.num_lines}"
+                f" with channels 3 or 4. Got {outline_color.shape}."
+            )
+        elif outline_color.shape[0] == self.num_lines and outline_color.shape[-1] == 3:
+            outline_color = np.concatenate(
+                [outline_color, np.ones((self.num_lines, 1), dtype="float32")], axis=-1
+            )
+
+        positions = np.empty((self.num_lines, 3), dtype="float32")
+
+        self.geometry = buffer_to_geometry(
+            positions, colors=colors, edge_colors=outline_color
+        )
+
+        if not isinstance(thickness, (int, float)):
+            raise ValueError(
+                f"Thickness must be a single float value. Got {thickness}."
+            )
+        if not isinstance(outline_thickness, (int, float)):
+            raise ValueError(
+                "Outline thickness must be a single float value. Got"
+                f"{outline_thickness}."
+            )
+
+        opacity = validate_opacity(opacity)
+
+        self.material = PointsMarkerMaterial(
+            size=thickness,
+            edge_width=outline_thickness,
+            opacity=opacity,
+            pick_write=False,
+            color_mode="vertex",
+            edge_color_mode="vertex",
+        )
+
+    @property
+    def plane(self):
+        """Get the plane equation.
+
+        Returns
+        -------
+        ndarray
+            The plane equation coefficients.
+        """
+        return self.uniform_buffer.data["plane"]
+
+    @plane.setter
+    def plane(self, value):
+        """Set the plane equation.
+
+        Parameters
+        ----------
+        value : {tuple, list, np.ndarray}
+            The plane equation coefficients.
+
+        Raises
+        ------
+        ValueError
+            If the input parameters are invalid.
+        """
+        if value is None:
+            value = (0, 0, -1, 0)
+            logging.info("No plane provided, defaulting to (0, 0, -1, 0).")
+        elif not isinstance(value, (list, tuple, np.ndarray)) or len(value) != 4:
+            raise ValueError(f"Plane must have a length of 4. Got {value}.")
+        self.uniform_buffer.data["plane"] = value
+        self.uniform_buffer.update_full()
+
+    @property
+    def lift(self):
+        """Get the lift value to avoid z-fighting.
+
+        Returns
+        -------
+        float
+            The lift value applied to the projected points.
+        """
+        return self.uniform_buffer.data["lift"]
+
+    @lift.setter
+    def lift(self, value):
+        """Set the lift value to avoid z-fighting.
+
+        Parameters
+        ----------
+        value : float
+            The lift value to apply.
+
+        Raises
+        ------
+        ValueError
+            If the input parameter is invalid.
+        """
+        if not isinstance(value, (int, float)):
+            raise ValueError(f"Lift must be a single float value. Got {value}.")
+        self.uniform_buffer.data["lift"] = value
+        self.uniform_buffer.update_full()
+
+
+def line_projection(
+    lines,
+    *,
+    plane="XY",
+    colors=(1, 0, 0),
+    lengths=None,
+    offsets=None,
+    thickness=1.0,
+    outline_color=(0, 0, 0),
+    outline_thickness=0.2,
+    opacity=1.0,
+    lift=0.0,
+):
+    """Initialize the line projection object.
+
+    This projection is best visualized when the plane normal
+    is aligned with the camera view direction.
+
+    Parameters
+    ----------
+    lines : sequence
+        A list of lines to be projected.
+    plane : {str, tuple}, optional
+        The plane equation (a, b, c, d) for the projection.
+    colors : {tuple, list, ndarray}, optional
+        The color of the cross-section point. It can be a single color or
+        a list of colors for each line.
+    lengths : list, optional
+        A list of lengths for each line.
+    offsets : list, optional
+        A list of offsets for each line.
+    thickness : float, optional
+        Thickness of the cross-section.
+    outline_color : tuple, optional
+        The color of the outline.
+    outline_thickness : float, optional
+        The thickness of the outline.
+    opacity : float, optional
+        The opacity of the lines.
+    lift : float, optional
+        A small lift applied to the projected points along the plane normal
+        to avoid z-fighting.
+
+    Returns
+    -------
+    LineProjection
+        The created line projection object.
+    """
+
+    if isinstance(plane, str):
+        if plane.upper() == "XY":
+            plane = (0, 0, -1, 0)
+        elif plane.upper() == "XZ":
+            plane = (0, -1, 0, 0)
+        elif plane.upper() == "YZ":
+            plane = (-1, 0, 0, 0)
+        else:
+            raise ValueError(
+                f"Plane must be 'XY', 'XZ', 'YZ' or a tuple of 4 elements. Got {plane}."
+            )
+    return LineProjection(
+        lines,
+        plane=plane,
+        colors=colors,
+        lengths=lengths,
+        offsets=offsets,
+        thickness=thickness,
+        outline_color=outline_color,
+        outline_thickness=outline_thickness,
+        opacity=opacity,
+        lift=lift,
+    )
+
+
+@register_wgpu_render_function(LineProjection, PointsMaterial)
+def register_render_line_projection(wobject):
+    """Register the line projection render function.
+
+    Parameters
+    ----------
+    wobject : LineProjection
+        The line projection object to register.
+
+    Returns
+    -------
+    tuple
+        The created line projection shaders.
+    """
+    return (LineProjectionComputeShader(wobject), PointsShader(wobject))
