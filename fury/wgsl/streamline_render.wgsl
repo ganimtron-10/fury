@@ -938,16 +938,14 @@ fn fs_main(varyings: Varyings, @builtin(front_facing) is_front: bool) -> Fragmen
     // here this will help the end result. Because this produces semitransparent fragments,
     // it relies on a good blend method, and the object gets drawn twice.
     var alpha: f32 = 1.0;
-    $$ if aa
-        let aa_width = 1.0;
-        let fill_alpha = smoothstep(aa_width, 0.0, dist_to_stroke_p);
-        let total_alpha = smoothstep(aa_width, 0.0, dist_to_outline_p);
-        alpha = total_alpha;
-        alpha = sqrt(alpha);  // this prevents aa lines from looking thinner
-        if (alpha <= 0.0) { discard; }
-    $$ else
-        if (dist_to_stroke_p > 0.0) { discard; }
-    $$ endif
+
+    let aa_width = 1.0;
+    let fill_alpha = smoothstep(aa_width, 0.0, dist_to_stroke_p);
+    let total_alpha = smoothstep(aa_width, 0.0, dist_to_outline_p);
+    alpha = total_alpha;
+    alpha = sqrt(alpha);  // this prevents aa lines from looking thinner
+    if (alpha <= 0.0) { discard; }
+
 
     // Determine the srgb color by mixing the outline and fill colors based on their alphas.
     var fill_color_srgb = u_material.color;
@@ -977,7 +975,7 @@ fn fs_main(varyings: Varyings, @builtin(front_facing) is_front: bool) -> Fragmen
 
     // Mix the outline and fill colors.
     // When fill_alpha is 1, we see 100% fill. When it's 0, we see 100% outline.
-    let physical_color = mix(physical_outline, physical_fill, sqrt(fill_alpha));
+    let physical_color = mix(physical_outline, physical_fill, fill_alpha);
     $$ if false
         // Alternative debug options during dev.
         physical_color = vec3<f32>(abs(dist_to_dash_p) / 20.0, 0.0, 0.0);
@@ -1001,7 +999,7 @@ fn fs_main(varyings: Varyings, @builtin(front_facing) is_front: bool) -> Fragmen
     coord = select(coord, coord - 1.0, coord > 0.5);
     let idx = varyings.pick_idx + select(0u, 1u, coord < 0.0);
     out.pick = (
-        pick_pack(u32(u_wobject.id), 20) +
+        pick_pack(u32(u_wobject.global_id), 20) +
         pick_pack(u32(idx), 26) +
         pick_pack(u32(coord * 100000.0 + 100000.0), 18)
     );
