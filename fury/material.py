@@ -791,3 +791,21 @@ class StreamlinesMaterial(LineMaterial):
 
         self.uniform_buffer.data["outline_color"] = value
         self.uniform_buffer.update_full()
+
+
+class BillboardMaterial(MeshBasicMaterial):
+    """
+    A Billboard material for creating billboards that always face the camera.
+    
+    This material is designed to work with the BillboardShader to create
+    rectangles that automatically rotate to face the camera while maintaining
+    their 3D position.
+
+    Parameters
+    ----------
+    **kwargs : dict
+        Additional keyword arguments to pass to the MeshBasicMaterial constructor.
+    """
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
