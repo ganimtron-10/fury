@@ -79,10 +79,14 @@ def billboard(
     sz = np.repeat(sizes, repeats, axis=0).astype(np.float32)
     indices = np.arange(pos.shape[0], dtype=np.uint32)
 
+    # Add dummy normals to avoid MeshShader pipeline issues
+    normals = np.tile([[0.0, 0.0, 1.0]], (pos.shape[0], 1)).astype(np.float32)
+
     geometry = buffer_to_geometry(
         positions=pos,
         colors=col,
         texcoords=sz,
+        normals=normals,
         indices=indices,
     )
 

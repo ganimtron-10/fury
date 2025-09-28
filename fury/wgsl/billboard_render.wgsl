@@ -61,8 +61,8 @@ fn vs_main(in: VertexInput) -> Varyings {
     varyings.position = vec4<f32>(clip_pos);
     varyings.world_pos = vec3<f32>(world_pos);
     
-    // Load color if available
-    let color = load_s_colors(billboard_index);
+    // Load color if available - colors are duplicated 6x like positions
+    let color = load_s_colors(billboard_index * 6);
     varyings.color = vec4<f32>(color, 1.0);
     
     return varyings;
