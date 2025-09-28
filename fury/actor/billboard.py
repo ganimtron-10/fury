@@ -18,9 +18,10 @@ class Billboard(Mesh):
     """World object representing one or more billboards.
 
     Geometry buffers are duplicated per 6 vertices (two triangles) per
-    billboard; vertex shader reconstructs quad via vertex_index math and
-    uses camera right/up vectors to orient.
+    billboard; the vertex shader reconstructs the quad via ``vertex_index``
+    math and uses camera right/up vectors to orient it.
     """
+
     pass
 
 
@@ -46,6 +47,12 @@ def billboard(
         Global opacity multiplier (0..1).
     enable_picking : bool
         Whether billboard is pickable.
+
+    Returns
+    -------
+    Billboard
+        Billboard world object configured with the provided geometry and
+        material.
     """
     centers = np.asarray(centers, dtype=np.float32)
     if centers.ndim == 1:
@@ -104,6 +111,18 @@ def billboard(
 
 @register_wgpu_render_function(Billboard, BillboardMaterial)
 def register_billboard_render_function(wobject):
+    """Build the render pipeline for ``Billboard`` instances.
+
+    Parameters
+    ----------
+    wobject : Billboard
+        Billboard world object to bind to the shader pipeline.
+
+    Returns
+    -------
+    tuple
+        Tuple containing the configured shader instance.
+    """
     from fury.shader import BillboardShader
 
     return (BillboardShader(wobject),)

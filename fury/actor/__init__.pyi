@@ -42,10 +42,10 @@ __all__ = [
     "line_projection",
 ]
 
+from .billboard import billboard
 from .bio import peaks_slicer, volume_slicer
 from .core import actor_from_primitive, arrow, axes, line
 from .curved import cone, cylinder, ellipsoid, sphere, streamlines, streamtube
-from .billboard import billboard
 from .planar import (
     disk,
     image,

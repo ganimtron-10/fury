@@ -480,7 +480,7 @@ class BillboardShader(MeshShader):
         """
         super().__init__(wobject)
         # Billboard-specific parameters can be set here
-        if hasattr(wobject, 'billboard_count'):
+        if hasattr(wobject, "billboard_count"):
             self["billboard_count"] = wobject.billboard_count
         else:
             self["billboard_count"] = 1

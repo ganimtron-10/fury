@@ -63,7 +63,7 @@ def test_basic_billboard(interactive: bool = False):
     assert arr is not None
     assert arr.ndim == 3
     assert arr.shape[-1] >= 3  # RGB or RGBA
-    
+
     # Check that billboard is visible (has red pixels)
     _assert_red_visible(arr)
 
@@ -89,8 +89,9 @@ def test_billboard_camera_facing():
 
     # Billboard should be visible from front view
     data1 = np.asarray(arr1)
-    green_pixels1 = (np.sum(data1[..., 1] > data1[..., 0]) +
-                     np.sum(data1[..., 1] > data1[..., 2]))
+    green_pixels1 = np.sum(data1[..., 1] > data1[..., 0]) + np.sum(
+        data1[..., 1] > data1[..., 2]
+    )
 
     # Move camera to side (if we had camera controls, but we test basic visibility)
     # Since we can't move camera easily, just test that billboard is rendered

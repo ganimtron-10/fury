@@ -794,9 +794,8 @@ class StreamlinesMaterial(LineMaterial):
 
 
 class BillboardMaterial(MeshBasicMaterial):
-    """
-    A Billboard material for creating billboards that always face the camera.
-    
+    """Billboard material for creating quads that always face the camera.
+
     This material is designed to work with the BillboardShader to create
     rectangles that automatically rotate to face the camera while maintaining
     their 3D position.
@@ -808,4 +807,11 @@ class BillboardMaterial(MeshBasicMaterial):
     """
 
     def __init__(self, **kwargs):
+        """Initialize the material and forward arguments to the base class.
+
+        Parameters
+        ----------
+        **kwargs : dict
+            Additional keyword arguments forwarded to ``MeshBasicMaterial``.
+        """
         super().__init__(**kwargs)
