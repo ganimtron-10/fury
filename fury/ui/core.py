@@ -1,7 +1,6 @@
 """UI core module that describe UI abstract class."""
 
 import abc
-from typing import List
 
 import numpy as np
 
@@ -9,9 +8,6 @@ from fury.decorators import warn_on_args_to_kwargs
 from fury.deprecator import deprecate_with_version
 from fury.geometry import buffer_to_geometry, create_mesh
 from fury.lib import (
-    KeyboardEvent,
-    Mesh,
-    PointerEvent,
     plane_geometry,
 )
 from fury.material import (
@@ -20,24 +16,6 @@ from fury.material import (
 from fury.primitive import prim_ring
 from fury.ui import UIContext
 from fury.ui.helpers import Anchor, get_anchor_to_multiplier
-
-# from fury.interactor import CustomInteractorStyle
-# from fury.io import load_image
-# from fury.lib import (
-#     Actor2D,
-#     CellArray,
-#     DiskSource,
-#     FloatArray,
-#     Points,
-#     PolyData,
-#     PolyDataMapper2D,
-#     Polygon,
-#     Property2D,
-#     TextActor,
-#     Texture,
-#     TexturedActor2D,
-# )
-# from fury.utils import set_input
 
 
 class UI(object, metaclass=abc.ABCMeta):
@@ -126,7 +104,7 @@ class UI(object, metaclass=abc.ABCMeta):
         """
         self.use_y_down = True
         self._position = np.array([0, 0])
-        self._children: List[UI] = []
+        self._children = []
         self._anchors = [x_anchor, y_anchor]
 
         self._setup()  # Setup needed actors and sub UI components.
@@ -171,7 +149,7 @@ class UI(object, metaclass=abc.ABCMeta):
             "by `fury.window.Scene.add()`."
         ),
         since="2.0.0a1",
-        until="2.0.0a1",
+        until="2.1.0",
     )
     def add_to_scene(self, scene):
         """Allow UI objects to add their own props to the scene.
@@ -190,7 +168,7 @@ class UI(object, metaclass=abc.ABCMeta):
             "directly added to the actor itself using `handle_events()`."
         ),
         since="2.0.0a1",
-        until="2.0.0a1",
+        until="2.1.0",
     )
     def add_callback(self):
         """Add a callback to a specific event for this UI component."""
@@ -204,7 +182,7 @@ class UI(object, metaclass=abc.ABCMeta):
             "y_anchor=Anchor.BOTTOM)` instead."
         ),
         since="2.0.0a1",
-        until="2.0.0a1",
+        until="2.1.0",
     )
     def position(self):
         """Get the position of this UI component.
@@ -224,7 +202,7 @@ class UI(object, metaclass=abc.ABCMeta):
             "y_anchor=Anchor.BOTTOM)` instead."
         ),
         since="2.0.0a1",
-        until="2.0.0a1",
+        until="2.1.0",
     )
     def position(self, coords):
         """Set the position of this UI component.
@@ -244,7 +222,7 @@ class UI(object, metaclass=abc.ABCMeta):
             "y_anchor=Anchor.CENTER)` instead."
         ),
         since="2.0.0a1",
-        until="2.0.0a1",
+        until="2.1.0",
     )
     def center(self):
         """Get the center position of this UI component.
@@ -264,7 +242,7 @@ class UI(object, metaclass=abc.ABCMeta):
             "y_anchor=Anchor.CENTER)` instead."
         ),
         since="2.0.0a1",
-        until="2.0.0a1",
+        until="2.1.0",
     )
     def center(self, coords):
         """Set the center of this UI component.
@@ -282,7 +260,7 @@ class UI(object, metaclass=abc.ABCMeta):
             "Its functionality is now handled by `_update_actors_position`."
         ),
         since="2.0.0a1",
-        until="2.0.0a1",
+        until="2.1.0",
     )
     def _set_position(self, coords):
         """Update the position of the internal actors.
@@ -335,7 +313,7 @@ class UI(object, metaclass=abc.ABCMeta):
                 f"y_anchor should be one of these {', '.join([Anchor.TOP, Anchor.CENTER, Anchor.BOTTOM])} but received {y_anchor}"  # noqa: E501
             )
 
-    def set_actor_position(self, actor: Mesh, center_position):
+    def set_actor_position(self, actor, center_position):
         """Set the position of the PyGfx actor.
 
         Parameters
@@ -355,7 +333,7 @@ class UI(object, metaclass=abc.ABCMeta):
             else center_position[1]
         )
 
-    def _update_ui_mode(self, switch_to_old_ui: bool):
+    def _update_ui_mode(self, switch_to_old_ui):
         """Update the UI element's internal state when the UI system mode changes.
 
         Parameters
@@ -364,7 +342,7 @@ class UI(object, metaclass=abc.ABCMeta):
             A flag indicating whether to use the V1 (legacy) UI mode.
         """
 
-        def invert_y_anchor(y_anchor: Anchor):
+        def invert_y_anchor(y_anchor):
             """Invert the Y-axis anchor string.
 
             Parameters
@@ -392,9 +370,7 @@ class UI(object, metaclass=abc.ABCMeta):
             for child in self._children:
                 child._update_ui_mode(switch_to_old_ui=switch_to_old_ui)
 
-    def set_position(
-        self, coords, x_anchor: str = Anchor.LEFT, y_anchor: str = Anchor.TOP
-    ):
+    def set_position(self, coords, x_anchor=Anchor.LEFT, y_anchor=Anchor.TOP):
         """Position this UI component according to the specified anchor.
 
         Parameters
@@ -417,8 +393,8 @@ class UI(object, metaclass=abc.ABCMeta):
 
     def get_position(
         self,
-        x_anchor: str = Anchor.LEFT,
-        y_anchor: str = Anchor.TOP,
+        x_anchor=Anchor.LEFT,
+        y_anchor=Anchor.TOP,
     ):
         """Get the position of this UI component according to the specified anchor.
 
@@ -487,7 +463,7 @@ class UI(object, metaclass=abc.ABCMeta):
         msg = "Subclasses of UI must implement property `size`."
         raise NotImplementedError(msg)
 
-    def set_visibility(self, visibility: bool):
+    def set_visibility(self, visibility):
         """Set visibility of this UI component.
 
         Parameters
@@ -499,7 +475,7 @@ class UI(object, metaclass=abc.ABCMeta):
             # actor.SetVisibility(visibility)
             actor.visible = visibility
 
-    def handle_events(self, actor: Mesh):
+    def handle_events(self, actor):
         """Attach event handlers to the UI object.
 
         Parameters
@@ -510,37 +486,9 @@ class UI(object, metaclass=abc.ABCMeta):
         actor.add_event_handler(self.mouse_button_down_callback, "pointer_down")
         actor.add_event_handler(self.mouse_button_up_callback, "pointer_up")
         actor.add_event_handler(self.mouse_move_callback, "pointer_move")
-        # actor.add_event_handler(self.mouse_button_up_callback, "pointer_enter")
-        # actor.add_event_handler(self.mouse_button_down_callback, "pointer_leave")
-        # actor.add_event_handler(self.mouse_button_up_callback, "click")
-        # actor.add_event_handler(self.mouse_button_down_callback, "double_click")
-        # actor.add_event_handler(self.mouse_button_up_callback, "wheel")
-
-        # actor.add_event_handler(self.mouse_button_down_callback, "key_down")
         actor.add_event_handler(self.key_press_callback, "key_up")
 
-        # self.add_callback(
-        #     actor, "LeftButtonPressEvent", self.left_button_click_callback
-        # )
-        # self.add_callback(
-        #     actor, "LeftButtonReleaseEvent", self.left_button_release_callback
-        # )
-        # self.add_callback(
-        #     actor, "RightButtonPressEvent", self.right_button_click_callback
-        # )
-        # self.add_callback(
-        #     actor, "RightButtonReleaseEvent", self.right_button_release_callback
-        # )
-        # self.add_callback(
-        #     actor, "MiddleButtonPressEvent", self.middle_button_click_callback
-        # )
-        # self.add_callback(
-        #     actor, "MiddleButtonReleaseEvent", self.middle_button_release_callback
-        # )
-        # self.add_callback(actor, "MouseMoveEvent", self.mouse_move_callback)
-        # self.add_callback(actor, "KeyPressEvent", self.key_press_callback)
-
-    def mouse_button_down_callback(self, event: PointerEvent):
+    def mouse_button_down_callback(self, event):
         """Handle mouse button press event.
 
         Parameters
@@ -556,7 +504,7 @@ class UI(object, metaclass=abc.ABCMeta):
             self.middle_button_click_callback(event)
         event.cancel()
 
-    def mouse_button_up_callback(self, event: PointerEvent):
+    def mouse_button_up_callback(self, event):
         """Handle mouse button release event.
 
         Parameters
@@ -572,7 +520,7 @@ class UI(object, metaclass=abc.ABCMeta):
             self.middle_button_release_callback(event)
         event.cancel()
 
-    def left_button_click_callback(self, event: PointerEvent):
+    def left_button_click_callback(self, event):
         """Handle left mouse button press event.
 
         Parameters
@@ -583,7 +531,7 @@ class UI(object, metaclass=abc.ABCMeta):
         self.left_button_state = "pressing"
         self.on_left_mouse_button_pressed(event)
 
-    def left_button_release_callback(self, event: PointerEvent):
+    def left_button_release_callback(self, event):
         """Handle left mouse button release event.
 
         Parameters
@@ -596,7 +544,7 @@ class UI(object, metaclass=abc.ABCMeta):
         self.left_button_state = "released"
         self.on_left_mouse_button_released(event)
 
-    def right_button_click_callback(self, event: PointerEvent):
+    def right_button_click_callback(self, event):
         """Handle right mouse button press event.
 
         Parameters
@@ -607,7 +555,7 @@ class UI(object, metaclass=abc.ABCMeta):
         self.right_button_state = "pressing"
         self.on_right_mouse_button_pressed(event)
 
-    def right_button_release_callback(self, event: PointerEvent):
+    def right_button_release_callback(self, event):
         """Handle right mouse button release event.
 
         Parameters
@@ -620,7 +568,7 @@ class UI(object, metaclass=abc.ABCMeta):
         self.right_button_state = "released"
         self.on_right_mouse_button_released(event)
 
-    def middle_button_click_callback(self, event: PointerEvent):
+    def middle_button_click_callback(self, event):
         """Handle middle mouse button press event.
 
         Parameters
@@ -631,7 +579,7 @@ class UI(object, metaclass=abc.ABCMeta):
         self.middle_button_state = "pressing"
         self.on_middle_mouse_button_pressed(event)
 
-    def middle_button_release_callback(self, event: PointerEvent):
+    def middle_button_release_callback(self, event):
         """Handle middle mouse button release event.
 
         Parameters
@@ -644,7 +592,7 @@ class UI(object, metaclass=abc.ABCMeta):
         self.middle_button_state = "released"
         self.on_middle_mouse_button_released(event)
 
-    def mouse_move_callback(self, event: PointerEvent):
+    def mouse_move_callback(self, event):
         """Handle mouse move event.
 
         Parameters
@@ -676,7 +624,7 @@ class UI(object, metaclass=abc.ABCMeta):
             self.middle_button_state = "dragging"
             self.on_middle_mouse_button_dragged(event)
 
-    def key_press_callback(self, event: KeyboardEvent):
+    def key_press_callback(self, event):
         """Handle key press event.
 
         Parameters
@@ -732,41 +680,6 @@ class Rectangle2D(UI):
 
         Create the plane actor used internally.
         """
-        # # Setup four points
-        # size = (1, 1)
-        # self._points = Points()
-        # self._points.InsertNextPoint(0, 0, 0)
-        # self._points.InsertNextPoint(size[0], 0, 0)
-        # self._points.InsertNextPoint(size[0], size[1], 0)
-        # self._points.InsertNextPoint(0, size[1], 0)
-
-        # # Create the polygon
-        # polygon = Polygon()
-        # polygon.GetPointIds().SetNumberOfIds(4)  # make a quad
-        # polygon.GetPointIds().SetId(0, 0)
-        # polygon.GetPointIds().SetId(1, 1)
-        # polygon.GetPointIds().SetId(2, 2)
-        # polygon.GetPointIds().SetId(3, 3)
-
-        # # Add the polygon to a list of polygons
-        # polygons = CellArray()
-        # polygons.InsertNextCell(polygon)
-
-        # # Create a PolyData
-        # self._polygonPolyData = PolyData()
-        # self._polygonPolyData.SetPoints(self._points)
-        # self._polygonPolyData.SetPolys(polygons)
-
-        # # Create a mapper and actor
-        # mapper = PolyDataMapper2D()
-        # mapper = set_input(mapper, self._polygonPolyData)
-
-        # self.actor = Actor2D()
-        # self.actor.SetMapper(mapper)
-
-        # # Add default events listener to the VTK actor.
-        # self.handle_events(self.actor)
-
         geo = plane_geometry(width=1, height=1)
         mat = _create_mesh_material(
             material="basic", enable_picking=True, flat_shading=True
@@ -793,11 +706,6 @@ class Rectangle2D(UI):
         (float, float)
             The current `(width, height)` of the rectangle in pixels.
         """
-        # # Get 2D coordinates of two opposed corners of the rectangle.
-        # lower_left_corner = np.array(self._points.GetPoint(0)[:2])
-        # upper_right_corner = np.array(self._points.GetPoint(2)[:2])
-        # size = abs(upper_right_corner - lower_left_corner)
-        # return size
         bounds = self.actor.get_bounding_box()
         minx, miny, minz = bounds[0]
         maxx, maxy, maxz = bounds[1]
@@ -855,15 +763,6 @@ class Rectangle2D(UI):
         size : (float, float)
             Rectangle size (width, height) in pixels.
         """
-        # self._points.SetPoint(0, 0, 0, 0.0)
-        # self._points.SetPoint(1, size[0], 0, 0.0)
-        # self._points.SetPoint(2, size[0], size[1], 0.0)
-        # self._points.SetPoint(3, 0, size[1], 0.0)
-        # self._polygonPolyData.SetPoints(self._points)
-        # mapper = PolyDataMapper2D()
-        # mapper = set_input(mapper, self._polygonPolyData)
-
-        # self.actor.SetMapper(mapper)
         self.actor.geometry = plane_geometry(width=size[0], height=size[1])
         self._update_actors_position()
 
@@ -882,8 +781,6 @@ class Rectangle2D(UI):
         (float, float, float)
             RGB color.
         """
-        # color = self.actor.GetProperty().GetColor()
-        # return np.asarray(color)
         return self.actor.material.color
 
     @color.setter
@@ -895,7 +792,6 @@ class Rectangle2D(UI):
         color : (float, float, float)
             RGB. Must take values in [0, 1].
         """
-        # self.actor.GetProperty().SetColor(*color)
         self.actor.material.color = np.array([*color, 1.0])
 
     @property
@@ -907,7 +803,6 @@ class Rectangle2D(UI):
         float
             Opacity value.
         """
-        # return self.actor.GetProperty().GetOpacity()
         return self.actor.material.opacity
 
     @opacity.setter
@@ -919,7 +814,6 @@ class Rectangle2D(UI):
         opacity : float
             Degree of transparency. Must be between [0, 1].
         """
-        # self.actor.GetProperty().SetOpacity(opacity)
         self.actor.material.opacity = opacity
 
 
@@ -981,23 +875,6 @@ class Disk2D(UI):
 
         Create the disk actor used internally.
         """
-        # # Setting up disk actor.
-        # self._disk = DiskSource()
-        # self._disk.SetRadialResolution(10)
-        # self._disk.SetCircumferentialResolution(50)
-        # self._disk.Update()
-
-        # # Mapper
-        # mapper = PolyDataMapper2D()
-        # mapper = set_input(mapper, self._disk.GetOutputPort())
-
-        # # Actor
-        # self.actor = Actor2D()
-        # self.actor.SetMapper(mapper)
-
-        # # Add default events listener to the VTK actor.
-        # self.handle_events(self.actor)
-
         positions, indices = prim_ring(
             inner_radius=self.inner_radius, outer_radius=self.outer_radius
         )
@@ -1046,8 +923,6 @@ class Disk2D(UI):
         (float, float, float)
             RGB color.
         """
-        # color = self.actor.GetProperty().GetColor()
-        # return np.asarray(color)
         return self.actor.material.color
 
     @color.setter
@@ -1059,7 +934,6 @@ class Disk2D(UI):
         color : (float, float, float)
             RGB. Must take values in [0, 1].
         """
-        # self.actor.GetProperty().SetColor(*color)
         self.actor.material.color = np.array([*color, 1.0])
 
     @property
@@ -1071,7 +945,6 @@ class Disk2D(UI):
         float
             Opacity value.
         """
-        # return self.actor.GetProperty().GetOpacity()
         return self.actor.material.opacity
 
     @opacity.setter
@@ -1083,7 +956,6 @@ class Disk2D(UI):
         opacity : float
             Degree of transparency. Must be between [0, 1].
         """
-        # self.actor.GetProperty().SetOpacity(opacity)
         self.actor.material.opacity = opacity
 
     @property
@@ -1095,7 +967,6 @@ class Disk2D(UI):
         int
             Outer radius in pixels.
         """
-        # return self._disk.GetOuterRadius()
         return self._outer_radius
 
     @outer_radius.setter
@@ -1107,8 +978,6 @@ class Disk2D(UI):
         radius : int
             New outer radius.
         """
-        # self._disk.SetOuterRadius(radius)
-        # self._disk.Update()
         if self.actor:
             positions, indices = prim_ring(
                 inner_radius=self.inner_radius, outer_radius=radius
@@ -1127,7 +996,6 @@ class Disk2D(UI):
         int
             Inner radius in pixels.
         """
-        # return self._disk.GetInnerRadius()
         return self._inner_radius
 
     @inner_radius.setter
@@ -1139,8 +1007,6 @@ class Disk2D(UI):
         radius : int
             New inner radius.
         """
-        # self._disk.SetInnerRadius(radius)
-        # self._disk.Update()
         if self.actor:
             positions, indices = prim_ring(
                 inner_radius=radius, outer_radius=self.outer_radius

@@ -10,7 +10,6 @@ import asyncio
 from dataclasses import dataclass
 from functools import reduce
 import os
-from typing import List
 
 from PIL.Image import fromarray as image_from_array
 import numpy as np
@@ -90,7 +89,7 @@ class Scene(GfxGroup):
         self.ui_scene = GfxScene()
         self.ui_camera = ScreenCoordsCamera()
         self.ui_scene.add(self.ui_camera)
-        self.ui_elements: List[UI] = []
+        self.ui_elements = []
 
         self._bg_color = background
         self._bg_actor = None
@@ -264,7 +263,7 @@ class Screen:
         self.viewport.rect = value
 
 
-def add_ui_to_scene(ui_scene: GfxScene, ui_obj: UI):
+def add_ui_to_scene(ui_scene, ui_obj):
     """Recursively traverse and add UI hierarchy to the UI scene.
 
     Parameters
@@ -281,7 +280,7 @@ def add_ui_to_scene(ui_scene: GfxScene, ui_obj: UI):
         add_ui_to_scene(ui_scene, child)
 
 
-def remove_ui_from_scene(ui_scene: GfxScene, ui_obj: UI):
+def remove_ui_from_scene(ui_scene, ui_obj):
     """Recursively traverse and remove UI hierarchy from the UI scene.
 
     Parameters
@@ -385,7 +384,7 @@ def update_viewports(screens, screen_bbs):
         update_camera(screen.camera, screen.size, screen.scene)
 
 
-def render_screens(renderer, screens: List[Screen]):
+def render_screens(renderer, screens):
     """Render multiple screens within a single renderer update cycle.
 
     Parameters
@@ -402,7 +401,7 @@ def render_screens(renderer, screens: List[Screen]):
     renderer.flush()
 
 
-def reposition_ui(screens: List[Screen], switch_ui_mode: bool = False):
+def reposition_ui(screens, switch_ui_mode=False):
     """Update the positions of all UI elements across multiple screens.
 
     Parameters

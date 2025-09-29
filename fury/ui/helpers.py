@@ -229,7 +229,7 @@ def rotate_2d(vertices, angle):
     return new_vertices
 
 
-def get_anchor_to_multiplier(use_y_down: bool = True):
+def get_anchor_to_multiplier(use_y_down=True):
     """Return a dictionary of anchor multipliers based on the Y-axis convention.
 
     Parameters
