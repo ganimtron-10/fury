@@ -112,7 +112,12 @@ branch = true
 [tool.coverage.report]
 fail_under = 100
 
-# [tool.pytest.ini_options]
+[tool.pytest.ini_options]
+filterwarnings = [
+    "ignore:.*You do not have Matplotlib installed.*:UserWarning",
+    "ignore:We'll no longer accept the way you call the.*function:UserWarning:.*doctest",
+    "ignore:.*There is no current event loop.*:DeprecationWarning",
+]
 # addopts = "--cov --cov-report html --cov-report term-missing --cov-fail-under 95"
 
 [tool.codespell]
