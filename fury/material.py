@@ -89,6 +89,7 @@ def _create_mesh_material(
     opacity=1.0,
     mode="vertex",
     flat_shading=True,
+    texture=None,
 ):
     """Create a mesh material.
 
@@ -110,6 +111,8 @@ def _create_mesh_material(
         The color mode of the material. Options are 'auto' and 'vertex'.
     flat_shading : bool, optional
         Whether to use flat shading (True) or smooth shading (False).
+    texture : Texture or TextureMap, optional
+        The texture map specifying the color for each texture coordinate.
 
     Returns
     -------
@@ -124,20 +127,19 @@ def _create_mesh_material(
     opacity = validate_opacity(opacity)
     color = validate_color(color, opacity, mode)
 
+    args = {
+        "pick_write": enable_picking,
+        "color_mode": mode,
+        "color": color,
+        "opacity": opacity,
+        "flat_shading": flat_shading,
+        "map": texture,
+    }
+
     if material == "phong":
-        return MeshPhongMaterial(
-            pick_write=enable_picking,
-            color_mode=mode,
-            color=color,
-            flat_shading=flat_shading,
-        )
+        return MeshPhongMaterial(**args)
     elif material == "basic":
-        return MeshBasicMaterial(
-            pick_write=enable_picking,
-            color_mode=mode,
-            color=color,
-            flat_shading=flat_shading,
-        )
+        return MeshBasicMaterial(**args)
     else:
         raise ValueError(f"Unsupported material type: {material}")
 

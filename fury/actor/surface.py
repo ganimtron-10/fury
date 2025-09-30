@@ -7,7 +7,6 @@ import numpy as np
 
 from fury.geometry import buffer_to_geometry, create_mesh
 from fury.io import load_image_texture
-from fury.lib import MeshBasicMaterial
 from fury.material import _create_mesh_material, validate_opacity
 from fury.utils import generate_planar_uvs
 
@@ -21,6 +20,7 @@ def surface(
     texture=None,
     texture_axis="xy",
     texture_coords=None,
+    normals=None,
     opacity=1.0,
 ):
     """Create a surface mesh actor from vertices and faces.
@@ -44,6 +44,9 @@ def surface(
     texture_coords : ndarray, shape (N, 2), optional
         Predefined UV coordinates for the texture mapping. If not provided, they will
         be generated based on the `texture_axis`.
+    normals : ndarray, shape (N, 3), optional
+        The normal vectors for each vertex. If not provided, normals will be
+        computed automatically.
     opacity : float, optional
         Takes values from 0 (fully transparent) to 1 (opaque).
 
@@ -66,6 +69,7 @@ def surface(
                 positions=vertices.astype("float32"),
                 indices=faces.astype("int32"),
                 colors=colors,
+                normals=normals.astype("float32") if normals is not None else None,
             )
             mat = _create_mesh_material(
                 material=material, mode="vertex", opacity=opacity
@@ -74,6 +78,7 @@ def surface(
             geo = buffer_to_geometry(
                 positions=vertices.astype("float32"),
                 indices=faces.astype("int32"),
+                normals=normals.astype("float32") if normals is not None else None,
             )
             mat = _create_mesh_material(color=colors, opacity=opacity)
         else:
@@ -85,13 +90,13 @@ def surface(
         if not os.path.exists(texture):
             raise FileNotFoundError(f"Texture file '{texture}' not found.")
 
-        logging.warning(
-            "texture option currently only supports planar projection,"
-            " the plane can be provided by texture_axis parameter."
-        )
-
         tex = load_image_texture(texture)
         if texture_coords is None:
+            logging.warning(
+                "texture option currently only supports planar projection,"
+                " if the texture_coords are not provided, the plane can be provided"
+                " by texture_axis parameter."
+            )
             texture_coords = generate_planar_uvs(vertices, axis=texture_axis)
         elif (
             texture_coords.shape[0] != vertices.shape[0] or texture_coords.shape[1] != 2
@@ -104,8 +109,11 @@ def surface(
             positions=vertices.astype("float32"),
             indices=faces.astype("int32"),
             texcoords=texture_coords.astype("float32"),
+            normals=normals.astype("float32") if normals is not None else None,
         )
-        mat = MeshBasicMaterial(map=tex, opacity=opacity)
+        mat = _create_mesh_material(
+            material=material, texture=tex, opacity=opacity, mode="auto"
+        )
     else:
         geo = buffer_to_geometry(
             positions=vertices.astype("float32"), indices=faces.astype("int32")
