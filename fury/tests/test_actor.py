@@ -559,6 +559,22 @@ def test_surface_basic_vertices_and_faces():
     assert isinstance(surface_actor.material, MeshPhongMaterial)
     assert surface_actor.material.opacity == 1.0
 
+    def test_surface_with_normals():
+        """Test surface creation with normals."""
+        vertices = np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0]], dtype=np.float32)
+        faces = np.array([[0, 1, 2]], dtype=np.int32)
+        normals = np.array([[0, 0, 1], [0, 0, 1], [0, 0, 1]], dtype=np.float32)
+
+        surface_actor = actor.surface(vertices, faces, normals=normals)
+
+        assert np.array_equal(surface_actor.geometry.positions.data, vertices)
+        assert np.array_equal(surface_actor.geometry.indices.data, faces)
+        assert np.array_equal(surface_actor.geometry.normals.data, normals)
+        assert not hasattr(surface_actor.geometry, "colors")
+        assert not hasattr(surface_actor.geometry, "texcoords")
+        assert isinstance(surface_actor.material, MeshPhongMaterial)
+        assert surface_actor.material.opacity == 1.0
+
 
 def test_surface_with_vertex_colors():
     """Test surface creation with vertex colors."""
@@ -572,6 +588,23 @@ def test_surface_with_vertex_colors():
     assert np.array_equal(surface_actor.geometry.indices.data, faces)
     assert np.array_equal(surface_actor.geometry.colors.data, colors)
 
+    assert isinstance(surface_actor.material, MeshPhongMaterial)
+    assert surface_actor.material.opacity == 1.0
+
+
+def test_surface_with_vertex_colors_and_normals():
+    """Test surface creation with vertex colors and normals."""
+    vertices = np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0]], dtype=np.float32)
+    faces = np.array([[0, 1, 2]], dtype=np.int32)
+    colors = np.array([[1, 0, 0], [0, 1, 0], [0, 0, 1]], dtype=np.float32)
+    normals = np.array([[0, 0, 1], [0, 0, 1], [0, 0, 1]], dtype=np.float32)
+
+    surface_actor = actor.surface(vertices, faces, colors=colors, normals=normals)
+
+    assert np.array_equal(surface_actor.geometry.positions.data, vertices)
+    assert np.array_equal(surface_actor.geometry.indices.data, faces)
+    assert np.array_equal(surface_actor.geometry.colors.data, colors)
+    assert np.array_equal(surface_actor.geometry.normals.data, normals)
     assert isinstance(surface_actor.material, MeshPhongMaterial)
     assert surface_actor.material.opacity == 1.0
 
