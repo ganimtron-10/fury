@@ -1,6 +1,6 @@
 <h1 align="center">
   <br>
-  <a href="https://www.fury.gl"><img src="https://raw.githubusercontent.com/fury-gl/fury-communication-assets/main/fury-logo.png" alt="FURY" width="200"></a>
+  <a href="https://www.fury.gl"><img src="https://raw.githubusercontent.com/fury-gl/fury/refs/heads/master/docs/source/_static/images/logo.svg" alt="FURY" width="200"></a>
   <br>Free Unified Rendering in Python<br>
 
 </h1>
