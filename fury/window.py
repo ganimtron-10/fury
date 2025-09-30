@@ -22,20 +22,23 @@ from fury.lib import (
     Canvas,
     Controller,
     DirectionalLight,
+    Group as GfxGroup,  # type: ignore
     JupyterCanvas,
     OffscreenCanvas,
     PerspectiveCamera,
     QtCanvas,
     Renderer,
     Scene as GfxScene,  # type: ignore
+    ScreenCoordsCamera,
     TrackballController,
     Viewport,
     get_app,
     run,
 )
+from fury.ui import UI, UIContext
 
 
-class Scene(GfxScene):
+class Scene(GfxGroup):
     """Scene class to hold the actors in the scene.
 
     Data Structure to arrange the logical and spatial representation of the
@@ -80,6 +83,13 @@ class Scene(GfxScene):
             A list of PyGfx Light objects to illuminate the scene. If None,
             a default AmbientLight is added. Defaults to None."""
         super().__init__()
+
+        self.main_scene = GfxScene()
+
+        self.ui_scene = GfxScene()
+        self.ui_camera = ScreenCoordsCamera()
+        self.ui_scene.add(self.ui_camera)
+        self.ui_elements = []
 
         self._bg_color = background
         self._bg_actor = None
@@ -156,9 +166,48 @@ class Scene(GfxScene):
 
     def clear(self):
         """Remove all actors from the scene, keeping background and lights."""
-        super().clear()
-        self.add(self._bg_actor)
-        self.add(*self.lights)
+        self.main_scene.clear()
+        self.main_scene.add(self._bg_actor)
+        self.main_scene.add(*self.lights)
+
+        self.ui_elements.clear()
+        self.ui_scene.clear()
+        self.ui_scene.add(self.ui_camera)
+
+    def add(self, *objects):
+        """Add actors or UI elements to the scene.
+
+        Parameters
+        ----------
+        *objects : list of Mesh or UI
+            A list objects to be added to the scene.
+        """
+        for obj in objects:
+            if isinstance(obj, UI):
+                self.ui_elements.append(obj)
+                add_ui_to_scene(self.ui_scene, obj)
+            elif isinstance(obj, GfxScene):  # type: ignore [misc]
+                super().add(obj)
+            else:
+                self.main_scene.add(obj)
+
+    def remove(self, *objects):
+        """Remove actors or UI elements from the scene.
+
+        Parameters
+        ----------
+        *objects : list of Mesh or UI
+            A list of objects to be removed from the scene.
+        """
+        for obj in objects:
+            if isinstance(obj, UI):
+                if obj in self.ui_elements:
+                    self.ui_elements.remove(obj)
+                remove_ui_from_scene(self.ui_scene, obj)
+            elif isinstance(obj, GfxScene):  # type: ignore [misc]
+                super().remove(obj)
+            else:
+                self.main_scene.remove(obj)
 
 
 @dataclass
@@ -212,6 +261,40 @@ class Screen:
         value : tuple
             The desired position and size (x, y, w, h) for the viewport."""
         self.viewport.rect = value
+
+
+def add_ui_to_scene(ui_scene, ui_obj):
+    """Recursively traverse and add UI hierarchy to the UI scene.
+
+    Parameters
+    ----------
+    ui_scene : GfxScene
+        Scene dedicated to UI elements.
+    ui_obj : UI
+        UI element to add into scene.
+    """
+    if ui_obj.actors:
+        ui_scene.add(*ui_obj.actors)
+
+    for child in ui_obj._children:
+        add_ui_to_scene(ui_scene, child)
+
+
+def remove_ui_from_scene(ui_scene, ui_obj):
+    """Recursively traverse and remove UI hierarchy from the UI scene.
+
+    Parameters
+    ----------
+    ui_scene : GfxScene
+        Scene dedicated to UI elements.
+    ui_obj : UI
+        UI element to be removed from the scene.
+    """
+    if ui_obj.actors:
+        ui_scene.remove(*ui_obj.actors)
+
+    for child in ui_obj._children:
+        remove_ui_from_scene(ui_scene, child)
 
 
 def create_screen(
@@ -275,8 +358,11 @@ def update_camera(camera, size, target):
         The size (width, height) of the viewport, used if the target is empty.
     target : Object or Scene
         The PyGfx object or scene the camera should focus on."""
-    if (isinstance(target, Scene) and len(target.children) > 3) or (
-        not isinstance(target, Scene) and target is not None
+    if isinstance(target, Scene):
+        target = target.main_scene
+
+    if (isinstance(target, GfxScene) and len(target.children) > 3) or (  # type: ignore [misc]
+        not isinstance(target, GfxScene) and target is not None  # type: ignore [misc]
     ):
         camera.show_object(target)
     elif size is not None:
@@ -308,9 +394,29 @@ def render_screens(renderer, screens):
     screens : list of Screen
         The list of Screen objects to render."""
     for screen in screens:
-        screen.viewport.render(screen.scene, screen.camera, flush=False)
+        scene_root = screen.scene
+        screen.viewport.render(scene_root.main_scene, screen.camera, flush=False)
+        screen.viewport.render(scene_root.ui_scene, scene_root.ui_camera, flush=False)
 
     renderer.flush()
+
+
+def reposition_ui(screens, switch_ui_mode=False):
+    """Update the positions of all UI elements across multiple screens.
+
+    Parameters
+    ----------
+    screens : list of Screen
+        The list of Screen objects containing UI elements to reposition.
+    switch_ui_mode : bool, optional
+        Whether to switch the current position anchor to LEFT, BOTTOM or not.
+    """
+
+    for screen in screens:
+        scene_root = screen.scene
+        for child in scene_root.ui_elements:
+            child._update_ui_mode(switch_to_old_ui=switch_ui_mode)
+            child._update_actors_position()
 
 
 def calculate_screen_sizes(screens, size):
@@ -392,6 +498,8 @@ class ShowManager:
         An existing QtWidgets QApplication instance (if `window_type` is 'qt').
     qt_parent : QWidget
         An existing QWidget to embed the QtCanvas within (if `window_type` is 'qt').
+    use_old_ui : bool, optional
+        Whether to use old ui with default anchor as LEFT,BOTTOM.
     """
 
     def __init__(
@@ -410,6 +518,7 @@ class ShowManager:
         enable_events=True,
         qt_app=None,
         qt_parent=None,
+        use_old_ui=False,
     ):
         """Manage the rendering window, scenes, and interactions.
 
@@ -456,19 +565,28 @@ class ShowManager:
             is 'qt' and no global app exists).
         qt_parent : QWidget, optional
             An existing QWidget to embed the QtCanvas within (if `window_type`
-            is 'qt')."""
+            is 'qt').
+        use_old_ui : bool, optional
+            Whether to use old ui with anchor as LEFT, BOTTOM or new with LEFT, TOP.
+        """
         self._size = size
         self._title = title
         self._is_qt = False
         self._qt_app = qt_app
         self._qt_parent = qt_parent
+        self._is_initial_resize = None
+        self._use_old_ui = use_old_ui
+        if use_old_ui:
+            UIContext.enable_v2_ui = False
         self._window_type = self._setup_window(window_type)
 
         if renderer is None:
             renderer = Renderer(self.window)
         self.renderer = renderer
         self.renderer.pixel_ratio = pixel_ratio
-        self.renderer.add_event_handler(self._resize, "resize")
+        self.renderer.add_event_handler(
+            lambda event: self._resize(size=(event.width, event.height)), "resize"
+        )
         self.renderer.add_event_handler(
             self._set_key_long_press_event, "key_down", "key_up"
         )
@@ -485,6 +603,7 @@ class ShowManager:
 
         self.enable_events = enable_events
         self._key_long_press = None
+        self._resize(self._size)
 
     def _screen_setup(self, scene, camera, controller, camera_light):
         """Prepare scene, camera, controller, and light lists for screen creation.
@@ -588,17 +707,28 @@ class ShowManager:
             )
         return screens
 
-    def _resize(self, _event):
+    def _resize(self, size):
         """Handle window resize events by updating viewports and re-rendering.
 
         Parameters
         ----------
-        _event : Event
-            The PyGfx resize event object (unused in current implementation)."""
+        size : tuple
+            The size (width, height) of the window in pixels.
+        """
+        if self._is_initial_resize is None:
+            self._is_initial_resize = True
+
+        UIContext.set_canvas_size(size=size)
         update_viewports(
             self.screens,
             calculate_screen_sizes(self._screen_config, self.renderer.logical_size),
         )
+        reposition_ui(
+            self.screens,
+            switch_ui_mode=(self._is_initial_resize and self._use_old_ui),
+        )
+        if self._is_initial_resize:
+            self._is_initial_resize = False
         self.render()
 
     async def _handle_key_long_press(self, event):
@@ -726,11 +856,16 @@ class ShowManager:
         img.save(fname)
         return arr
 
+    def _draw_function(self):
+        """Draw all screens and request a window redraw."""
+        render_screens(self.renderer, self.screens)
+        self.window.request_draw()
+
     def render(self):
         """Request a redraw of all screens in the window."""
         if self._is_qt and self._qt_parent is not None:
             self._qt_parent.show()
-        self.window.request_draw(lambda: render_screens(self.renderer, self.screens))
+        self.window.request_draw(self._draw_function)
 
     def start(self):
         """Start the rendering event loop and display the window.
