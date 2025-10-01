@@ -8,5 +8,5 @@ pydata-sphinx-theme==0.15.2
 tomli>=2.0.1
 networkx
 ablog >=0.11.1
-pybullet>=2.7.0
-opencv-python
+# pybullet>=2.7.0
+# opencv-python
