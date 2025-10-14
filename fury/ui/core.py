@@ -5,7 +5,6 @@ import abc
 import numpy as np
 
 from fury.decorators import warn_on_args_to_kwargs
-from fury.deprecator import deprecate_with_version
 from fury.geometry import buffer_to_geometry, create_mesh
 from fury.lib import (
     plane_geometry,
@@ -141,137 +140,6 @@ class UI(object, metaclass=abc.ABCMeta):
         msg = "Subclasses of UI must implement `_setup(self)`."
         raise NotImplementedError(msg)
 
-    @deprecate_with_version(
-        message=(
-            "The `add_to_scene` method is deprecated as a part of Fury v2. "
-            "This method is no longer needed, as the addition of UI elements "
-            "and their hierarchy into the scene is now automatically handled "
-            "by `fury.window.Scene.add()`."
-        ),
-        since="2.0.0a1",
-        until="2.1.0",
-    )
-    def add_to_scene(self, scene):
-        """Allow UI objects to add their own props to the scene.
-
-        Parameters
-        ----------
-        scene : scene
-            The scene object to which the UI element's actors should be added.
-        """
-        scene.add(self)
-
-    @deprecate_with_version(
-        message=(
-            "The `add_callback` method is deprecated as a part of Fury v2. "
-            "This method is no longer needed, as event callbacks are now "
-            "directly added to the actor itself using `handle_events()`."
-        ),
-        since="2.0.0a1",
-        until="2.1.0",
-    )
-    def add_callback(self):
-        """Add a callback to a specific event for this UI component."""
-        pass
-
-    @property
-    @deprecate_with_version(
-        message=(
-            "The `position` property getter is deprecated as a part of Fury v2. "
-            "Please use `get_position(x_anchor=Anchor.LEFT, "
-            "y_anchor=Anchor.BOTTOM)` instead."
-        ),
-        since="2.0.0a1",
-        until="2.1.0",
-    )
-    def position(self):
-        """Get the position of this UI component.
-
-        Returns
-        -------
-        (float, float)
-            The `(x, y)` pixel coordinates of the UI component's lower-left corner.
-        """
-        return self.get_position(x_anchor=Anchor.LEFT, y_anchor=Anchor.BOTTOM)
-
-    @position.setter
-    @deprecate_with_version(
-        message=(
-            "The `position` property setter is deprecated as a part of Fury v2. "
-            "Please use `set_position(coords=coords, x_anchor=Anchor.LEFT, "
-            "y_anchor=Anchor.BOTTOM)` instead."
-        ),
-        since="2.0.0a1",
-        until="2.1.0",
-    )
-    def position(self, coords):
-        """Set the position of this UI component.
-
-        Parameters
-        ----------
-        coords : (float, float)
-            Absolute pixel coordinates `(x, y)` for the UI components lower-left corner.
-        """
-        self.set_position(coords=coords, x_anchor=Anchor.LEFT, y_anchor=Anchor.BOTTOM)
-
-    @property
-    @deprecate_with_version(
-        message=(
-            "The `center` property getter is deprecated as a part of Fury v2. "
-            "Please use `get_position(x_anchor=Anchor.CENTER, "
-            "y_anchor=Anchor.CENTER)` instead."
-        ),
-        since="2.0.0a1",
-        until="2.1.0",
-    )
-    def center(self):
-        """Get the center position of this UI component.
-
-        Returns
-        -------
-        (float, float)
-            The `(x, y)` pixel coordinates of the UI component's center.
-        """
-        return self.get_position(x_anchor=Anchor.CENTER, y_anchor=Anchor.CENTER)
-
-    @center.setter
-    @deprecate_with_version(
-        message=(
-            "The `center` property setter is deprecated as a part of Fury v2. "
-            "Please use `set_position(coords=coords, x_anchor=Anchor.CENTER, "
-            "y_anchor=Anchor.CENTER)` instead."
-        ),
-        since="2.0.0a1",
-        until="2.1.0",
-    )
-    def center(self, coords):
-        """Set the center of this UI component.
-
-        Parameters
-        ----------
-        coords : (float, float)
-            Absolute pixel coordinates `(x, y)` for the UI components lower-left corner.
-        """
-        self.set_position(coords=coords, x_anchor=Anchor.CENTER, y_anchor=Anchor.CENTER)
-
-    @deprecate_with_version(
-        message=(
-            "The `_set_position` method is deprecated as a part of Fury v2. "
-            "Its functionality is now handled by `_update_actors_position`."
-        ),
-        since="2.0.0a1",
-        until="2.1.0",
-    )
-    def _set_position(self, coords):
-        """Update the position of the internal actors.
-
-        Parameters
-        ----------
-        coords : (float, float)
-            Absolute pixel coordinates `(x, y)` for the UI components lower-left corner.
-        """
-        pass
-
     @abc.abstractmethod
     def _get_actors(self):
         """Get the actors composing this UI component."""
@@ -324,7 +192,7 @@ class UI(object, metaclass=abc.ABCMeta):
             A 2-element array `(x, y)` representing the desired center
             position of the actor.
         """
-        canvas_size = UIContext.get_canvas_size()
+        canvas_size = UIContext.canvas_size
 
         actor.local.x = center_position[0]
         actor.local.y = (
@@ -332,43 +200,6 @@ class UI(object, metaclass=abc.ABCMeta):
             if self.use_y_down
             else center_position[1]
         )
-
-    def _update_ui_mode(self, switch_to_old_ui):
-        """Update the UI element's internal state when the UI system mode changes.
-
-        Parameters
-        ----------
-        switch_to_old_ui : bool
-            A flag indicating whether to use the V1 (legacy) UI mode.
-        """
-
-        def invert_y_anchor(y_anchor):
-            """Invert the Y-axis anchor string.
-
-            Parameters
-            ----------
-            y_anchor : Anchor
-                The anchor to be inverted.
-
-            Returns
-            -------
-            Anchor
-                The inverted anchor.
-            """
-            if y_anchor in (Anchor.TOP, Anchor.BOTTOM):
-                return Anchor.BOTTOM
-            else:
-                return Anchor.CENTER
-
-        if switch_to_old_ui:
-            current_position = self.get_position(
-                self._anchors[0], invert_y_anchor(self._anchors[1])
-            )
-            self.use_y_down = not switch_to_old_ui
-            self.set_position(current_position, self._anchors[0], self._anchors[1])
-
-            for child in self._children:
-                child._update_ui_mode(switch_to_old_ui=switch_to_old_ui)
 
     def set_position(self, coords, x_anchor=Anchor.LEFT, y_anchor=Anchor.TOP):
         """Position this UI component according to the specified anchor.
@@ -413,7 +244,7 @@ class UI(object, metaclass=abc.ABCMeta):
             The (x, y) pixel coordinates of the specified anchor point.
         """
 
-        ANCHOR_TO_MULTIPLIER = get_anchor_to_multiplier(use_y_down=self.use_y_down)
+        ANCHOR_TO_MULTIPLIER = get_anchor_to_multiplier()
 
         self.perform_position_validation(x_anchor=x_anchor, y_anchor=y_anchor)
 
@@ -472,7 +303,6 @@ class UI(object, metaclass=abc.ABCMeta):
             If `True`, the UI component will be visible. If `False`, it will be hidden.
         """
         for actor in self.actors:
-            # actor.SetVisibility(visibility)
             actor.visible = visibility
 
     def handle_events(self, actor):
