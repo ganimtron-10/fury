@@ -79,10 +79,10 @@ class UI(object, metaclass=abc.ABCMeta):
         UI component.
     x_anchor : str, optional
         Define the horizontal anchor point for `position`. Can be "LEFT",
-        "CENTER", or "RIGHT". Defaults to "LEFT".
+        "CENTER", or "RIGHT".
     y_anchor : str, optional
         Define the vertical anchor point for `position`. Can be "BOTTOM",
-        "CENTER", or "TOP". Defaults to "BOTTOM".
+        "CENTER", or "TOP".
     """
 
     def __init__(self, *, position=(0, 0), x_anchor=Anchor.LEFT, y_anchor=Anchor.TOP):
@@ -96,10 +96,10 @@ class UI(object, metaclass=abc.ABCMeta):
             UI component.
         x_anchor : str, optional
             Define the horizontal anchor point for `position`. Can be "LEFT",
-            "CENTER", or "RIGHT". Defaults to "LEFT".
+            "CENTER", or "RIGHT".
         y_anchor : str, optional
             Define the vertical anchor point for `position`. Can be "BOTTOM",
-            "CENTER", or "TOP". Defaults to "BOTTOM".
+            "CENTER", or "TOP".
         """
         self.use_y_down = True
         self._position = np.array([0, 0])
@@ -211,10 +211,10 @@ class UI(object, metaclass=abc.ABCMeta):
             are interpreted based on `x_anchor` and `y_anchor`.
         x_anchor : str, optional
             Define the horizontal anchor point for `coords`. Can be "LEFT",
-            "CENTER", or "RIGHT". Defaults to "LEFT".
+            "CENTER", or "RIGHT".
         y_anchor : str, optional
             Define the vertical anchor point for `coords`. Can be "TOP",
-            "CENTER", or "BOTTOM". Defaults to "TOP".
+            "CENTER", or "BOTTOM".
         """
         self.perform_position_validation(x_anchor=x_anchor, y_anchor=y_anchor)
 
@@ -233,10 +233,10 @@ class UI(object, metaclass=abc.ABCMeta):
         ----------
         x_anchor : str, optional
             Define the horizontal anchor point for the returned coordinates.
-            Can be "LEFT", "CENTER", or "RIGHT". Defaults to "LEFT".
+            Can be "LEFT", "CENTER", or "RIGHT".
         y_anchor : str, optional
             Define the vertical anchor point for the returned coordinates.
-            Can be "BOTTOM", "CENTER", or "TOP". Defaults to "TOP".
+            Can be "BOTTOM", "CENTER", or "TOP".
 
         Returns
         -------
@@ -472,21 +472,18 @@ class Rectangle2D(UI):
     ----------
     size : (int, int), optional
         Initial `(width, height)` of the rectangle in pixels.
-        Defaults to `(0, 0)`.
     position : (float, float), optional
         Coordinates `(x, y)` of the rectangle. The interpretation of `(x,y)`
         (e.g., top-left, bottom-left) depends on the current UI version.
-        Defaults to `(0, 0)`.
     color : (float, float, float), optional
         RGB color tuple, with values in the range `[0, 1]`.
-        Defaults to `(1, 1, 1)` (white).
     opacity : float, optional
         Degree of transparency, with values in the range `[0, 1]`.
-        `0` is fully transparent, `1` is fully opaque. Defaults to `1.0`.
+        `0` is fully transparent, `1` is fully opaque.
     """
 
     @warn_on_args_to_kwargs()
-    def __init__(self, *, size=(0, 0), position=(0, 0), color=(1, 1, 1), opacity=1.0):
+    def __init__(self, size, *, position=(0, 0), color=(1, 1, 1), opacity=1.0):
         """Initialize a rectangle.
 
         Parameters
