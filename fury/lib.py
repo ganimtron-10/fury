@@ -4,9 +4,9 @@ from typing import TypeAlias
 
 import jinja2
 import pygfx as gfx
+from rendercanvas.auto import RenderCanvas, loop
+from rendercanvas.offscreen import RenderCanvas as OffscreenRenderCanvas
 import wgpu
-from wgpu.gui.auto import WgpuCanvas, run
-from wgpu.gui.offscreen import WgpuCanvas as OffscreenWgpuCanvas
 
 from fury.optpkg import optional_package
 
@@ -19,7 +19,7 @@ jupyter_rfb, have_jupyter_rfb, _ = optional_package(
     "jupyter_rfb", trip_msg=jupyter_pckg_msg
 )
 if have_jupyter_rfb:
-    from wgpu.gui.jupyter import WgpuCanvas as JupyterWgpuCanvas
+    from rendercanvas.jupyter import RenderCanvas as JupyterWgpuCanvas
 
 qt_pckg_msg = (
     "You do not have any qt package installed. The qt window will not work for "
@@ -32,7 +32,11 @@ PyQt6, have_py_qt6, _ = optional_package("PyQt6", trip_msg=qt_pckg_msg)
 PyQt5, have_py_qt5, _ = optional_package("PyQt5", trip_msg=qt_pckg_msg)
 
 if have_py_side6 or have_py_qt6 or have_py_qt5:
-    from wgpu.gui.qt import WgpuCanvas as QtWgpuCanvas, get_app
+    from rendercanvas.qt import RenderCanvas as QtRenderCanvas
+
+    def get_app():
+        return loop._app
+
 
 if have_py_side6:
     from PySide6 import QtWidgets
@@ -94,9 +98,8 @@ OrthographicCamera = gfx.OrthographicCamera
 PerspectiveCamera = gfx.PerspectiveCamera
 ScreenCoordsCamera = gfx.ScreenCoordsCamera
 Renderer = gfx.WgpuRenderer
-run = run
-Canvas = WgpuCanvas
-OffscreenCanvas = OffscreenWgpuCanvas
+Canvas = RenderCanvas
+OffscreenCanvas = OffscreenRenderCanvas
 BaseShader = gfx.renderers.wgpu.BaseShader
 MeshPhongShader = gfx.renderers.wgpu.shaders.meshshader.MeshPhongShader
 MeshStandardShader = gfx.renderers.wgpu.shaders.meshshader.MeshStandardShader
@@ -119,6 +122,7 @@ WindowEvent = gfx.WindowEvent
 PointerEvent = gfx.PointerEvent
 WheelEvent = gfx.WheelEvent
 KeyboardEvent = gfx.KeyboardEvent
+run = loop.run
 
 
 plane_geometry = gfx.plane_geometry
@@ -128,7 +132,7 @@ if have_jupyter_rfb:
 else:
     JupyterCanvas = jupyter_rfb
 if have_py_side6 or have_py_qt6 or have_py_qt5:
-    QtCanvas = QtWgpuCanvas
+    QtCanvas = QtRenderCanvas
 else:
     QtCanvas = PySide6
     QtWidgets = PySide6

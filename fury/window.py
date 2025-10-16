@@ -877,7 +877,7 @@ class ShowManager:
             "true",
             "1",
         ]:
-            self.window.draw_frame()
+            self._draw_function()
             self.snapshot(f"{self._title}.png")
             self.window.close()
             return
@@ -934,7 +934,7 @@ def snapshot(
         scene=scene, screen_config=screen_config, window_type="offscreen"
     )
     show_m.render()
-    show_m.window.draw_frame()
+    show_m.window.draw()
     arr = show_m.snapshot(fname)
 
     if return_array:
