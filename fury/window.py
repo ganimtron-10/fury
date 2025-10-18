@@ -665,8 +665,6 @@ class ShowManager:
         if window_type == "default" or window_type == "glfw":
             self.window = Canvas(size=self._size, title=self._title)
         elif window_type == "qt":
-            if self._qt_app is None:
-                self._qt_app = get_app()
             self.window = QtCanvas(
                 size=self._size, title=self._title, parent=self._qt_parent
             )
@@ -883,6 +881,8 @@ class ShowManager:
             return
 
         if self._is_qt:
+            if self._qt_app is None:
+                self._qt_app = get_app()
             self._qt_app.exec()
         else:
             run()

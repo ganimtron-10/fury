@@ -32,10 +32,10 @@ PyQt6, have_py_qt6, _ = optional_package("PyQt6", trip_msg=qt_pckg_msg)
 PyQt5, have_py_qt5, _ = optional_package("PyQt5", trip_msg=qt_pckg_msg)
 
 if have_py_side6 or have_py_qt6 or have_py_qt5:
-    from rendercanvas.qt import RenderCanvas as QtRenderCanvas
+    from rendercanvas.qt import RenderCanvas as QtRenderCanvas, loop as QtLoop
 
     def get_app():
-        return loop._app
+        return QtLoop._app
 
 
 if have_py_side6:

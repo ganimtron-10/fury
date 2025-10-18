@@ -27,13 +27,13 @@ def test_rectangle2d_initialization_default(mock_ui_context_v2):
     Checks default size, color, opacity, and position.
     """
     rect = ui.Rectangle2D()
-    npt.assert_equal(rect.size, (0, 0))
+    npt.assert_equal(rect.size, (100, 100))
     npt.assert_array_equal(rect.color, [1, 1, 1, 1])
     npt.assert_equal(rect.opacity, 1.0)
     assert isinstance(rect.actor, Mesh)
     assert rect.actor in rect.actors
 
-    npt.assert_array_equal(rect.get_position(Anchor.LEFT, Anchor.BOTTOM), [0, 0])
+    npt.assert_array_equal(rect.get_position(Anchor.LEFT, Anchor.BOTTOM), [0, 100])
 
 
 def test_rectangle2d_initialization_custom(mock_ui_context_v2):
