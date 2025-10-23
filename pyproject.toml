@@ -48,7 +48,7 @@ dependencies = [
     "pillow>=10.4.0",
     "packaging>=23.0",
     "lazy_loader>=0.4",
-    "pygfx>=0.13.0",
+    "pygfx>=0.14.0",
     "glfw>=2.7.0",
 ]
 
@@ -117,6 +117,8 @@ filterwarnings = [
     "ignore:.*You do not have Matplotlib installed.*:UserWarning",
     "ignore:We'll no longer accept the way you call the.*function:UserWarning:.*doctest",
     "ignore:.*There is no current event loop.*:DeprecationWarning",
+    # This is due to the Qt deprecation warnings in RenderCanvas
+    "ignore:.*ApplicationAttribute.AA_EnableHighDpiScaling.*:DeprecationWarning"
 ]
 # addopts = "--cov --cov-report html --cov-report term-missing --cov-fail-under 95"
 

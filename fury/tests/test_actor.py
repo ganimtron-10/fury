@@ -4,6 +4,7 @@ from PIL import Image
 import numpy as np
 import numpy.testing as npt
 import pytest
+import rendercanvas.glfw
 
 from fury import actor, window
 from fury.io import load_image_texture
@@ -22,6 +23,13 @@ from fury.utils import (
 )
 
 _, have_numba, _ = optional_package("numba")
+
+
+def _do_nothing_patch(self):
+    pass
+
+
+rendercanvas.glfw.RenderCanvas._rc_close = _do_nothing_patch
 
 
 def random_png(width, height):
@@ -1054,8 +1062,6 @@ def test_streamtube():
     middle_pixel = img_array[img_array.shape[0] // 2, img_array.shape[1] // 2]
     r, g, b, a = middle_pixel
     assert r > g and r > b
-
-    scene.remove(tube_actor)
 
 
 def test_line_projection():

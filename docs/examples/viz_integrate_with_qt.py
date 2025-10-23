@@ -30,7 +30,6 @@ class Main(QtWidgets.QWidget):
             scene=self.scene,
             window_type="qt",
             title="FURY 2.0: Integrate Qt Example",
-            size=None,
             qt_app=app,
             qt_parent=self,
         )
