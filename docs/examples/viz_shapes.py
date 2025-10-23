@@ -65,13 +65,12 @@ rect.on_left_mouse_button_pressed = rect_left_button_pressed
 rect.on_left_mouse_button_dragged = rect_left_button_dragged
 
 
-def disk_left_button_pressed(event: PointerEvent):
+def disk_right_button_pressed(event: PointerEvent):
     """Changes the disk's color to a random RGB value on press."""
     disk.color = np.random.random([3])
-    print(disk.color)
 
 
-disk.on_left_mouse_button_pressed = disk_left_button_pressed
+disk.on_right_mouse_button_pressed = disk_right_button_pressed
 
 
 ###############################################################################
@@ -85,6 +84,5 @@ if __name__ == "__main__":
         scene=scene,
         size=current_size,
         title="FURY 2.0: Shapes Example",
-        use_old_ui=False,
     )
     show_manager.start()

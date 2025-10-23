@@ -401,21 +401,18 @@ def render_screens(renderer, screens):
     renderer.flush()
 
 
-def reposition_ui(screens, switch_ui_mode=False):
+def reposition_ui(screens):
     """Update the positions of all UI elements across multiple screens.
 
     Parameters
     ----------
     screens : list of Screen
         The list of Screen objects containing UI elements to reposition.
-    switch_ui_mode : bool, optional
-        Whether to switch the current position anchor to LEFT, BOTTOM or not.
     """
 
     for screen in screens:
         scene_root = screen.scene
         for child in scene_root.ui_elements:
-            child._update_ui_mode(switch_to_old_ui=switch_ui_mode)
             child._update_actors_position()
 
 
@@ -498,8 +495,6 @@ class ShowManager:
         An existing QtWidgets QApplication instance (if `window_type` is 'qt').
     qt_parent : QWidget
         An existing QWidget to embed the QtCanvas within (if `window_type` is 'qt').
-    use_old_ui : bool, optional
-        Whether to use old ui with default anchor as LEFT,BOTTOM.
     """
 
     def __init__(
@@ -518,7 +513,6 @@ class ShowManager:
         enable_events=True,
         qt_app=None,
         qt_parent=None,
-        use_old_ui=False,
     ):
         """Manage the rendering window, scenes, and interactions.
 
@@ -566,8 +560,6 @@ class ShowManager:
         qt_parent : QWidget, optional
             An existing QWidget to embed the QtCanvas within (if `window_type`
             is 'qt').
-        use_old_ui : bool, optional
-            Whether to use old ui with anchor as LEFT, BOTTOM or new with LEFT, TOP.
         """
         self._size = size
         self._title = title
@@ -575,9 +567,6 @@ class ShowManager:
         self._qt_app = qt_app
         self._qt_parent = qt_parent
         self._is_initial_resize = None
-        self._use_old_ui = use_old_ui
-        if use_old_ui:
-            UIContext.enable_v2_ui = False
         self._window_type = self._setup_window(window_type)
 
         if renderer is None:
@@ -713,20 +702,12 @@ class ShowManager:
         size : tuple
             The size (width, height) of the window in pixels.
         """
-        if self._is_initial_resize is None:
-            self._is_initial_resize = True
-
-        UIContext.set_canvas_size(size=size)
+        UIContext.canvas_size = size
         update_viewports(
             self.screens,
             calculate_screen_sizes(self._screen_config, self.renderer.logical_size),
         )
-        reposition_ui(
-            self.screens,
-            switch_ui_mode=(self._is_initial_resize and self._use_old_ui),
-        )
-        if self._is_initial_resize:
-            self._is_initial_resize = False
+        reposition_ui(self.screens)
         self.render()
 
     async def _handle_key_long_press(self, event):
