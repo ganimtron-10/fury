@@ -665,8 +665,6 @@ class ShowManager:
         if window_type == "default" or window_type == "glfw":
             self.window = Canvas(size=self._size, title=self._title)
         elif window_type == "qt":
-            if self._qt_app is None:
-                self._qt_app = get_app()
             self.window = QtCanvas(
                 size=self._size, title=self._title, parent=self._qt_parent
             )
@@ -877,12 +875,14 @@ class ShowManager:
             "true",
             "1",
         ]:
-            self.window.draw_frame()
+            self._draw_function()
             self.snapshot(f"{self._title}.png")
             self.window.close()
             return
 
         if self._is_qt:
+            if self._qt_app is None:
+                self._qt_app = get_app()
             self._qt_app.exec()
         else:
             run()
@@ -934,7 +934,7 @@ def snapshot(
         scene=scene, screen_config=screen_config, window_type="offscreen"
     )
     show_m.render()
-    show_m.window.draw_frame()
+    show_m.window.draw()
     arr = show_m.snapshot(fname)
 
     if return_array:
