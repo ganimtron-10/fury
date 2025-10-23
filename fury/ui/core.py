@@ -483,7 +483,9 @@ class Rectangle2D(UI):
     """
 
     @warn_on_args_to_kwargs()
-    def __init__(self, size, *, position=(0, 0), color=(1, 1, 1), opacity=1.0):
+    def __init__(
+        self, *, size=(100, 100), position=(0, 0), color=(1, 1, 1), opacity=1.0
+    ):
         """Initialize a rectangle.
 
         Parameters

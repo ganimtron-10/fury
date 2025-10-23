@@ -289,7 +289,7 @@ def test_show_manager_snapshot(tmpdir):
 
     show_m = ShowManager(window_type="offscreen")
     show_m.render()
-    show_m.window.draw_frame()
+    show_m.window.draw()
     arr = show_m.snapshot(str(fname))
 
     saved_arr = load_image(str(fname))
@@ -304,7 +304,7 @@ def test_show_manager_snapshot_multiple_screens(tmpdir):
     show_m = ShowManager(screen_config=[2], window_type="offscreen")  # Two screens
     fname = tmpdir.join("snapshot_multiple.png")
     show_m.render()
-    show_m.window.draw_frame()
+    show_m.window.draw()
     arr = show_m.snapshot(str(fname))
     saved_arr = load_image(str(fname))
     assert isinstance(arr, np.ndarray)

@@ -18,6 +18,9 @@ __all__ += [
     "get_info",
 ]
 
+gfx, _, _ = optional_package("pygfx", min_version="0.14.0")
+gfx_version = gfx.__version__
+
 
 def get_info(verbose=False):
     """Return dict describing the context of this package.
@@ -49,7 +52,7 @@ def get_info(verbose=False):
         "sys_platform": sys.platform,
         "numpy_version": numpy.__version__,
         "scipy_version": scipy.__version__,
-        # TODO: Add pygfx version if applicable
+        "pygfx_version": gfx_version,
     }
 
     if have_mpl:
