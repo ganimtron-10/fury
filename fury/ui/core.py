@@ -7,6 +7,7 @@ import numpy as np
 from fury.decorators import warn_on_args_to_kwargs
 from fury.geometry import buffer_to_geometry, create_mesh
 from fury.lib import (
+    EventType,
     plane_geometry,
 )
 from fury.material import (
@@ -313,10 +314,10 @@ class UI(object, metaclass=abc.ABCMeta):
         actor : Mesh
             The PyGfx mesh to which event handlers should be attached.
         """
-        actor.add_event_handler(self.mouse_button_down_callback, "pointer_down")
-        actor.add_event_handler(self.mouse_button_up_callback, "pointer_up")
-        actor.add_event_handler(self.mouse_move_callback, "pointer_move")
-        actor.add_event_handler(self.key_press_callback, "key_up")
+        actor.add_event_handler(self.mouse_button_down_callback, EventType.POINTER_DOWN)
+        actor.add_event_handler(self.mouse_button_up_callback, EventType.POINTER_UP)
+        actor.add_event_handler(self.mouse_move_callback, EventType.POINTER_DRAG)
+        actor.add_event_handler(self.key_press_callback, EventType.KEY_UP)
 
     def mouse_button_down_callback(self, event):
         """Handle mouse button press event.
@@ -332,7 +333,6 @@ class UI(object, metaclass=abc.ABCMeta):
             self.right_button_click_callback(event)
         elif event.button == 3:
             self.middle_button_click_callback(event)
-        event.cancel()
 
     def mouse_button_up_callback(self, event):
         """Handle mouse button release event.
@@ -348,7 +348,6 @@ class UI(object, metaclass=abc.ABCMeta):
             self.right_button_release_callback(event)
         elif event.button == 3:
             self.middle_button_release_callback(event)
-        event.cancel()
 
     def left_button_click_callback(self, event):
         """Handle left mouse button press event.

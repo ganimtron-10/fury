@@ -22,10 +22,12 @@ from fury.lib import (
     Canvas,
     Controller,
     DirectionalLight,
+    EventType,
     Group as GfxGroup,  # type: ignore
     JupyterCanvas,
     OffscreenCanvas,
     PerspectiveCamera,
+    PointerEvent,
     QtCanvas,
     Renderer,
     Scene as GfxScene,  # type: ignore
@@ -568,6 +570,8 @@ class ShowManager:
         self._qt_parent = qt_parent
         self._is_initial_resize = None
         self._window_type = self._setup_window(window_type)
+        self._is_dragging = False
+        self._drag_target = None
 
         if renderer is None:
             renderer = Renderer(self.window)
@@ -577,7 +581,13 @@ class ShowManager:
             lambda event: self._resize(size=(event.width, event.height)), "resize"
         )
         self.renderer.add_event_handler(
-            self._set_key_long_press_event, "key_down", "key_up"
+            self._set_key_long_press_event, EventType.KEY_DOWN, EventType.KEY_UP
+        )
+        self.renderer.add_event_handler(
+            self._register_drag,
+            EventType.POINTER_DOWN,
+            EventType.POINTER_UP,
+            EventType.POINTER_MOVE,
         )
 
         self._total_screens = 0
@@ -593,6 +603,39 @@ class ShowManager:
         self.enable_events = enable_events
         self._key_long_press = None
         self._resize(self._size)
+
+    def _handle_drag(self, event):
+        """Handle drag events for pointer interactions.
+
+        Parameters
+        ----------
+        event : PointerEvent
+            The PyGfx pointer event object.
+        """
+        if self._drag_target is None:
+            self._drag_target = event.target
+        drag_event = PointerEvent(
+            x=event.x, y=event.y, type=EventType.POINTER_DRAG, target=self._drag_target
+        )
+        self.renderer.dispatch_event(drag_event)
+
+    def _register_drag(self, event):
+        """Register drag events for pointer interactions.
+
+        Parameters
+        ----------
+        event : PointerEvent
+            The PyGfx pointer event object.
+        """
+
+        if event.type == EventType.POINTER_DOWN:
+            self._is_dragging = True
+            self._drag_target = event.target
+        elif event.type == EventType.POINTER_UP:
+            self._is_dragging = False
+            self._drag_target = None
+        elif event.type == EventType.POINTER_MOVE and self._is_dragging:
+            self._handle_drag(event)
 
     def _screen_setup(self, scene, camera, controller, camera_light):
         """Prepare scene, camera, controller, and light lists for screen creation.
