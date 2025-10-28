@@ -18,6 +18,24 @@ class Panel2D(UI):
     alignment : [left, right]
         Alignment of the panel with respect to the overall screen.
 
+    Parameters
+    ----------
+    size : (int, int)
+        Size (width, height) in pixels of the panel.
+    position : (float, float)
+        Absolute coordinates (x, y) of the lower-left corner of the panel.
+    color : (float, float, float)
+        Must take values in [0, 1].
+    opacity : float
+        Must take values in [0, 1].
+    align : [left, right]
+        Alignment of the panel with respect to the overall screen.
+    border_color : (float, float, float), optional
+        RGB color of the border. Must take values in [0, 1].
+    border_width : float, optional
+        Width of the border.
+    has_border : bool, optional
+        If the panel should have borders.
     """
 
     @warn_on_args_to_kwargs()
@@ -33,7 +51,7 @@ class Panel2D(UI):
         border_width=0,
         has_border=False,
     ):
-        """Init class instance.
+        """Initialize class instance.
 
         Parameters
         ----------
@@ -47,14 +65,20 @@ class Panel2D(UI):
             Must take values in [0, 1].
         align : [left, right]
             Alignment of the panel with respect to the overall screen.
-        border_color: (float, float, float), optional
-            Must take values in [0, 1].
-        border_width: float, optional
-            width of the border
-        has_border: bool, optional
+        border_color : (float, float, float), optional
+            RGB color of the border. Must take values in [0, 1].
+        border_width : float, optional
+            Width of the border.
+        has_border : bool, optional
             If the panel should have borders.
-
         """
+        self.SIDES = ["left", "right", "top", "bottom"]
+        self.BORDER_COORDS = {
+            "left": (0.0, 0.0),
+            "right": (1.0, 0.0),
+            "top": (0.0, 0.0),
+            "bottom": (0.0, 1.0),
+        }
         self.has_border = has_border
         self._border_color = border_color
         self._border_width = border_width
@@ -66,10 +90,10 @@ class Panel2D(UI):
         self._drag_offset = None
 
     def _setup(self):
-        """Setup this UI component.
+        """Set up this UI component.
 
-        Create the background (Rectangle2D) of the panel.
-        Create the borders (Rectangle2D) of the panel.
+        Create the background (Rectangle2D) of the panel and initialize the
+        border elements (Rectangle2D).
         """
         self._elements = []
         self.element_offsets = []
@@ -83,13 +107,6 @@ class Panel2D(UI):
                 "bottom": Rectangle2D(size=(1, 1)),
             }
 
-            self.border_coords = {
-                "left": (0.0, 0.0),
-                "right": (1.0, 0.0),
-                "top": (0.0, 0.0),
-                "bottom": (0.0, 1.0),
-            }
-
             for key in self.borders.keys():
                 self.borders[key].color = self._border_color
                 self.borders[
@@ -100,7 +117,7 @@ class Panel2D(UI):
                     key
                 ].on_left_mouse_button_dragged = self.left_button_dragged
                 self.add_element(
-                    self.borders[key], self.border_coords[key], _is_internal=True
+                    self.borders[key], self.BORDER_COORDS[key], _is_internal=True
                 )
 
         self.add_element(self.background, (0, 0), _is_internal=True)
@@ -110,7 +127,13 @@ class Panel2D(UI):
         self.background.on_left_mouse_button_dragged = self.left_button_dragged
 
     def _get_actors(self):
-        """Get the actors composing this UI component."""
+        """Get actors composing this UI component.
+
+        Returns
+        -------
+        list
+            List of actors composing this UI component.
+        """
         actors = []
 
         actors.extend(self.background.actors)
@@ -120,6 +143,13 @@ class Panel2D(UI):
         return actors
 
     def _get_size(self):
+        """Get the actual size of the panel.
+
+        Returns
+        -------
+        (float, float)
+            The (width, height) size of the panel.
+        """
         return self.background.size
 
     def resize(self, size):
@@ -129,7 +159,6 @@ class Panel2D(UI):
         ----------
         size : (float, float)
             Panel size (width, height) in pixels.
-
         """
         self.background.resize(size)
 
@@ -167,23 +196,59 @@ class Panel2D(UI):
             element.set_position(coords + offset)
 
     def set_visibility(self, visibility):
+        """Set visibility of this UI component.
+
+        Parameters
+        ----------
+        visibility : bool
+            If True, the panel and its elements will be visible. If False, it will
+            be hidden.
+        """
         for element in self._elements:
             element.set_visibility(visibility)
 
     @property
     def color(self):
+        """Get the background color of the panel.
+
+        Returns
+        -------
+        (float, float, float)
+            RGB color of the panel background.
+        """
         return self.background.color
 
     @color.setter
     def color(self, color):
+        """Set the background color of the panel.
+
+        Parameters
+        ----------
+        color : (float, float, float)
+            New RGB color of the panel background. Must take values in [0, 1].
+        """
         self.background.color = color
 
     @property
     def opacity(self):
+        """Get the opacity of the panel.
+
+        Returns
+        -------
+        float
+            Opacity value.
+        """
         return self.background.opacity
 
     @opacity.setter
     def opacity(self, opacity):
+        """Set the opacity of the panel.
+
+        Parameters
+        ----------
+        opacity : float
+            New opacity value.
+        """
         self.background.opacity = opacity
 
     @warn_on_args_to_kwargs()
@@ -202,7 +267,17 @@ class Panel2D(UI):
             between [0,1].
             If int, pixels coordinates are assumed and it must fit within the
             panel's size.
+        anchor : str, optional
+            Supported anchors are 'position' (top-left) and 'center'.
+        _is_internal : bool, optional
+            Flag used to distinguish between user-added elements
+            and internal elements added by the Panel itself.
 
+        Raises
+        ------
+        ValueError
+            If coordinates are normalized but outside the [0,1] range, or if
+            an unknown anchor is provided.
         """
         coords = np.array(coords)
 
@@ -223,7 +298,8 @@ class Panel2D(UI):
                 self.get_position() + coords,
             )
         else:
-            msg = "Unknown anchor {}. Supported anchors are 'position' and 'center'."
+            msg = f"Unknown anchor {anchor}. Supported anchors are 'position' and \
+                'center'."
             raise ValueError(msg)
 
         self._elements.append(element)
@@ -240,6 +316,10 @@ class Panel2D(UI):
         element : UI
             The UI item to be removed.
 
+        Raises
+        ------
+        ValueError
+            If the element is not found in the panel's elements list.
         """
         idx = self._elements.index(element)
         del self._elements[idx]
@@ -259,19 +339,40 @@ class Panel2D(UI):
             New coordinates.
             If float, normalized coordinates are assumed and they must be
             between [0,1].
-            If int, pixels coordinates are assumed and it must fit within the
+            If int, pixel coordinates are assumed and it must fit within the
             panel's size.
+        anchor : str, optional
+            Supported anchors are 'position' (top-left) and 'center'.
 
+        Raises
+        ------
+        ValueError
+            If coordinates are normalized but outside the [0,1] range, or if
+            an unknown anchor is provided.
         """
         self.remove_element(element)
         self.add_element(element, coords, anchor=anchor)
 
     def left_button_pressed(self, event):
+        """Handle left mouse button press event for panel.
+
+        Parameters
+        ----------
+        event : PointerEvent
+            The PyGfx pointer event object.
+        """
         click_pos = np.array([event.x, event.y])
         self._drag_offset = click_pos - self.get_position()
         event.cancel()  # Stop propagating the event.
 
     def left_button_dragged(self, event):
+        """Handle left mouse button drag event for panel movement.
+
+        Parameters
+        ----------
+        event : PointerEvent
+            The PyGfx pointer event object.
+        """
         if self._drag_offset is not None:
             click_position = np.array([event.x, event.y])
             new_position = click_position - self._drag_offset
@@ -285,6 +386,10 @@ class Panel2D(UI):
         window_size_change : (int, int)
             New window size (width, height) in pixels.
 
+        Raises
+        ------
+        ValueError
+            If alignment is not 'left' or 'right'.
         """
         if self.alignment == "left":
             pass
@@ -295,31 +400,32 @@ class Panel2D(UI):
             raise ValueError(msg)
 
     def update_border_coords(self):
-        """Update the coordinates of the borders"""
-        self.border_coords = {
-            "left": (0.0, 0.0),
-            "right": (1.0, 0.0),
-            "top": (0.0, 1.0),
-            "bottom": (0.0, 0.0),
-        }
+        """Update the coordinates of the borders."""
 
         for key in self.borders.keys():
-            self.update_element(self.borders[key], self.border_coords[key])
+            self.update_element(self.borders[key], self.BORDER_COORDS[key])
 
     @property
     def border_color(self):
-        sides = ["left", "right", "top", "bottom"]
-        return [self.borders[side].color for side in sides]
+        """Get the current color of all four borders.
+
+        Returns
+        -------
+        list
+            A list containing the color (RGB tuple) of the left, right, top, and bottom
+            borders, respectively.
+        """
+
+        return [self.borders[side].color for side in self.SIDES]
 
     @border_color.setter
     def border_color(self, side_color):
-        """Set the color of a specific border
+        """Set the color of a specific border.
 
         Parameters
         ----------
-        side_color: Iterable
-            Iterable to pack side, color values
-
+        side_color : Iterable
+            Iterable `[side, color]` containing the side (str) and color (RGB tuple).
         """
         side, color = side_color
 
@@ -330,10 +436,18 @@ class Panel2D(UI):
 
     @property
     def border_width(self):
-        sides = ["left", "right", "top", "bottom"]
+        """Get the current width/height of the borders.
+
+        Returns
+        -------
+        list
+            A list containing the width (for left/right) and height (for top/bottom)
+            of the borders.
+        """
+
         widths = []
 
-        for side in sides:
+        for side in self.SIDES:
             if side in ["left", "right"]:
                 widths.append(self.borders[side].width)
             elif side in ["top", "bottom"]:
@@ -344,13 +458,12 @@ class Panel2D(UI):
 
     @border_width.setter
     def border_width(self, side_width):
-        """Set the border width of a specific border
+        """Set the width of a specific border.
 
         Parameters
         ----------
-        side_width: Iterable
-            Iterable to pack side, width values
-
+        side_width : Iterable
+            Iterable `[side, width]` containing the side (str) and the width (float).
         """
         side, border_width = side_width
 
