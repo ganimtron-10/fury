@@ -14,7 +14,7 @@ from fury.material import (
 )
 from fury.primitive import prim_ring
 from fury.ui import UIContext
-from fury.ui.helpers import Anchor, get_anchor_to_multiplier
+from fury.ui.helpers import UI_Z_RANGE, Anchor, get_anchor_to_multiplier
 
 
 class UI(object, metaclass=abc.ABCMeta):
@@ -83,9 +83,13 @@ class UI(object, metaclass=abc.ABCMeta):
     y_anchor : str, optional
         Define the vertical anchor point for `position`. Can be "BOTTOM",
         "CENTER", or "TOP".
+    z_order : int, optional
+        The initial Z-order of the UI component.
     """
 
-    def __init__(self, *, position=(0, 0), x_anchor=Anchor.LEFT, y_anchor=Anchor.TOP):
+    def __init__(
+        self, *, position=(0, 0), x_anchor=Anchor.LEFT, y_anchor=Anchor.TOP, z_order=0
+    ):
         """Init scene.
 
         Parameters
@@ -100,11 +104,14 @@ class UI(object, metaclass=abc.ABCMeta):
         y_anchor : str, optional
             Define the vertical anchor point for `position`. Can be "BOTTOM",
             "CENTER", or "TOP".
+        z_order : int, optional
+            The initial Z-order of the UI component.
         """
         self.use_y_down = True
         self._position = np.array([0, 0])
         self._children = []
         self._anchors = [x_anchor, y_anchor]
+        self.z_order = z_order
 
         self._setup()  # Setup needed actors and sub UI components.
         self.set_position(position, x_anchor, y_anchor)
@@ -181,7 +188,7 @@ class UI(object, metaclass=abc.ABCMeta):
                 f"y_anchor should be one of these {', '.join([Anchor.TOP, Anchor.CENTER, Anchor.BOTTOM])} but received {y_anchor}"  # noqa: E501
             )
 
-    def set_actor_position(self, actor, center_position):
+    def set_actor_position(self, actor, center_position, z_order):
         """Set the position of the PyGfx actor.
 
         Parameters
@@ -191,6 +198,8 @@ class UI(object, metaclass=abc.ABCMeta):
         center_position : tuple or ndarray
             A 2-element array `(x, y)` representing the desired center
             position of the actor.
+        z_order : int
+            The Z-order of the UI component.
         """
         canvas_size = UIContext.canvas_size
 
@@ -200,6 +209,7 @@ class UI(object, metaclass=abc.ABCMeta):
             if self.use_y_down
             else center_position[1]
         )
+        actor.local.z = np.interp(z_order, UIContext.z_order_bounds, UI_Z_RANGE)
 
     def set_position(self, coords, x_anchor=Anchor.LEFT, y_anchor=Anchor.TOP):
         """Position this UI component according to the specified anchor.
@@ -264,6 +274,37 @@ class UI(object, metaclass=abc.ABCMeta):
                 ),
             ]
         )
+
+    @property
+    def z_order(self):
+        """Get the Z-order of this UI element.
+
+        Returns
+        -------
+        int
+            Z-order of the UI.
+        """
+        return self._z_order
+
+    @z_order.setter
+    def z_order(self, z_order):
+        """Set the Z-order of this UI element.
+
+        Parameters
+        ----------
+        z_order : int
+            The new integer Z-order value.
+
+        Raises
+        ------
+        ValueError
+            If the provided `z_order` is not an integer.
+        """
+        if not isinstance(z_order, int):
+            raise ValueError("Z-order must be an integer.")
+
+        self._z_order = z_order
+        UIContext.z_order_bounds = z_order
 
     @abc.abstractmethod
     def _update_actors_position(self):
@@ -599,7 +640,7 @@ class Rectangle2D(UI):
         """Set the position of the internal actor."""
         position = self.get_position(x_anchor=Anchor.CENTER, y_anchor=Anchor.CENTER)
 
-        self.set_actor_position(self.actor, position)
+        self.set_actor_position(self.actor, position, self.z_order)
 
     @property
     def color(self):
@@ -741,7 +782,7 @@ class Disk2D(UI):
         """Set the position of the internal actor."""
         position = self.get_position(x_anchor=Anchor.CENTER, y_anchor=Anchor.CENTER)
 
-        self.set_actor_position(self.actor, position)
+        self.set_actor_position(self.actor, position, self.z_order)
 
     @property
     def color(self):

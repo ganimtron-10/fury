@@ -30,7 +30,7 @@ panel = Panel2D(size=(300, 300), color=(0.2, 0.2, 0.2), has_border=True, border_
 # Let's add some simple shapes to the panel.
 
 rect = Rectangle2D(size=(50, 50), color=(1, 0, 1))
-disk = Disk2D(outer_radius=100, color=(1, 1, 0))
+disk = Disk2D(outer_radius=50, color=(1, 1, 0))
 
 panel.add_element(rect, (200, 200))
 panel.add_element(disk, (0.5, 0.5), anchor="center")

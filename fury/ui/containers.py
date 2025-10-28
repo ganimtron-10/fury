@@ -92,9 +92,6 @@ class Panel2D(UI):
 
             for key in self.borders.keys():
                 self.borders[key].color = self._border_color
-                self.add_element(self.borders[key], self.border_coords[key])
-
-            for key in self.borders.keys():
                 self.borders[
                     key
                 ].on_left_mouse_button_pressed = self.left_button_pressed
@@ -102,8 +99,11 @@ class Panel2D(UI):
                 self.borders[
                     key
                 ].on_left_mouse_button_dragged = self.left_button_dragged
+                self.add_element(
+                    self.borders[key], self.border_coords[key], _is_internal=True
+                )
 
-        self.add_element(self.background, (0, 0))
+        self.add_element(self.background, (0, 0), _is_internal=True)
 
         # Add default events listener for this UI component.
         self.background.on_left_mouse_button_pressed = self.left_button_pressed
@@ -111,11 +111,11 @@ class Panel2D(UI):
 
     def _get_actors(self):
         """Get the actors composing this UI component."""
-        # Assuming everything to be Panel's childrens including rectangle and borders
         actors = []
 
-        # for element in self._elements:
-        #     actors.extend(element.actors)
+        actors.extend(self.background.actors)
+        for border in self.borders.values():
+            actors.extend(border.actors)
 
         return actors
 
@@ -155,8 +155,15 @@ class Panel2D(UI):
     def _update_actors_position(self):
         """Update the position of the internal actors."""
         coords = self.get_position()
-        self.background.set_position(coords)
+
         for element, offset in self.element_offsets:
+            if element == self.background:
+                element.z_order = self.z_order
+            elif element in self.borders.values():
+                element.z_order = self.z_order + 1
+            else:
+                element.z_order = self.z_order + 2
+
             element.set_position(coords + offset)
 
     def set_visibility(self, visibility):
@@ -180,7 +187,7 @@ class Panel2D(UI):
         self.background.opacity = opacity
 
     @warn_on_args_to_kwargs()
-    def add_element(self, element, coords, *, anchor="position"):
+    def add_element(self, element, coords, *, anchor="position", _is_internal=False):
         """Add a UI component to the panel.
 
         The coordinates represent an offset from the lower left corner of the
@@ -220,7 +227,8 @@ class Panel2D(UI):
             raise ValueError(msg)
 
         self._elements.append(element)
-        self._children.append(element)
+        if not _is_internal:
+            self._children.append(element)
         offset = element.get_position() - self.get_position()
         self.element_offsets.append((element, offset))
 
@@ -236,7 +244,8 @@ class Panel2D(UI):
         idx = self._elements.index(element)
         del self._elements[idx]
         del self.element_offsets[idx]
-        self._children.remove(element)
+        if element in self._children:
+            self._children.remove(element)
 
     @warn_on_args_to_kwargs()
     def update_element(self, element, coords, *, anchor="position"):
