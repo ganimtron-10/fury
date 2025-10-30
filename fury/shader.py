@@ -479,7 +479,6 @@ class BillboardShader(MeshShader):
             The mesh object containing billboard data.
         """
         super().__init__(wobject)
-        # Billboard-specific parameters can be set here
         if hasattr(wobject, "billboard_count"):
             self["billboard_count"] = wobject.billboard_count
         else:

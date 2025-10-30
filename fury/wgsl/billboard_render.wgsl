@@ -36,8 +36,8 @@ fn vs_main(in: VertexInput) -> Varyings {
     let cam_right = vec3<f32>(u_stdinfo.cam_transform_inv[0].xyz);
     let cam_up = vec3<f32>(u_stdinfo.cam_transform_inv[1].xyz);
 
-    // Temporary: fixed size until texcoords binding issue resolved
-    let size = vec2<f32>(1.0, 1.0);
+    let normal_data = load_s_normals(billboard_index * 6);
+    let size = vec2<f32>(normal_data.x, normal_data.y);
 
     // Calculate billboard vertex position in world space
     let billboard_offset = local_pos.x * cam_right * size.x + local_pos.y * cam_up * size.y;

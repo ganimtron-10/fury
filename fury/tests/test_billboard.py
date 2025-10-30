@@ -31,7 +31,7 @@ def test_basic_billboard(interactive: bool = False):
     geom = bb.geometry
     npt.assert_equal(len(geom.positions.data), 18)
     npt.assert_equal(len(geom.colors.data), 18)
-    npt.assert_equal(len(geom.texcoords.data), 18)
+    npt.assert_equal(len(geom.normals.data), 18)  # Sizes stored in normals
     npt.assert_equal(len(geom.indices.data), 18)
 
     # Check material opacity
@@ -41,7 +41,7 @@ def test_basic_billboard(interactive: bool = False):
     bb_scalar = actor.billboard(centers, colors=colors, sizes=0.4)
     geom_scalar = bb_scalar.geometry
     npt.assert_equal(len(geom_scalar.positions.data), 18)
-    npt.assert_equal(len(geom_scalar.texcoords.data), 18)
+    npt.assert_equal(len(geom_scalar.normals.data), 18)  # Sizes stored in normals
 
     # Test basic rendering
     scene = window.Scene()
@@ -53,10 +53,11 @@ def test_basic_billboard(interactive: bool = False):
     scene.add(bb_render)
 
     if interactive:  # pragma: no cover
-        window.show(scene)
+        window.show([bb_render])
 
     # Test snapshot creation
-    tmp_file = tempfile.mktemp(suffix="_bb.png")
+    tmp_fd, tmp_file = tempfile.mkstemp(suffix="_bb.png")
+    os.close(tmp_fd)
     arr = window.snapshot(scene=scene, fname=tmp_file, return_array=True)
 
     # Basic checks: array exists and has expected shape
@@ -84,14 +85,18 @@ def test_billboard_camera_facing():
     scene.add(bb)
 
     # Test from default camera position
-    tmp_file1 = tempfile.mktemp(suffix="_bb_front.png")
+    tmp_fd1, tmp_file1 = tempfile.mkstemp(suffix="_bb_front.png")
+    os.close(tmp_fd1)
     arr1 = window.snapshot(scene=scene, fname=tmp_file1, return_array=True)
 
     # Billboard should be visible from front view
     data1 = np.asarray(arr1)
-    green_pixels1 = np.sum(data1[..., 1] > data1[..., 0]) + np.sum(
-        data1[..., 1] > data1[..., 2]
+    green_mask = (
+        (data1[..., 1] > 50)
+        & (data1[..., 1] > data1[..., 0])
+        & (data1[..., 1] > data1[..., 2])
     )
+    green_pixels1 = np.sum(green_mask)
 
     # Move camera to side (if we had camera controls, but we test basic visibility)
     # Since we can't move camera easily, just test that billboard is rendered
@@ -105,6 +110,24 @@ def test_billboard_camera_facing():
             os.remove(tmp_file)
 
 
+def test_rectangular_billboards():
+    """Test that billboards support rectangular aspect ratios."""
+    centers = np.array([[0, 0, 0], [3, 0, 0], [6, 0, 0]])
+    colors = np.array([[1, 0, 0], [0, 1, 0], [0, 0, 1]])
+    sizes = np.array([[7.0, 1.0], [1.0, 1.0], [1.0, 3.0]])
+
+    bb = actor.billboard(centers=centers, colors=colors, sizes=sizes)
+
+    npt.assert_equal(bb.billboard_count, 3)
+
+    geom = bb.geometry
+    normals = geom.normals.data
+
+    npt.assert_allclose(normals[0, :2], [7.0, 1.0], rtol=1e-5)
+    npt.assert_allclose(normals[6, :2], [1.0, 1.0], rtol=1e-5)
+    npt.assert_allclose(normals[12, :2], [1.0, 3.0], rtol=1e-5)
+
+
 def _assert_red_visible(image):
     """Check if red pixels exist in image."""
     data = np.asarray(image)
@@ -112,6 +135,6 @@ def _assert_red_visible(image):
         raise AssertionError("Invalid image format")
 
     red = data[..., 0]
-    has_red = np.any(red > 0)
+    has_red = np.any(red > 50)
     if not has_red:
-        raise AssertionError("No red pixels found")
+        raise AssertionError("No visible red pixels found in rendered billboard")
