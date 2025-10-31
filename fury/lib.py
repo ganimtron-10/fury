@@ -33,6 +33,12 @@ jupyter_rfb, have_jupyter_rfb, _ = optional_package(
 if have_jupyter_rfb:
     from rendercanvas.jupyter import RenderCanvas as JupyterWgpuCanvas
 
+IPython, have_ipython, _ = optional_package("IPython")
+if have_ipython:
+    from IPython.display import display as display_jupyter_widget
+else:
+    display_jupyter_widget = IPython
+
 qt_pckg_msg = (
     "You do not have any qt package installed. The qt window will not work for "
     "you. Please install or upgrade any of PySide6, PyQt6, PyQt5, PySide2 "
@@ -145,7 +151,6 @@ Clock = gfx.Clock
 Stats = gfx.Stats
 
 plane_geometry = gfx.plane_geometry
-
 if have_jupyter_rfb:
     JupyterCanvas = JupyterWgpuCanvas
 else:
