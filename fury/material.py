@@ -90,6 +90,8 @@ def _create_mesh_material(
     mode="vertex",
     flat_shading=True,
     texture=None,
+    wireframe=False,
+    wireframe_thickness=-1.0,
 ):
     """Create a mesh material.
 
@@ -113,6 +115,10 @@ def _create_mesh_material(
         Whether to use flat shading (True) or smooth shading (False).
     texture : Texture or TextureMap, optional
         The texture map specifying the color for each texture coordinate.
+    wireframe : bool, optional
+        Whether to render the mesh as a wireframe.
+    wireframe_thickness : float, optional
+        The thickness of the wireframe lines.
 
     Returns
     -------
@@ -134,6 +140,8 @@ def _create_mesh_material(
         "opacity": opacity,
         "flat_shading": flat_shading,
         "map": texture,
+        "wireframe": wireframe,
+        "wireframe_thickness": wireframe_thickness,
     }
 
     if material == "phong":
