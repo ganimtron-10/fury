@@ -37,6 +37,8 @@ def sphere(
     material="phong",
     enable_picking=True,
     smooth=True,
+    wireframe=False,
+    wireframe_thickness=1.0,
 ):
     """Create one or many spheres with different colors and radii.
 
@@ -63,6 +65,10 @@ def sphere(
         Whether the spheres should be pickable in a 3D scene.
     smooth : bool, optional
         Whether to create a smooth sphere or a faceted sphere.
+    wireframe : bool, optional
+        Whether to render the mesh as a wireframe.
+    wireframe_thickness : float, optional
+        The thickness of the wireframe lines.
 
     Returns
     -------
@@ -99,6 +105,8 @@ def sphere(
         material=material,
         smooth=smooth,
         enable_picking=enable_picking,
+        wireframe=wireframe,
+        wireframe_thickness=wireframe_thickness,
     )
 
 
@@ -114,6 +122,8 @@ def ellipsoid(
     material="phong",
     enable_picking=True,
     smooth=True,
+    wireframe=False,
+    wireframe_thickness=1.0,
 ):
     """
     Create ellipsoid actor(s) with specified orientation and scaling.
@@ -146,6 +156,10 @@ def ellipsoid(
         Allow picking of the ellipsoids in a 3D scene.
     smooth : bool, optional
         Whether to create a smooth ellipsoid or a faceted ellipsoid.
+    wireframe : bool, optional
+        Whether to render the mesh as a wireframe.
+    wireframe_thickness : float, optional
+        The thickness of the wireframe lines.
 
     Returns
     -------
@@ -231,6 +245,8 @@ def ellipsoid(
         smooth=smooth,
         enable_picking=enable_picking,
         repeat_primitive=False,
+        wireframe=wireframe,
+        wireframe_thickness=wireframe_thickness,
     )
 
 
@@ -247,6 +263,8 @@ def cylinder(
     opacity=None,
     material="phong",
     enable_picking=True,
+    wireframe=False,
+    wireframe_thickness=1.0,
 ):
     """Create one or many cylinders with different features.
 
@@ -280,6 +298,10 @@ def cylinder(
         The material type for the cylinders. Options are 'phong' and 'basic'.
     enable_picking : bool, optional
         Whether the cylinders should be pickable in a 3D scene.
+    wireframe : bool, optional
+        Whether to render the mesh as a wireframe.
+    wireframe_thickness : float, optional
+        The thickness of the wireframe lines.
 
     Returns
     -------
@@ -313,6 +335,8 @@ def cylinder(
         opacity=opacity,
         material=material,
         enable_picking=enable_picking,
+        wireframe=wireframe,
+        wireframe_thickness=wireframe_thickness,
     )
 
 
@@ -328,6 +352,8 @@ def cone(
     opacity=None,
     material="phong",
     enable_picking=True,
+    wireframe=False,
+    wireframe_thickness=1.0,
 ):
     """Create one or many cones with different features.
 
@@ -358,6 +384,10 @@ def cone(
         The material type for the cones. Options are 'phong' and 'basic'.
     enable_picking : bool, optional
         Whether the cones should be pickable in a 3D scene.
+    wireframe : bool, optional
+        Whether to render the mesh as a wireframe.
+    wireframe_thickness : float, optional
+        The thickness of the wireframe lines.
 
     Returns
     -------
@@ -389,6 +419,8 @@ def cone(
         opacity=opacity,
         material=material,
         enable_picking=enable_picking,
+        wireframe=wireframe,
+        wireframe_thickness=wireframe_thickness,
     )
 
 
