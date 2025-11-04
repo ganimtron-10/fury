@@ -33,7 +33,7 @@ from fury.window import (
 @pytest.fixture
 def sample_actor():
     "Fixture to provide a simple actor."
-    actor = sphere(np.zeros((1, 3)))
+    actor = sphere(np.zeros((1, 3)), material="basic")
     return actor
 
 
@@ -291,11 +291,14 @@ def test_show_manager_update_camera(sample_actor):
     assert show_m.screens[0].camera.height != 800
 
 
-def test_show_manager_snapshot(tmpdir):
+def test_show_manager_snapshot(tmpdir, sample_actor):
     """Test taking a snapshot of the scene."""
     fname = tmpdir.join("snapshot.png")
 
-    show_m = ShowManager(window_type="offscreen")
+    scene = Scene()
+    scene.add(sample_actor)
+
+    show_m = ShowManager(scene=scene, window_type="offscreen")
     show_m.render()
     show_m.window.draw()
     arr = show_m.snapshot(str(fname))
@@ -306,18 +309,33 @@ def test_show_manager_snapshot(tmpdir):
     assert arr.shape[2] == 4  # RGBA image
     np.testing.assert_equal(arr, saved_arr)
 
+    report = analyze_snapshot(str(fname), colors=[(255, 0, 0)])
+    assert report.colors_found == [True]
+    assert report.objects == 1
 
-def test_show_manager_snapshot_multiple_screens(tmpdir):
+
+def test_show_manager_snapshot_multiple_screens(tmpdir, sample_actor):
     """Test taking a snapshot with multiple screens."""
-    show_m = ShowManager(screen_config=[2], window_type="offscreen")  # Two screens
     fname = tmpdir.join("snapshot_multiple.png")
+
+    scene = Scene()
+    scene.add(sample_actor)
+
+    show_m = ShowManager(
+        scene=scene, screen_config=[2], window_type="offscreen"
+    )  # Two screens
     show_m.render()
     show_m.window.draw()
     arr = show_m.snapshot(str(fname))
     saved_arr = load_image(str(fname))
+
     assert isinstance(arr, np.ndarray)
     assert arr.shape[2] == 4  # RGBA image
     np.testing.assert_equal(arr, saved_arr)
+
+    report = analyze_snapshot(str(fname), colors=[(255, 0, 0)])
+    assert report.colors_found == [True]
+    assert report.objects == 2
 
 
 def test_show_manager_invalid_window_type():
