@@ -9,6 +9,7 @@ multiple screens.
 import asyncio
 from dataclasses import dataclass
 from functools import reduce
+import logging
 import os
 
 from PIL.Image import fromarray as image_from_array
@@ -32,7 +33,9 @@ from fury.lib import (
     ScreenCoordsCamera,
     TrackballController,
     Viewport,
+    call_later,
     get_app,
+    qcall_later,
     run,
 )
 from fury.ui import UI, UIContext
@@ -589,6 +592,7 @@ class ShowManager:
             self.screens,
             calculate_screen_sizes(self._screen_config, self.renderer.logical_size),
         )
+        self._callbacks = {}
 
         self.enable_events = enable_events
         self._key_long_press = None
@@ -738,6 +742,80 @@ class ShowManager:
             self._key_long_press.cancel()
             self._key_long_press = None
 
+    def _on_repeat_callback(self, func, time, name, *args):
+        """Internal method to handle the timing and execution of callbacks.
+
+        Parameters
+        ----------
+        func : callable
+            The function to be called.
+        time : float
+            The time interval in seconds after which the function is called.
+        name : str
+            A unique name for the callback.
+        *args : tuple
+            Additional arguments to pass to the function.
+        """
+        args = (func, time, name, *args)
+
+        if name not in self._callbacks:
+            return
+
+        if self._is_qt:
+            qcall_later(time, self._on_repeat_callback, *args)
+        else:
+            call_later(time, self._on_repeat_callback, *args)
+        func(*args[3:])
+
+    def register_callback(self, func, time, repeat, name, *args):
+        """Register a callback function to be called after a time interval.
+
+        Parameters
+        ----------
+        func : callable
+            The function to be called.
+        time : float
+            The time interval in seconds after which the function is called.
+        repeat : bool
+            If True, the function is called repeatedly every `time` seconds.
+            If False, it is called only once.
+        name : str
+            A unique name for the callback.
+        *args : tuple
+            Additional arguments to pass to the function.
+        """
+        if repeat:
+            if name in self._callbacks:
+                logging.warning(
+                    f"Callback with name '{name}' is already registered."
+                    "Please use a different name."
+                )
+                return
+
+            self._callbacks[name] = (func, time, repeat, args)
+
+            args = (func, time, name, *args)
+            if self._is_qt:
+                qcall_later(time, self._on_repeat_callback, *args)
+            else:
+                call_later(time, self._on_repeat_callback, *args)
+        else:
+            if self._is_qt:
+                qcall_later(time, func, *args)
+            else:
+                call_later(time, func, *args)
+
+    def cancel_callback(self, name):
+        """Cancel a registered callback by its name.
+
+        Parameters
+        ----------
+        name : str
+            The unique name of the callback to cancel.
+        """
+        if name in self._callbacks:
+            del self._callbacks[name]
+
     @property
     def app(self):
         """Get the associated QApplication instance, if any.
@@ -798,6 +876,18 @@ class ShowManager:
         tuple
             The current (width, height) of the window in logical pixels."""
         return self._size
+
+    @property
+    def callbacks(self):
+        """Get the registered callbacks.
+
+        This only returns the callbacks that are set to repeat.
+
+        Returns
+        -------
+        dict
+            A dictionary of registered callbacks with their names as keys."""
+        return self._callbacks
 
     def set_enable_events(self, value):
         """Enable or disable mouse and keyboard interactions for all screens.
