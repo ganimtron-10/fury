@@ -146,6 +146,8 @@ def test_show_manager_initialization_default():
     assert show_m.size == (800, 800)
     assert show_m.pixel_ratio == 1
     assert show_m.enable_events is True
+    assert show_m._show_fps is False
+    assert show_m._max_fps == 60
 
 
 def test_show_manager_initialization_custom():
@@ -157,6 +159,8 @@ def test_show_manager_initialization_custom():
         enable_events=False,
         screen_config=[2],  # Two vertical sections
         window_type="offscreen",
+        show_fps=True,
+        max_fps=120,
     )
     assert show_m.title == "Custom Title"
     assert show_m.size == (1024, 768)
@@ -164,6 +168,8 @@ def test_show_manager_initialization_custom():
     assert show_m.enable_events is False
     assert show_m._total_screens == 2  # Two screens
     assert len(show_m.screens) == 2
+    assert show_m._show_fps is True
+    assert show_m._max_fps == 120
 
 
 def test_show_manager_initialization_multiple_screens():
