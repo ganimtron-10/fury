@@ -498,6 +498,10 @@ class ShowManager:
         An existing QtWidgets QApplication instance (if `window_type` is 'qt').
     qt_parent : QWidget
         An existing QWidget to embed the QtCanvas within (if `window_type` is 'qt').
+    show_fps : bool
+        Whether to display FPS statistics in the renderer.
+    max_fps : int
+        Maximum frames per second for the canvas (default: 60).
     """
 
     def __init__(
@@ -516,6 +520,8 @@ class ShowManager:
         enable_events=True,
         qt_app=None,
         qt_parent=None,
+        show_fps=False,
+        max_fps=60,
     ):
         """Manage the rendering window, scenes, and interactions.
 
@@ -563,6 +569,10 @@ class ShowManager:
         qt_parent : QWidget, optional
             An existing QWidget to embed the QtCanvas within (if `window_type`
             is 'qt').
+        show_fps : bool, optional
+            Whether to display FPS statistics in the renderer. Defaults to False.
+        max_fps : int, optional
+            Maximum frames per second for the canvas. Defaults to 60.
         """
         self._size = size
         self._title = title
@@ -570,10 +580,12 @@ class ShowManager:
         self._qt_app = qt_app
         self._qt_parent = qt_parent
         self._is_initial_resize = None
+        self._show_fps = show_fps
+        self._max_fps = max_fps
         self._window_type = self._setup_window(window_type)
 
         if renderer is None:
-            renderer = Renderer(self.window)
+            renderer = Renderer(self.window, show_fps=self._show_fps)
         self.renderer = renderer
         self.renderer.pixel_ratio = pixel_ratio
         self.renderer.add_event_handler(
@@ -656,16 +668,25 @@ class ShowManager:
             )
 
         if window_type == "default" or window_type == "glfw":
-            self.window = Canvas(size=self._size, title=self._title)
+            self.window = Canvas(
+                size=self._size, title=self._title, max_fps=self._max_fps
+            )
         elif window_type == "qt":
             self.window = QtCanvas(
-                size=self._size, title=self._title, parent=self._qt_parent
+                size=self._size,
+                title=self._title,
+                parent=self._qt_parent,
+                max_fps=self._max_fps,
             )
             self._is_qt = True
         elif window_type == "jupyter":
-            self.window = JupyterCanvas(size=self._size, title=self._title)
+            self.window = JupyterCanvas(
+                size=self._size, title=self._title, max_fps=self._max_fps
+            )
         else:
-            self.window = OffscreenCanvas(size=self._size, title=self._title)
+            self.window = OffscreenCanvas(
+                size=self._size, title=self._title, max_fps=self._max_fps
+            )
 
         return window_type
 
