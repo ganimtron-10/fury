@@ -499,9 +499,9 @@ class ShowManager:
     qt_parent : QWidget
         An existing QWidget to embed the QtCanvas within (if `window_type` is 'qt').
     show_fps : bool
-        Whether to display FPS statistics in the renderer.
+        Whether to print FPS statistics in the console.
     max_fps : int
-        Maximum frames per second for the canvas (default: 60).
+        Maximum frames per second for the canvas.
     """
 
     def __init__(
@@ -570,9 +570,9 @@ class ShowManager:
             An existing QWidget to embed the QtCanvas within (if `window_type`
             is 'qt').
         show_fps : bool, optional
-            Whether to display FPS statistics in the renderer. Defaults to False.
+            Whether to display FPS statistics in the renderer.
         max_fps : int, optional
-            Maximum frames per second for the canvas. Defaults to 60.
+            Maximum frames per second for the canvas.
         """
         self._size = size
         self._title = title
