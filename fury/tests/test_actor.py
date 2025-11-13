@@ -122,6 +122,30 @@ def validate_actors(actor_type="actor_name", prim_count=1, **kwargs):
     scene.remove(get_actor_1)
 
 
+def test_actor_from_primitive_wireframe():
+    """Test wireframe and wireframe_thickness for primitive actors."""
+    sphere_actor = actor.sphere(
+        centers=np.array([[0, 0, 0]]), colors=np.array([[1, 0, 0]])
+    )
+
+    # By default, wireframe is off
+    assert not sphere_actor.material.wireframe
+    assert sphere_actor.material.wireframe_thickness == 1.0
+
+    # Test enabling wireframe
+    sphere_actor.material.wireframe = True
+    assert sphere_actor.material.wireframe
+
+    # Test disabling wireframe
+    sphere_actor.material.wireframe = False
+    assert not sphere_actor.material.wireframe
+
+    # Test setting wireframe thickness
+    new_thickness = 5.0
+    sphere_actor.material.wireframe_thickness = new_thickness
+    assert sphere_actor.material.wireframe_thickness == new_thickness
+
+
 def test_sphere():
     centers = np.array([[0, 0, 0]])
     colors = np.array([[1, 0, 0]])
