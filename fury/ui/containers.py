@@ -57,13 +57,13 @@ class Panel2D(UI):
         ----------
         size : (int, int)
             Size (width, height) in pixels of the panel.
-        position : (float, float)
+        position : (float, float), optional
             Absolute coordinates (x, y) of the lower-left corner of the panel.
-        color : (float, float, float)
+        color : (float, float, float), optional
             Must take values in [0, 1].
-        opacity : float
+        opacity : float, optional
             Must take values in [0, 1].
-        align : [left, right]
+        align : [left, right], optional
             Alignment of the panel with respect to the overall screen.
         border_color : (float, float, float), optional
             RGB color of the border. Must take values in [0, 1].
@@ -122,7 +122,6 @@ class Panel2D(UI):
 
         self.add_element(self.background, (0, 0), _is_internal=True)
 
-        # Add default events listener for this UI component.
         self.background.on_left_mouse_button_pressed = self.left_button_pressed
         self.background.on_left_mouse_button_dragged = self.left_button_dragged
 
@@ -363,7 +362,6 @@ class Panel2D(UI):
         """
         click_pos = np.array([event.x, event.y])
         self._drag_offset = click_pos - self.get_position()
-        event.cancel()  # Stop propagating the event.
 
     def left_button_dragged(self, event):
         """Handle left mouse button drag event for panel movement.

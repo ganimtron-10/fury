@@ -113,7 +113,7 @@ class UIContextClass:
 
     @z_order_bounds.setter
     def z_order_bounds(self, z_order):
-        """Update the minimum and maximum active Z-order values in the UI.
+        """Update the minimum or maximum active Z-order values in the UI.
 
         Parameters
         ----------

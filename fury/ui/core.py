@@ -651,7 +651,7 @@ class Rectangle2D(UI):
         (float, float, float)
             RGB color.
         """
-        return self.actor.material.color
+        return self.actor.material.color[:3]
 
     @color.setter
     def color(self, color):
