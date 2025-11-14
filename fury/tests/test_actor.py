@@ -1200,7 +1200,7 @@ def test_streamtube_gpu_invalid_inputs():
         )
 
     with pytest.raises(
-        ValueError, match="first dimension must be 1 or match number of lines"
+        ValueError, match=r"first dimension must be 1 or \d+ \(number of lines\)"
     ):
         actor.streamtube(
             [line_a, line_b],
@@ -1208,7 +1208,9 @@ def test_streamtube_gpu_invalid_inputs():
             backend="gpu",
         )
 
-    with pytest.raises(ValueError, match=r"length 3 \(RGB\) or 4 \(RGBA\)"):
+    with pytest.raises(
+        ValueError, match=r"(must have 3|components, got) \(RGB\) or 4 \(RGBA\)"
+    ):
         actor.streamtube(
             [line_a],
             colors=np.array([1.0, 0.5], dtype=np.float32),

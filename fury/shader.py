@@ -7,6 +7,7 @@ from fury.lib import (
     Binding,
     Buffer,
     LineShader,
+    MeshPhongShader,
     MeshShader,
     ThinLineSegmentShader,
     load_wgsl,
@@ -667,3 +668,64 @@ class _StreamtubeBakingShader(BaseShader):
         """
 
         return load_wgsl("streamtube_compute.wgsl", package_name="fury.wgsl")
+
+
+class _StreamtubeRenderShader(MeshPhongShader):
+    """Render shader wrapper that auto-detaches compute after first bake.
+
+    This shader is used internally by the streamtube actor to automatically
+    swap from compute-based material to standard render-only material after
+    the first baking pass is complete.
+
+    Notes
+    -----
+    This is an internal class marked with a leading underscore. It should not
+    be used directly by end users.
+    """
+
+    def get_render_info(self, wobject, shared):
+        """Get render info and auto-detach compute shader if baking is done.
+
+        Parameters
+        ----------
+        wobject : Mesh
+            The mesh object being rendered.
+        shared : dict
+            Shared rendering state.
+
+        Returns
+        -------
+        dict
+            Render information for the shader.
+        """
+        try:
+            # Import here to avoid circular dependency
+            from fury.material import StreamtubeMaterial, _StreamtubeBakedMaterial
+
+            mat = getattr(wobject, "material", None)
+            needs_update = bool(getattr(wobject, "_needs_gpu_update", False))
+            auto_detach = bool(getattr(mat, "auto_detach", True))
+            if (
+                isinstance(mat, _StreamtubeBakedMaterial)
+                and auto_detach
+                and not needs_update
+            ):
+                baked_mat = StreamtubeMaterial(
+                    opacity=float(getattr(mat, "opacity", 1.0)),
+                    pick_write=bool(getattr(mat, "pick_write", True)),
+                    flat_shading=bool(getattr(mat, "flat_shading", False)),
+                    color_mode=str(getattr(mat, "color_mode", "vertex")),
+                )
+                wobject.material = baked_mat
+                for attr in (
+                    "line_buffer",
+                    "length_buffer",
+                    "color_buffer",
+                    "vertex_offset_buffer",
+                    "triangle_offset_buffer",
+                ):
+                    if hasattr(wobject, attr):
+                        delattr(wobject, attr)
+        except Exception:
+            pass
+        return super().get_render_info(wobject, shared)
