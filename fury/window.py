@@ -398,8 +398,7 @@ def render_screens(renderer, screens, stats=None):
     screens : list of Screen
         The list of Screen objects to render.
     stats : Stats, optional
-        Optional pygfx Stats helper to time rendering. If provided, it will
-        wrap the rendering cycle and display FPS overlay after rendering all screens."""
+        Stats helper to display FPS overlay."""
     if stats is not None:
         stats.start()
 
@@ -510,7 +509,7 @@ class ShowManager:
     qt_parent : QWidget
         An existing QWidget to embed the QtCanvas within (if `window_type` is 'qt').
     show_fps : bool
-        Whether to print FPS statistics in the console.
+        Whether to display FPS statistics using an on-screen overlay.
     max_fps : int
         Maximum frames per second for the canvas.
     """
@@ -595,12 +594,8 @@ class ShowManager:
         self._max_fps = max_fps
         self._window_type = self._setup_window(window_type)
 
-        # For offscreen rendering, enable console FPS printing in the renderer
-        # For interactive windows, we'll use visual Stats overlay instead
-        use_renderer_fps = self._show_fps and self._window_type == "offscreen"
-
         if renderer is None:
-            renderer = Renderer(self.window, show_fps=use_renderer_fps)
+            renderer = Renderer(self.window)
         self.renderer = renderer
         self.renderer.pixel_ratio = pixel_ratio
         self.renderer.add_event_handler(
@@ -621,7 +616,6 @@ class ShowManager:
         )
         self._callbacks = {}
 
-        # Stats will be created lazily on first render to avoid initialization issues
         self._stats = None
         self._stats_initialized = False
 
@@ -979,14 +973,7 @@ class ShowManager:
 
     def _draw_function(self):
         """Draw all screens and request a window redraw."""
-        # Lazy initialize stats on first render if requested
-        # Skip stats for offscreen (crashes)
-        should_init_stats = (
-            self._show_fps
-            and not self._stats_initialized
-            and self._window_type != "offscreen"
-        )
-        if should_init_stats:
+        if self._show_fps and not self._stats_initialized:
             self._stats = Stats(self.renderer)
             self._stats_initialized = True
 

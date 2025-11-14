@@ -471,42 +471,15 @@ def test_add_to_scene(sample_actor, sample_ui_actor):
     assert sample_gfx_scene not in scene.children
 
 
-def test_show_manager_fps_display_modes():
-    """Test FPS display modes: offscreen (console) vs interactive (visual stats)."""
-    # Test 1: Offscreen with show_fps=True (uses console printing via Renderer)
-    show_m_offscreen = ShowManager(show_fps=True, window_type="offscreen")
+def test_show_manager_fps_display():
+    """Test FPS display using Stats overlay."""
+    show_m = ShowManager(show_fps=True)
 
-    # Before render: stats not initialized, renderer has console FPS enabled
-    assert show_m_offscreen._stats is None
-    assert show_m_offscreen._stats_initialized is False
-    assert show_m_offscreen.renderer._show_fps is True
-    assert show_m_offscreen.get_fps() is None
-
-    # Test 2: show_fps=False (no FPS display at all)
-    show_m_no_fps = ShowManager(show_fps=False, window_type="offscreen")
-
-    # Renderer should not have console FPS enabled
-    assert show_m_no_fps.renderer._show_fps is False
-    assert show_m_no_fps._stats is None
-    assert show_m_no_fps.get_fps() is None
-
-
-def test_show_manager_fps_interactive_mode():
-    """Test FPS display for interactive (non-offscreen) windows uses Stats."""
-    # Interactive window with show_fps=True should NOT use renderer console FPS
-    # Instead, Stats overlay will be created lazily on first render
-    show_m = ShowManager(show_fps=True, window_type="default")
-
-    # Initial state: Stats not yet created (lazy initialization)
     assert show_m._stats is None
     assert show_m._stats_initialized is False
-    # Renderer should NOT use console FPS for interactive windows
-    assert show_m.renderer._show_fps is False
     assert show_m.get_fps() is None
 
-    # Test with show_fps=False for interactive window
-    show_m_no_fps = ShowManager(show_fps=False, window_type="default")
+    show_m_no_fps = ShowManager(show_fps=False)
     assert show_m_no_fps._stats is None
     assert show_m_no_fps._stats_initialized is False
-    assert show_m_no_fps.renderer._show_fps is False
     assert show_m_no_fps.get_fps() is None
