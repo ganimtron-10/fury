@@ -126,7 +126,8 @@ WheelEvent = gfx.WheelEvent
 KeyboardEvent = gfx.KeyboardEvent
 run = loop.run
 call_later = loop.call_later
-
+Clock = gfx.Clock
+Stats = gfx.Stats
 
 plane_geometry = gfx.plane_geometry
 

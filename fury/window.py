@@ -31,6 +31,7 @@ from fury.lib import (
     Renderer,
     Scene as GfxScene,  # type: ignore
     ScreenCoordsCamera,
+    Stats,
     TrackballController,
     Viewport,
     call_later,
@@ -387,7 +388,7 @@ def update_viewports(screens, screen_bbs):
         update_camera(screen.camera, screen.size, screen.scene)
 
 
-def render_screens(renderer, screens):
+def render_screens(renderer, screens, stats=None):
     """Render multiple screens within a single renderer update cycle.
 
     Parameters
@@ -395,11 +396,21 @@ def render_screens(renderer, screens):
     renderer : Renderer
         The PyGfx Renderer object to draw into.
     screens : list of Screen
-        The list of Screen objects to render."""
+        The list of Screen objects to render.
+    stats : Stats, optional
+        Optional pygfx Stats helper to time rendering. If provided, it will
+        wrap the rendering cycle and display FPS overlay after rendering all screens."""
+    if stats is not None:
+        stats.start()
+
     for screen in screens:
         scene_root = screen.scene
         screen.viewport.render(scene_root.main_scene, screen.camera, flush=False)
         screen.viewport.render(scene_root.ui_scene, scene_root.ui_camera, flush=False)
+
+    if stats is not None:
+        stats.stop()
+        stats.render(flush=False)
 
     renderer.flush()
 
@@ -584,8 +595,12 @@ class ShowManager:
         self._max_fps = max_fps
         self._window_type = self._setup_window(window_type)
 
+        # For offscreen rendering, enable console FPS printing in the renderer
+        # For interactive windows, we'll use visual Stats overlay instead
+        use_renderer_fps = self._show_fps and self._window_type == "offscreen"
+
         if renderer is None:
-            renderer = Renderer(self.window, show_fps=self._show_fps)
+            renderer = Renderer(self.window, show_fps=use_renderer_fps)
         self.renderer = renderer
         self.renderer.pixel_ratio = pixel_ratio
         self.renderer.add_event_handler(
@@ -605,6 +620,10 @@ class ShowManager:
             calculate_screen_sizes(self._screen_config, self.renderer.logical_size),
         )
         self._callbacks = {}
+
+        # Stats will be created lazily on first render to avoid initialization issues
+        self._stats = None
+        self._stats_initialized = False
 
         self.enable_events = enable_events
         self._key_long_press = None
@@ -925,6 +944,18 @@ class ShowManager:
         for s in self.screens:
             s.controller.enabled = value
 
+    def get_fps(self):
+        """Get the current FPS from the stats overlay if available.
+
+        Returns
+        -------
+        int or None
+            The current FPS value, or None if stats are not initialized or
+            FPS has not been computed yet."""
+        if self._stats is not None:
+            return getattr(self._stats, "_fps", None)
+        return None
+
     def snapshot(self, fname):
         """Save a snapshot of the current rendered content to a file.
 
@@ -948,7 +979,18 @@ class ShowManager:
 
     def _draw_function(self):
         """Draw all screens and request a window redraw."""
-        render_screens(self.renderer, self.screens)
+        # Lazy initialize stats on first render if requested
+        # Skip stats for offscreen (crashes)
+        should_init_stats = (
+            self._show_fps
+            and not self._stats_initialized
+            and self._window_type != "offscreen"
+        )
+        if should_init_stats:
+            self._stats = Stats(self.renderer)
+            self._stats_initialized = True
+
+        render_screens(self.renderer, self.screens, stats=self._stats)
         self.window.request_draw()
 
     def render(self):
