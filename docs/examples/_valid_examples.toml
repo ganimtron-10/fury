@@ -41,7 +41,7 @@ readme = "file: _ui.rst"
 position = 7
 enable = false
 files = [
-
+    "viz_textblock.py",
 ]
 
 [animation]
