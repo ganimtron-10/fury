@@ -4,7 +4,6 @@
 
 import numpy as np
 
-from fury.decorators import warn_on_args_to_kwargs
 from fury.ui.core import UI, Anchor, Rectangle2D
 
 
@@ -38,7 +37,6 @@ class Panel2D(UI):
         If the panel should have borders.
     """
 
-    @warn_on_args_to_kwargs()
     def __init__(
         self,
         size,
@@ -72,8 +70,8 @@ class Panel2D(UI):
         has_border : bool, optional
             If the panel should have borders.
         """
-        self.SIDES = ["left", "right", "top", "bottom"]
-        self.BORDER_COORDS = {
+        self.border_sides = ["left", "right", "top", "bottom"]
+        self.border_coords = {
             "left": (0.0, 0.0),
             "right": (1.0, 0.0),
             "top": (0.0, 0.0),
@@ -117,7 +115,7 @@ class Panel2D(UI):
                     key
                 ].on_left_mouse_button_dragged = self.left_button_dragged
                 self.add_element(
-                    self.borders[key], self.BORDER_COORDS[key], _is_internal=True
+                    self.borders[key], self.border_coords[key], _is_internal=True
                 )
 
         self.add_element(self.background, (0, 0), _is_internal=True)
@@ -250,7 +248,6 @@ class Panel2D(UI):
         """
         self.background.opacity = opacity
 
-    @warn_on_args_to_kwargs()
     def add_element(self, element, coords, *, anchor="position", _is_internal=False):
         """Add a UI component to the panel.
 
@@ -326,7 +323,6 @@ class Panel2D(UI):
         if element in self._children:
             self._children.remove(element)
 
-    @warn_on_args_to_kwargs()
     def update_element(self, element, coords, *, anchor="position"):
         """Update the position of a UI component in the panel.
 
@@ -401,7 +397,7 @@ class Panel2D(UI):
         """Update the coordinates of the borders."""
 
         for key in self.borders.keys():
-            self.update_element(self.borders[key], self.BORDER_COORDS[key])
+            self.update_element(self.borders[key], self.border_coords[key])
 
     @property
     def border_color(self):
@@ -414,7 +410,7 @@ class Panel2D(UI):
             borders, respectively.
         """
 
-        return [self.borders[side].color for side in self.SIDES]
+        return [self.borders[side].color for side in self.border_sides]
 
     @border_color.setter
     def border_color(self, side_color):
@@ -445,7 +441,7 @@ class Panel2D(UI):
 
         widths = []
 
-        for side in self.SIDES:
+        for side in self.border_sides:
             if side in ["left", "right"]:
                 widths.append(self.borders[side].width)
             elif side in ["top", "bottom"]:
