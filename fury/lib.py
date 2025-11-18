@@ -120,6 +120,8 @@ register_wgsl_loader = gfx.renderers.wgpu.shader.register_wgsl_loader
 WorldObject = gfx.WorldObject
 
 Event = gfx.Event
+EventType = gfx.EventType
+EventType.POINTER_DRAG = "pointer_drag"
 WindowEvent = gfx.WindowEvent
 PointerEvent = gfx.PointerEvent
 WheelEvent = gfx.WheelEvent
