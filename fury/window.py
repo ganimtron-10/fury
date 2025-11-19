@@ -23,14 +23,17 @@ from fury.lib import (
     Canvas,
     Controller,
     DirectionalLight,
+    EventType,
     Group as GfxGroup,  # type: ignore
     JupyterCanvas,
     OffscreenCanvas,
     PerspectiveCamera,
+    PointerEvent,
     QtCanvas,
     Renderer,
     Scene as GfxScene,  # type: ignore
     ScreenCoordsCamera,
+    Stats,
     TrackballController,
     Viewport,
     call_later,
@@ -387,7 +390,7 @@ def update_viewports(screens, screen_bbs):
         update_camera(screen.camera, screen.size, screen.scene)
 
 
-def render_screens(renderer, screens):
+def render_screens(renderer, screens, stats=None):
     """Render multiple screens within a single renderer update cycle.
 
     Parameters
@@ -395,11 +398,20 @@ def render_screens(renderer, screens):
     renderer : Renderer
         The PyGfx Renderer object to draw into.
     screens : list of Screen
-        The list of Screen objects to render."""
+        The list of Screen objects to render.
+    stats : Stats, optional
+        Stats helper to display FPS overlay."""
+    if stats is not None:
+        stats.start()
+
     for screen in screens:
         scene_root = screen.scene
         screen.viewport.render(scene_root.main_scene, screen.camera, flush=False)
         screen.viewport.render(scene_root.ui_scene, scene_root.ui_camera, flush=False)
+
+    if stats is not None:
+        stats.stop()
+        stats.render(flush=False)
 
     renderer.flush()
 
@@ -498,6 +510,10 @@ class ShowManager:
         An existing QtWidgets QApplication instance (if `window_type` is 'qt').
     qt_parent : QWidget
         An existing QWidget to embed the QtCanvas within (if `window_type` is 'qt').
+    show_fps : bool
+        Whether to display FPS statistics using an on-screen overlay.
+    max_fps : int
+        Maximum frames per second for the canvas.
     """
 
     def __init__(
@@ -516,6 +532,8 @@ class ShowManager:
         enable_events=True,
         qt_app=None,
         qt_parent=None,
+        show_fps=False,
+        max_fps=60,
     ):
         """Manage the rendering window, scenes, and interactions.
 
@@ -563,6 +581,10 @@ class ShowManager:
         qt_parent : QWidget, optional
             An existing QWidget to embed the QtCanvas within (if `window_type`
             is 'qt').
+        show_fps : bool, optional
+            Whether to display FPS statistics in the renderer.
+        max_fps : int, optional
+            Maximum frames per second for the canvas.
         """
         self._size = size
         self._title = title
@@ -570,17 +592,28 @@ class ShowManager:
         self._qt_app = qt_app
         self._qt_parent = qt_parent
         self._is_initial_resize = None
+        self._show_fps = show_fps
+        self._max_fps = max_fps
         self._window_type = self._setup_window(window_type)
+        self._is_dragging = False
+        self._drag_target = None
 
         if renderer is None:
             renderer = Renderer(self.window)
         self.renderer = renderer
         self.renderer.pixel_ratio = pixel_ratio
         self.renderer.add_event_handler(
-            lambda event: self._resize(size=(event.width, event.height)), "resize"
+            lambda event: self._resize(size=(event.width, event.height)),
+            EventType.RESIZE,
         )
         self.renderer.add_event_handler(
-            self._set_key_long_press_event, "key_down", "key_up"
+            self._set_key_long_press_event, EventType.KEY_DOWN, EventType.KEY_UP
+        )
+        self.renderer.add_event_handler(
+            self._register_drag,
+            EventType.POINTER_DOWN,
+            EventType.POINTER_UP,
+            EventType.POINTER_MOVE,
         )
 
         self._total_screens = 0
@@ -594,9 +627,45 @@ class ShowManager:
         )
         self._callbacks = {}
 
+        self._stats = None
+        self._stats_initialized = False
+
         self.enable_events = enable_events
         self._key_long_press = None
         self._resize(self._size)
+
+    def _handle_drag(self, event):
+        """Handle drag events for pointer interactions.
+
+        Parameters
+        ----------
+        event : PointerEvent
+            The PyGfx pointer event object.
+        """
+        if self._drag_target is None:
+            self._drag_target = event.target
+        drag_event = PointerEvent(
+            x=event.x, y=event.y, type=EventType.POINTER_DRAG, target=self._drag_target
+        )
+        self.renderer.dispatch_event(drag_event)
+
+    def _register_drag(self, event):
+        """Register drag events for pointer interactions.
+
+        Parameters
+        ----------
+        event : PointerEvent
+            The PyGfx pointer event object.
+        """
+
+        if event.type == EventType.POINTER_DOWN:
+            self._is_dragging = True
+            self._drag_target = event.target
+        elif event.type == EventType.POINTER_UP:
+            self._is_dragging = False
+            self._drag_target = None
+        elif event.type == EventType.POINTER_MOVE and self._is_dragging:
+            self._handle_drag(event)
 
     def _screen_setup(self, scene, camera, controller, camera_light):
         """Prepare scene, camera, controller, and light lists for screen creation.
@@ -656,16 +725,25 @@ class ShowManager:
             )
 
         if window_type == "default" or window_type == "glfw":
-            self.window = Canvas(size=self._size, title=self._title)
+            self.window = Canvas(
+                size=self._size, title=self._title, max_fps=self._max_fps
+            )
         elif window_type == "qt":
             self.window = QtCanvas(
-                size=self._size, title=self._title, parent=self._qt_parent
+                size=self._size,
+                title=self._title,
+                parent=self._qt_parent,
+                max_fps=self._max_fps,
             )
             self._is_qt = True
         elif window_type == "jupyter":
-            self.window = JupyterCanvas(size=self._size, title=self._title)
+            self.window = JupyterCanvas(
+                size=self._size, title=self._title, max_fps=self._max_fps
+            )
         else:
-            self.window = OffscreenCanvas(size=self._size, title=self._title)
+            self.window = OffscreenCanvas(
+                size=self._size, title=self._title, max_fps=self._max_fps
+            )
 
         return window_type
 
@@ -734,7 +812,7 @@ class ShowManager:
         event : KeyEvent
             The PyGfx key event object."""
 
-        if event.type == "key_down":
+        if event.type == EventType.KEY_DOWN:
             self._key_long_press = asyncio.create_task(
                 self._handle_key_long_press(event)
             )
@@ -904,6 +982,18 @@ class ShowManager:
         for s in self.screens:
             s.controller.enabled = value
 
+    def get_fps(self):
+        """Get the current FPS from the stats overlay if available.
+
+        Returns
+        -------
+        int or None
+            The current FPS value, or None if stats are not initialized or
+            FPS has not been computed yet."""
+        if self._stats is not None:
+            return getattr(self._stats, "_fps", None)
+        return None
+
     def snapshot(self, fname):
         """Save a snapshot of the current rendered content to a file.
 
@@ -927,7 +1017,11 @@ class ShowManager:
 
     def _draw_function(self):
         """Draw all screens and request a window redraw."""
-        render_screens(self.renderer, self.screens)
+        if self._show_fps and not self._stats_initialized:
+            self._stats = Stats(self.renderer)
+            self._stats_initialized = True
+
+        render_screens(self.renderer, self.screens, stats=self._stats)
         self.window.request_draw()
 
     def render(self):

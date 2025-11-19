@@ -49,8 +49,6 @@ def rect_left_button_pressed(event: PointerEvent):
     click_pos = np.array([event.x, event.y])
     _rect_drag_offset = click_pos - rect_position
 
-    event.cancel()
-
 
 def rect_left_button_dragged(event: PointerEvent):
     """Updates the rectangle's position based on mouse movement."""

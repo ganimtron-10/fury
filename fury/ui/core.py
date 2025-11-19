@@ -6,11 +6,14 @@ import numpy as np
 
 from fury.geometry import buffer_to_geometry, create_mesh
 from fury.io import load_image_texture
-from fury.lib import plane_geometry
+from fury.lib import (
+    EventType,
+    plane_geometry,
+)
 from fury.material import _create_mesh_material
 from fury.primitive import prim_ring
 from fury.ui import UIContext
-from fury.ui.helpers import Anchor, get_anchor_to_multiplier
+from fury.ui.helpers import UI_Z_RANGE, Anchor, get_anchor_to_multiplier
 
 
 class UI(object, metaclass=abc.ABCMeta):
@@ -75,13 +78,17 @@ class UI(object, metaclass=abc.ABCMeta):
         UI component.
     x_anchor : str, optional
         Define the horizontal anchor point for `position`. Can be "LEFT",
-        "CENTER", or "RIGHT". Defaults to "LEFT".
+        "CENTER", or "RIGHT".
     y_anchor : str, optional
         Define the vertical anchor point for `position`. Can be "BOTTOM",
-        "CENTER", or "TOP". Defaults to "BOTTOM".
+        "CENTER", or "TOP".
+    z_order : int, optional
+        The initial Z-order of the UI component.
     """
 
-    def __init__(self, *, position=(0, 0), x_anchor=Anchor.LEFT, y_anchor=Anchor.TOP):
+    def __init__(
+        self, *, position=(0, 0), x_anchor=Anchor.LEFT, y_anchor=Anchor.TOP, z_order=0
+    ):
         """Init scene.
 
         Parameters
@@ -92,15 +99,18 @@ class UI(object, metaclass=abc.ABCMeta):
             UI component.
         x_anchor : str, optional
             Define the horizontal anchor point for `position`. Can be "LEFT",
-            "CENTER", or "RIGHT". Defaults to "LEFT".
+            "CENTER", or "RIGHT".
         y_anchor : str, optional
             Define the vertical anchor point for `position`. Can be "BOTTOM",
-            "CENTER", or "TOP". Defaults to "BOTTOM".
+            "CENTER", or "TOP".
+        z_order : int, optional
+            The initial Z-order of the UI component.
         """
         self.use_y_down = True
         self._position = np.array([0, 0])
         self._children = []
         self._anchors = [x_anchor, y_anchor]
+        self.z_order = z_order
 
         self._setup()  # Setup needed actors and sub UI components.
         self.set_position(position, x_anchor, y_anchor)
@@ -177,7 +187,7 @@ class UI(object, metaclass=abc.ABCMeta):
                 f"y_anchor should be one of these {', '.join([Anchor.TOP, Anchor.CENTER, Anchor.BOTTOM])} but received {y_anchor}"  # noqa: E501
             )
 
-    def set_actor_position(self, actor, center_position):
+    def set_actor_position(self, actor, center_position, z_order):
         """Set the position of the PyGfx actor.
 
         Parameters
@@ -187,6 +197,8 @@ class UI(object, metaclass=abc.ABCMeta):
         center_position : tuple or ndarray
             A 2-element array `(x, y)` representing the desired center
             position of the actor.
+        z_order : int
+            The Z-order of the UI component.
         """
         canvas_size = UIContext.canvas_size
 
@@ -196,6 +208,7 @@ class UI(object, metaclass=abc.ABCMeta):
             if self.use_y_down
             else center_position[1]
         )
+        actor.local.z = np.interp(z_order, UIContext.z_order_bounds, UI_Z_RANGE)
 
     def set_position(self, coords, x_anchor=Anchor.LEFT, y_anchor=Anchor.TOP):
         """Position this UI component according to the specified anchor.
@@ -207,10 +220,10 @@ class UI(object, metaclass=abc.ABCMeta):
             are interpreted based on `x_anchor` and `y_anchor`.
         x_anchor : str, optional
             Define the horizontal anchor point for `coords`. Can be "LEFT",
-            "CENTER", or "RIGHT". Defaults to "LEFT".
+            "CENTER", or "RIGHT".
         y_anchor : str, optional
             Define the vertical anchor point for `coords`. Can be "TOP",
-            "CENTER", or "BOTTOM". Defaults to "TOP".
+            "CENTER", or "BOTTOM".
         """
         self.perform_position_validation(x_anchor=x_anchor, y_anchor=y_anchor)
 
@@ -229,10 +242,10 @@ class UI(object, metaclass=abc.ABCMeta):
         ----------
         x_anchor : str, optional
             Define the horizontal anchor point for the returned coordinates.
-            Can be "LEFT", "CENTER", or "RIGHT". Defaults to "LEFT".
+            Can be "LEFT", "CENTER", or "RIGHT".
         y_anchor : str, optional
             Define the vertical anchor point for the returned coordinates.
-            Can be "BOTTOM", "CENTER", or "TOP". Defaults to "TOP".
+            Can be "BOTTOM", "CENTER", or "TOP".
 
         Returns
         -------
@@ -260,6 +273,37 @@ class UI(object, metaclass=abc.ABCMeta):
                 ),
             ]
         )
+
+    @property
+    def z_order(self):
+        """Get the Z-order of this UI element.
+
+        Returns
+        -------
+        int
+            Z-order of the UI.
+        """
+        return self._z_order
+
+    @z_order.setter
+    def z_order(self, z_order):
+        """Set the Z-order of this UI element.
+
+        Parameters
+        ----------
+        z_order : int
+            The new integer Z-order value.
+
+        Raises
+        ------
+        ValueError
+            If the provided `z_order` is not an integer.
+        """
+        if not isinstance(z_order, int):
+            raise ValueError("Z-order must be an integer.")
+
+        self._z_order = z_order
+        UIContext.z_order_bounds = z_order
 
     @abc.abstractmethod
     def _update_actors_position(self):
@@ -309,10 +353,10 @@ class UI(object, metaclass=abc.ABCMeta):
         actor : Mesh
             The PyGfx mesh to which event handlers should be attached.
         """
-        actor.add_event_handler(self.mouse_button_down_callback, "pointer_down")
-        actor.add_event_handler(self.mouse_button_up_callback, "pointer_up")
-        actor.add_event_handler(self.mouse_move_callback, "pointer_move")
-        actor.add_event_handler(self.key_press_callback, "key_up")
+        actor.add_event_handler(self.mouse_button_down_callback, EventType.POINTER_DOWN)
+        actor.add_event_handler(self.mouse_button_up_callback, EventType.POINTER_UP)
+        actor.add_event_handler(self.mouse_move_callback, EventType.POINTER_DRAG)
+        actor.add_event_handler(self.key_press_callback, EventType.KEY_UP)
 
     def mouse_button_down_callback(self, event):
         """Handle mouse button press event.
@@ -328,7 +372,6 @@ class UI(object, metaclass=abc.ABCMeta):
             self.right_button_click_callback(event)
         elif event.button == 3:
             self.middle_button_click_callback(event)
-        event.cancel()
 
     def mouse_button_up_callback(self, event):
         """Handle mouse button release event.
@@ -344,7 +387,6 @@ class UI(object, metaclass=abc.ABCMeta):
             self.right_button_release_callback(event)
         elif event.button == 3:
             self.middle_button_release_callback(event)
-        event.cancel()
 
     def left_button_click_callback(self, event):
         """Handle left mouse button press event.
@@ -468,17 +510,14 @@ class Rectangle2D(UI):
     ----------
     size : (int, int), optional
         Initial `(width, height)` of the rectangle in pixels.
-        Defaults to `(0, 0)`.
     position : (float, float), optional
         Coordinates `(x, y)` of the rectangle. The interpretation of `(x,y)`
         (e.g., top-left, bottom-left) depends on the current UI version.
-        Defaults to `(0, 0)`.
     color : (float, float, float), optional
         RGB color tuple, with values in the range `[0, 1]`.
-        Defaults to `(1, 1, 1)` (white).
     opacity : float, optional
         Degree of transparency, with values in the range `[0, 1]`.
-        `0` is fully transparent, `1` is fully opaque. Defaults to `1.0`.
+        `0` is fully transparent, `1` is fully opaque.
     """
 
     def __init__(
@@ -597,7 +636,7 @@ class Rectangle2D(UI):
         """Set the position of the internal actor."""
         position = self.get_position(x_anchor=Anchor.CENTER, y_anchor=Anchor.CENTER)
 
-        self.set_actor_position(self.actor, position)
+        self.set_actor_position(self.actor, position, self.z_order)
 
     @property
     def color(self):
@@ -608,7 +647,7 @@ class Rectangle2D(UI):
         (float, float, float)
             RGB color.
         """
-        return self.actor.material.color
+        return self.actor.material.color[:3]
 
     @color.setter
     def color(self, color):
@@ -738,7 +777,7 @@ class Disk2D(UI):
         """Set the position of the internal actor."""
         position = self.get_position(x_anchor=Anchor.CENTER, y_anchor=Anchor.CENTER)
 
-        self.set_actor_position(self.actor, position)
+        self.set_actor_position(self.actor, position, self.z_order)
 
     @property
     def color(self):

@@ -1,10 +1,12 @@
 exclude: ".*/(data|docs/experimental)/.*"
 repos:
--   repo: https://gitlab.com/vojko.pribudic.foss/pre-commit-update
-    rev: v0.7.0
-    hooks:
-    -   id: pre-commit-update
-        args: [--keep, pre-commit-update]
+# Relax this rule for now because it creates too many PRs conflicts.
+# A GH actions will checkout this weekly instead
+# -   repo: https://gitlab.com/vojko.pribudic.foss/pre-commit-update
+#     rev: v0.7.0
+#     hooks:
+#     -   id: pre-commit-update
+#         args: [--keep, pre-commit-update]
 -   repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
     hooks:
@@ -43,7 +45,7 @@ repos:
         args: ["fury"]
         pass_filenames: false
 -   repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.14.3
+    rev: v0.14.5
     hooks:
       # Run the linter
     -   id: ruff
