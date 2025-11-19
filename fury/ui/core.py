@@ -1625,4 +1625,4 @@ class Button2D(UI):
         """Set the position of the internal actor."""
         position = self.get_position(x_anchor=Anchor.CENTER, y_anchor=Anchor.CENTER)
 
-        self.set_actor_position(self.actor, position)
+        self.set_actor_position(self.actor, position, self.z_order)
