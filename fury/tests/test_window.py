@@ -15,6 +15,7 @@ from fury.lib import (
     Scene as GfxScene,
     ScreenCoordsCamera,
     Texture,
+    have_imgui_bundle,
 )
 from fury.ui import Rectangle2D
 from fury.window import (
@@ -483,3 +484,61 @@ def test_show_manager_fps_display():
     assert show_m_no_fps._stats is None
     assert show_m_no_fps._stats_initialized is False
     assert show_m_no_fps.get_fps() is None
+
+
+@pytest.mark.skipif(not have_imgui_bundle, reason="Needs Imgui Bundle")
+def test_show_manager_enable_imgui_creates_renderer():
+    """ImGui should be disabled by default and created on enable_imgui()."""
+
+    show_m = ShowManager(window_type="offscreen")
+
+    assert show_m._imgui is None
+
+    show_m.enable_imgui()
+    assert show_m._imgui is not None
+
+
+@pytest.mark.skipif(not have_imgui_bundle, reason="Needs Imgui Bundle")
+def test_show_manager_disable_imgui_clears_renderer():
+    """disable_imgui() should clear the _imgui reference."""
+
+    show_m = ShowManager(window_type="offscreen")
+
+    show_m.enable_imgui()
+    assert show_m._imgui is not None
+
+    show_m.disable_imgui()
+    assert show_m._imgui is None
+
+
+@pytest.mark.skipif(not have_imgui_bundle, reason="Needs Imgui Bundle")
+def test_show_manager_enable_imgui_idempotent():
+    """Calling enable_imgui() twice should keep the same renderer instance."""
+
+    show_m = ShowManager(window_type="offscreen")
+
+    show_m.enable_imgui()
+    first_imgui = show_m._imgui
+
+    show_m.enable_imgui()
+    second_imgui = show_m._imgui
+
+    assert first_imgui is second_imgui
+
+
+@pytest.mark.skipif(not have_imgui_bundle, reason="Needs Imgui Bundle")
+def test_show_manager_set_imgui_render_callback_only_when_enabled():
+    """set_imgui_render_callback should only wire callback once ImGui is enabled."""
+
+    show_m = ShowManager(window_type="offscreen")
+
+    def dummy_callback():
+        pass
+
+    show_m.set_imgui_render_callback(dummy_callback)
+    assert show_m._imgui is None
+
+    show_m.enable_imgui()
+    show_m.set_imgui_render_callback(dummy_callback)
+    assert show_m._imgui is not None
+    assert show_m._imgui._update_gui_function == dummy_callback
