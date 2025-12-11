@@ -35,6 +35,7 @@ from fury.lib import (
     ScreenCoordsCamera,
     Stats,
     TrackballController,
+    UIRenderer,
     Viewport,
     call_later,
     get_app,
@@ -514,6 +515,10 @@ class ShowManager:
         Whether to display FPS statistics using an on-screen overlay.
     max_fps : int
         Maximum frames per second for the canvas.
+    imgui : bool, optional
+            Whether to enable ImGui UI rendering support.
+    imgui_draw_function : callable, optional
+        A function that updates the ImGui UI elements each frame.
     """
 
     def __init__(
@@ -534,6 +539,8 @@ class ShowManager:
         qt_parent=None,
         show_fps=False,
         max_fps=60,
+        imgui=False,
+        imgui_draw_function=None,
     ):
         """Manage the rendering window, scenes, and interactions.
 
@@ -585,6 +592,10 @@ class ShowManager:
             Whether to display FPS statistics in the renderer.
         max_fps : int, optional
             Maximum frames per second for the canvas.
+        imgui : bool, optional
+            Whether to enable ImGui UI rendering support.
+        imgui_draw_function : callable, optional
+            A function that updates the ImGui UI elements each frame.
         """
         self._size = size
         self._title = title
@@ -629,6 +640,10 @@ class ShowManager:
 
         self._stats = None
         self._stats_initialized = False
+
+        self._imgui = None
+        if imgui:
+            self.enable_imgui(imgui_draw_function=imgui_draw_function)
 
         self.enable_events = enable_events
         self._key_long_press = None
@@ -894,6 +909,45 @@ class ShowManager:
         if name in self._callbacks:
             del self._callbacks[name]
 
+    def enable_imgui(self, *, imgui_draw_function=None):
+        """Enable ImGui UI rendering support.
+
+        Parameters
+        ----------
+        imgui_draw_function : callable, optional
+            A function that updates the ImGui UI elements each frame.
+            If None, no UI update function is set initially.
+        """
+        if self._imgui is None:
+            self._imgui = UIRenderer(self.renderer.device, self.window)
+            self.set_imgui_render_callback(imgui_draw_function)
+        else:
+            logging.warning("ImGui is already enabled for this ShowManager.")
+
+    def disable_imgui(self):
+        """Disable ImGui UI rendering support."""
+        if self._imgui is not None:
+            self._imgui = None
+        else:
+            logging.warning("ImGui is not enabled for this ShowManager.")
+
+    def set_imgui_render_callback(self, imgui_draw_function):
+        """Set the ImGui rendering callback function.
+
+        Parameters
+        ----------
+        imgui_draw_function : callable
+            A function that updates the ImGui UI elements each frame.
+        """
+        if not callable(imgui_draw_function):
+            logging.warning("The provided ImGui draw function is not callable.")
+            return
+
+        if self._imgui is not None:
+            self._imgui.set_gui(imgui_draw_function)
+        else:
+            logging.warning("ImGui is not enabled for this ShowManager.")
+
     @property
     def app(self):
         """Get the associated QApplication instance, if any.
@@ -1022,6 +1076,7 @@ class ShowManager:
             self._stats_initialized = True
 
         render_screens(self.renderer, self.screens, stats=self._stats)
+        self._imgui and self._imgui.render()
         self.window.request_draw()
 
     def render(self):

@@ -10,6 +10,18 @@ import wgpu
 
 from fury.optpkg import optional_package
 
+imgui_message = (
+    "You do not have imgui-bundle installed. The GUI will not work for you. "
+    "Please install or upgrade imgui-bundle using pip install -U imgui-bundle"
+)
+imgui_bundle, have_imgui_bundle, _ = optional_package(
+    "imgui_bundle", trip_msg=imgui_message
+)
+if have_imgui_bundle:
+    from wgpu.utils.imgui import ImguiRenderer
+else:
+    ImguiRenderer = imgui_bundle
+
 jupyter_pckg_msg = (
     "You do not have jupyter-rfb installed. The jupyter widget will not work for "
     "you. Please install or upgrade jupyter-rfb using pip install -U jupyter-rfb"
@@ -100,6 +112,7 @@ OrthographicCamera = gfx.OrthographicCamera
 PerspectiveCamera = gfx.PerspectiveCamera
 ScreenCoordsCamera = gfx.ScreenCoordsCamera
 Renderer = gfx.WgpuRenderer
+UIRenderer = ImguiRenderer
 Canvas = RenderCanvas
 OffscreenCanvas = OffscreenRenderCanvas
 BaseShader = gfx.renderers.wgpu.BaseShader

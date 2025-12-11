@@ -75,6 +75,7 @@ doc = [
     "sphinx >=6.1.2",
     "texext",
     "tomli; python_version < \"3.11\"",
+    "imgui_bundle",
     ]
 style = ["ruff", "pre-commit"]
 typing = ["mypy", "types-Pillow", "data-science-types"]
