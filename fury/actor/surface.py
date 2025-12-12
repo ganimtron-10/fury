@@ -8,8 +8,9 @@ import numpy as np
 from fury.actor import create_mesh
 from fury.geometry import buffer_to_geometry
 from fury.io import load_image_texture
+from fury.lib import Group
 from fury.material import _create_mesh_material, validate_opacity
-from fury.utils import generate_planar_uvs
+from fury.utils import generate_planar_uvs, voxel_mesh_by_object
 
 
 def surface(
@@ -75,13 +76,15 @@ def surface(
             mat = _create_mesh_material(
                 material=material, mode="vertex", opacity=opacity
             )
-        elif isinstance(colors, (tuple, list)) and len(colors) == 3:
+        elif isinstance(colors, (tuple, list, np.ndarray)) and len(colors) == 3:
             geo = buffer_to_geometry(
                 positions=vertices.astype("float32"),
                 indices=faces.astype("int32"),
                 normals=normals.astype("float32") if normals is not None else None,
             )
-            mat = _create_mesh_material(color=colors, opacity=opacity)
+            mat = _create_mesh_material(
+                material=material, mode="auto", opacity=opacity, color=colors
+            )
         else:
             raise ValueError(
                 "Colors must be either an ndarray with shape (N, 3) or (N, 4), "
@@ -123,3 +126,44 @@ def surface(
 
     obj = create_mesh(geo, mat)
     return obj
+
+
+def contour_from_volume(data, *, color=(1, 0, 0), opacity=0.5, material="phong"):
+    """Generate surface actor from a binary ROI.
+
+    Parameters
+    ----------
+    data : ndarray, shape (X, Y, Z)
+        An ROI file that will be binarized and displayed.
+    color : tuple, optional
+        The RGB output color of the contour in the range [0, 1].
+    opacity : float, optional
+        The opacity of the contour.
+        Takes values from 0 (fully transparent) to 1 (opaque).
+    material : str, optional
+        The material type for the contour mesh. Options are 'phong' and 'basic'.
+
+    Returns
+    -------
+    Group
+        A group of actors containing the generated contours from the volume data.
+    """
+
+    if color is None or len(color) != 3:
+        raise ValueError("Color must be a tuple of three values (R, G, B).")
+
+    surface_data = voxel_mesh_by_object(data, connectivity=1)
+
+    contours = Group()
+
+    for surf in surface_data.values():
+        surface_actor = surface(
+            surf["verts"],
+            surf["faces"],
+            colors=color,
+            opacity=opacity,
+            material=material,
+        )
+        contours.add(surface_actor)
+
+    return contours
