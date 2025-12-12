@@ -72,7 +72,8 @@ dev = [
 doc = [
     "fury[plot]",
     "numpydoc",
-    "sphinx >=6.1.2",
+    "sphinx >=6.1.2,<9.0.0",
+    "ablog >=0.11.1",
     "texext",
     "tomli; python_version < \"3.11\"",
     "imgui_bundle",
