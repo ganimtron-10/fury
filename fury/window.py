@@ -38,6 +38,7 @@ from fury.lib import (
     UIRenderer,
     Viewport,
     call_later,
+    display_jupyter_widget,
     get_app,
     qcall_later,
     run,
@@ -1106,6 +1107,9 @@ class ShowManager:
             self._qt_app.exec()
         else:
             run()
+
+        if self._window_type == "jupyter":
+            display_jupyter_widget(self.window)
 
     def close(self):
         """Close the rendering window and terminate the application if necessary."""
