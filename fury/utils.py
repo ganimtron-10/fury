@@ -613,7 +613,7 @@ def get_transformed_cube_bounds(affine_matrix, vertex1, vertex2):
     return [min_vals, max_vals]
 
 
-def extract_surface_voxels(volume, label_value, *, structuring_element):
+def extract_surface_voxels(volume, label_value, *, structuring_element=None):
     """Extract boundary voxel coordinates for a label within a volume.
 
     Parameters
@@ -623,8 +623,9 @@ def extract_surface_voxels(volume, label_value, *, structuring_element):
         or a cropped sub-section.
     label_value : int
         The label identifying the object whose surface voxels should be returned.
-    structuring_element : ndarray
-        Structuring element defining the desired connectivity.
+    structuring_element : ndarray, optional
+        Structuring element defining the desired connectivity. If None,
+        a default 1-connectivity structuring element is used.
 
     Returns
     -------
@@ -633,11 +634,17 @@ def extract_surface_voxels(volume, label_value, *, structuring_element):
         surface_coords has shape (N, 3) ordered as (x, y, z). Returns None when
         the label does not have exposed voxels.
     """
+
+    if structuring_element is None:
+        structuring_element = generate_binary_structure(rank=3, connectivity=1)
+
     object_mask = volume == label_value
 
-    surface_mask = object_mask & ~binary_erosion(
+    volume_interior_mask = binary_erosion(
         object_mask, structure=structuring_element, border_value=0
     )
+    background_and_surface_mask = np.logical_not(volume_interior_mask)
+    surface_mask = np.logical_and(object_mask, background_and_surface_mask)
 
     z_coords, y_coords, x_coords = np.nonzero(surface_mask)
 
@@ -781,7 +788,7 @@ def voxel_mesh_by_object(
         occupied = np.zeros_like(valid, dtype=bool)
         valid_idx = np.where(valid)
         occupied[valid_idx] = object_mask[nz[valid_idx], ny[valid_idx], nx[valid_idx]]
-        exposed = ~occupied
+        exposed = np.logical_not(occupied)
 
         if not np.any(exposed):
             continue

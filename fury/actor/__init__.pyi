@@ -117,7 +117,7 @@ from .slicer import (
     vector_field,
     vector_field_slicer,
 )
-from .surface import contour_from_volume, surface
+from .topology import contour_from_volume, surface
 from .utils import (
     apply_affine_to_actor,
     apply_affine_to_group,

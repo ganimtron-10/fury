@@ -5,10 +5,9 @@ import os
 
 import numpy as np
 
-from fury.actor import create_mesh
+from fury.actor import Group, create_mesh
 from fury.geometry import buffer_to_geometry
 from fury.io import load_image_texture
-from fury.lib import Group
 from fury.material import _create_mesh_material, validate_opacity
 from fury.utils import generate_planar_uvs, voxel_mesh_by_object
 
