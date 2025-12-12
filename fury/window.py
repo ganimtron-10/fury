@@ -14,7 +14,9 @@ import os
 
 from PIL.Image import fromarray as image_from_array
 import numpy as np
+from scipy import ndimage
 
+from fury.io import load_image
 from fury.lib import (
     AmbientLight,
     Background,
@@ -1163,6 +1165,80 @@ def snapshot(
 
     if return_array:
         return arr
+
+
+def analyze_snapshot(im, *, colors=None, find_objects=True, strel=None):
+    """Analyze snapshot from memory or file.
+
+    Parameters
+    ----------
+    im : str or array
+        If string then the image is read from a file otherwise the image is
+        read from a numpy array. The array is expected to be of shape (X, Y, 3)
+        or (X, Y, 4) where the last dimensions are the RGB or RGBA values.
+    colors : tuple or list of tuples, optional
+        List of colors to search in the image.
+    find_objects : bool, optional
+        If True it will calculate the number of objects that are different
+        from the background and return their position in a new image.
+    strel : 2d array, optional
+        Structure element to use for finding the objects of size (3, 3).
+
+    Returns
+    -------
+    ReportSnapshot
+        This is an object with attributes like ``colors_found`` that give
+        information about what was found in the current snapshot array ``im``.
+    """
+    if isinstance(im, str):
+        im = load_image(im)
+
+    class ReportSnapshot:
+        """Report class for snapshot analysis results."""
+
+        objects = None
+        labels = None
+        colors_found = False
+
+        def __str__(self):
+            """String method for printing.
+
+            Returns
+            -------
+            str
+                A formatted string report of the snapshot analysis.
+            """
+            msg = "Report:\n-------\n"
+            msg += "objects: {}\n".format(self.objects)
+            msg += "labels: \n{}\n".format(self.labels)
+            msg += "colors_found: {}\n".format(self.colors_found)
+            return msg
+
+    report = ReportSnapshot()
+
+    if colors is not None:
+        if isinstance(colors, tuple):
+            colors = [colors]
+        flags = [False] * len(colors)
+        for i, col in enumerate(colors):
+            flags[i] = np.any(np.any(np.all(np.equal(im[..., :3], col[:3]), axis=-1)))
+
+        report.colors_found = flags
+
+    if find_objects is True:
+        weights = [0.299, 0.587, 0.144]
+        gray = np.dot(im[..., :3], weights)
+        bg_color2 = im[0, 0][:3]
+        background = np.dot(bg_color2, weights)
+
+        if strel is None:
+            strel = np.array([[1, 1, 1], [1, 1, 1], [1, 1, 1]])
+
+        labels, objects = ndimage.label(gray != background, strel)
+        report.labels = labels
+        report.objects = objects
+
+    return report
 
 
 def show(actors, *, window_type="default"):

@@ -21,6 +21,7 @@ from fury.ui import Rectangle2D
 from fury.window import (
     Scene,
     ShowManager,
+    analyze_snapshot,
     calculate_screen_sizes,
     create_screen,
     show,
@@ -32,7 +33,7 @@ from fury.window import (
 @pytest.fixture
 def sample_actor():
     "Fixture to provide a simple actor."
-    actor = sphere(np.zeros((1, 3)))
+    actor = sphere(np.zeros((1, 3)), material="basic")
     return actor
 
 
@@ -290,11 +291,14 @@ def test_show_manager_update_camera(sample_actor):
     assert show_m.screens[0].camera.height != 800
 
 
-def test_show_manager_snapshot(tmpdir):
+def test_show_manager_snapshot(tmpdir, sample_actor):
     """Test taking a snapshot of the scene."""
     fname = tmpdir.join("snapshot.png")
 
-    show_m = ShowManager(window_type="offscreen")
+    scene = Scene()
+    scene.add(sample_actor)
+
+    show_m = ShowManager(scene=scene, window_type="offscreen")
     show_m.render()
     show_m.window.draw()
     arr = show_m.snapshot(str(fname))
@@ -305,18 +309,33 @@ def test_show_manager_snapshot(tmpdir):
     assert arr.shape[2] == 4  # RGBA image
     np.testing.assert_equal(arr, saved_arr)
 
+    report = analyze_snapshot(str(fname), colors=[(255, 0, 0)])
+    assert report.colors_found == [True]
+    assert report.objects == 1
 
-def test_show_manager_snapshot_multiple_screens(tmpdir):
+
+def test_show_manager_snapshot_multiple_screens(tmpdir, sample_actor):
     """Test taking a snapshot with multiple screens."""
-    show_m = ShowManager(screen_config=[2], window_type="offscreen")  # Two screens
     fname = tmpdir.join("snapshot_multiple.png")
+
+    scene = Scene()
+    scene.add(sample_actor)
+
+    show_m = ShowManager(
+        scene=scene, screen_config=[2], window_type="offscreen"
+    )  # Two screens
     show_m.render()
     show_m.window.draw()
     arr = show_m.snapshot(str(fname))
     saved_arr = load_image(str(fname))
+
     assert isinstance(arr, np.ndarray)
     assert arr.shape[2] == 4  # RGBA image
     np.testing.assert_equal(arr, saved_arr)
+
+    report = analyze_snapshot(str(fname), colors=[(255, 0, 0)])
+    assert report.colors_found == [True]
+    assert report.objects == 2
 
 
 def test_show_manager_invalid_window_type():
@@ -542,3 +561,52 @@ def test_show_manager_set_imgui_render_callback_only_when_enabled():
     show_m.set_imgui_render_callback(dummy_callback)
     assert show_m._imgui is not None
     assert show_m._imgui._update_gui_function == dummy_callback
+
+
+def test_analyze_snapshot(tmpdir):
+    """Test analyze_snapshot function."""
+    # Create a test image with a black background and two colored squares
+    img = np.zeros((20, 20, 3), dtype=np.uint8)
+    img[2:6, 2:6] = [255, 0, 0]  # Red square
+    img[10:15, 10:15] = [0, 255, 0]  # Green square
+
+    # Test 1: Find objects in the image array
+    report = analyze_snapshot(img, find_objects=True)
+    assert report.objects == 2
+    assert report.labels.shape == (20, 20)
+    assert not report.colors_found
+
+    # Test 2: Find specific colors
+    report = analyze_snapshot(
+        img, colors=[(255, 0, 0), (0, 0, 255)], find_objects=False
+    )
+    assert report.objects is None
+    assert report.labels is None
+    assert report.colors_found == [True, False]
+
+    # Test 3: Find a single color
+    report = analyze_snapshot(img, colors=(0, 255, 0), find_objects=False)
+    assert report.colors_found == [True]
+
+    # Test 4: Analyze from a saved file
+    fname = tmpdir.join("test_snapshot.png")
+    from fury.io import save_image
+
+    save_image(img, str(fname))
+    report_from_file = analyze_snapshot(str(fname))
+    assert report_from_file.objects == 2
+
+    # Test 5: With RGBA image
+    img_rgba = np.zeros((20, 20, 4), dtype=np.uint8)
+    img_rgba[2:6, 2:6] = [255, 0, 0, 255]
+    img_rgba[10:15, 10:15] = [0, 255, 0, 255]
+    report_rgba = analyze_snapshot(img_rgba)
+    assert report_rgba.objects == 2
+
+    # Test 6: Custom structuring element
+    # A larger strel might merge close objects
+    strel = np.ones((3, 3))
+    report_strel = analyze_snapshot(img, strel=strel)
+    # Depending on the image and strel, this could be 1 or 2.
+    # For this specific setup, the squares are far apart.
+    assert report_strel.objects == 2
