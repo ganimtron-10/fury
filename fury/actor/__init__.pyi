@@ -59,10 +59,13 @@ __all__ = [
     "apply_affine_to_actor",
     "get_slices",
     "show_slices",
+    "contour_from_volume",
+    "contour_from_roi",
+    "contour_from_label",
 ]
 
 from .billboard import billboard
-from .bio import peaks_slicer, volume_slicer
+from .bio import contour_from_label, contour_from_roi, peaks_slicer, volume_slicer
 from .core import (
     Actor,
     Group,
@@ -114,7 +117,7 @@ from .slicer import (
     vector_field,
     vector_field_slicer,
 )
-from .surface import surface
+from .surface import contour_from_volume, surface
 from .utils import (
     apply_affine_to_actor,
     apply_affine_to_group,
