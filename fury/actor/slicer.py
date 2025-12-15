@@ -2,14 +2,12 @@
 
 import numpy as np
 
+from fury.actor.core import Actor, Group, Mesh, Volume
 from fury.geometry import buffer_to_geometry
 from fury.lib import (
     Geometry,
-    Group,
-    Mesh,
     MeshPhongShader,
     Texture,
-    Volume,
     VolumeSliceMaterial,
     WorldObject,
     register_wgpu_render_function,
@@ -128,7 +126,7 @@ def data_slicer(
     return obj
 
 
-class VectorField(WorldObject):
+class VectorField(WorldObject, Actor):
     """Class to visualize a vector field.
 
     Parameters

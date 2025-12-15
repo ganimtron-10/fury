@@ -2,7 +2,8 @@ import numpy as np
 import pytest
 
 from fury.actor import data_slicer, line_projection
-from fury.lib import AffineTransform, Group, Mesh, RecursiveTransform, WorldObject
+from fury.actor.core import Group, Mesh
+from fury.lib import AffineTransform, RecursiveTransform, WorldObject
 from fury.utils import (
     apply_affine_to_actor,
     apply_affine_to_group,

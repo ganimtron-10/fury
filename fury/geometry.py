@@ -1,23 +1,9 @@
 """Geometry utilities for FURY."""
 
-from PIL import Image as PILImage
 import numpy as np
 
 from fury.lib import (
     Geometry,
-    Image,
-    ImageBasicMaterial,
-    Line,
-    Mesh,
-    MeshBasicMaterial,
-    MeshPhongMaterial,
-    Points,
-    PointsGaussianBlobMaterial,
-    PointsMarkerMaterial,
-    PointsMaterial,
-    Text,
-    TextMaterial,
-    Texture,
 )
 
 
@@ -47,59 +33,6 @@ def buffer_to_geometry(positions, **kwargs):
 
     geo = Geometry(positions=positions, **kwargs)
     return geo
-
-
-def create_mesh(geometry, material):
-    """Create a mesh object.
-
-    Parameters
-    ----------
-    geometry : Geometry
-        The geometry object.
-    material : Material
-        The material object. Must be either MeshPhongMaterial or MeshBasicMaterial.
-
-    Returns
-    -------
-    Mesh
-        The mesh object.
-
-    Raises
-    ------
-    TypeError
-        If geometry is not an instance of Geometry or material is not an
-        instance of MeshPhongMaterial or MeshBasicMaterial.
-    """
-    if not isinstance(geometry, Geometry):
-        raise TypeError("geometry must be an instance of Geometry.")
-
-    if not isinstance(material, (MeshPhongMaterial, MeshBasicMaterial)):
-        raise TypeError(
-            "material must be an instance of MeshPhongMaterial or MeshBasicMaterial."
-        )
-
-    mesh = Mesh(geometry=geometry, material=material)
-    return mesh
-
-
-def create_line(geometry, material):
-    """
-    Create a line object.
-
-    Parameters
-    ----------
-    geometry : Geometry
-        The geometry object.
-    material : Material
-        The material object.
-
-    Returns
-    -------
-    Line
-        The line object.
-    """
-    line = Line(geometry=geometry, material=material)
-    return line
 
 
 def line_buffer_separator(line_vertices, color=None):
@@ -177,120 +110,6 @@ def line_buffer_separator(line_vertices, color=None):
             idx += 1
 
     return positions_result, colors_result
-
-
-def create_point(geometry, material):
-    """Create a point object.
-
-    Parameters
-    ----------
-    geometry : Geometry
-        The geometry object.
-    material : Material
-        The material object. Must be either PointsMaterial, PointsGaussianBlobMaterial,
-        or PointsMarkerMaterial.
-
-    Returns
-    -------
-    Points
-        The point object.
-
-    Raises
-    ------
-    TypeError
-        If geometry is not an instance of Geometry or material is not an
-        instance of PointsMaterial, PointsGaussianBlobMaterial, or PointsMarkerMaterial.
-    """
-    if not isinstance(geometry, Geometry):
-        raise TypeError("geometry must be an instance of Geometry.")
-
-    if not isinstance(
-        material, (PointsMaterial, PointsGaussianBlobMaterial, PointsMarkerMaterial)
-    ):
-        raise TypeError(
-            "material must be an instance of PointsMaterial, "
-            "PointsGaussianBlobMaterial or PointsMarkerMaterial."
-        )
-
-    point = Points(geometry=geometry, material=material)
-    return point
-
-
-def create_text(text, material, **kwargs):
-    """Create a text object.
-
-    Parameters
-    ----------
-    text : str
-        The text content.
-    material : TextMaterial
-        The material object.
-    **kwargs : dict
-        Additional properties like font_size, anchor, etc.
-
-    Returns
-    -------
-    Text
-        The text object.
-
-    Raises
-    ------
-    TypeError
-        If text is not a string or material is not an instance of TextMaterial.
-    """
-    if not isinstance(text, str):
-        raise TypeError("text must be a string.")
-
-    if not isinstance(material, TextMaterial):
-        raise TypeError("material must be an instance of TextMaterial.")
-
-    text = Text(text=text, material=material, **kwargs)
-    return text
-
-
-def create_image(image_input, material, **kwargs):
-    """Create an image object.
-
-    Parameters
-    ----------
-    image_input : str or np.ndarray, optional
-        The image content.
-    material : Material
-        The material object.
-    **kwargs : dict, optional
-        Additional properties like position, visible, etc.
-
-    Returns
-    -------
-    Image
-        The image object.
-    """
-    if isinstance(image_input, str):
-        image = np.flipud(np.array(PILImage.open(image_input)).astype(np.float32))
-    elif isinstance(image_input, np.ndarray):
-        if image_input.ndim not in (2, 3):
-            raise ValueError("image_input must be a 2D or 3D NumPy array.")
-        if image_input.ndim == 3 and image_input.shape[2] not in (1, 3, 4):
-            raise ValueError("image_input must have 1, 3, or 4 channels.")
-        image = image_input
-    else:
-        raise TypeError("image_input must be a file path (str) or a NumPy array.")
-
-    if image.ndim != 2:
-        raise ValueError("Only 2D grayscale images are supported.")
-
-    if image.max() > 1.0 or image.min() < 0.0:
-        if image.max() == image.min():
-            raise ValueError("Cannot normalize an image with constant pixel values.")
-        image = (image - image.min()) / (image.max() - image.min())
-
-    if not isinstance(material, ImageBasicMaterial):
-        raise TypeError("material must be an instance of ImageBasicMaterial.")
-
-    image = Image(
-        Geometry(grid=Texture(image.astype(np.float32), dim=2)), material=material
-    )
-    return image
 
 
 def rotate_vector(v, axis, angle):

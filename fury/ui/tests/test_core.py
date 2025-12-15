@@ -5,7 +5,7 @@ import numpy as np
 import numpy.testing as npt
 
 from fury import ui, window
-from fury.lib import Mesh
+from fury.actor.core import Mesh
 from fury.ui.helpers import Anchor
 
 

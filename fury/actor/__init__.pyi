@@ -40,11 +40,26 @@ __all__ = [
     "peaks_slicer",
     "streamlines",
     "line_projection",
+    "create_mesh",
+    "create_line",
+    "create_point",
+    "create_text",
+    "create_image",
 ]
 
 from .billboard import billboard
 from .bio import peaks_slicer, volume_slicer
-from .core import actor_from_primitive, arrow, axes, line
+from .core import (
+    actor_from_primitive,
+    arrow,
+    axes,
+    create_image,
+    create_line,
+    create_mesh,
+    create_point,
+    create_text,
+    line,
+)
 from .curved import cone, cylinder, ellipsoid, sphere, streamlines, streamtube
 from .planar import (
     disk,

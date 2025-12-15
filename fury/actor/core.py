@@ -1,16 +1,325 @@
 # -*- coding: utf-8 -*-
 """Core actor functionality for FURY."""
 
+from PIL import Image as PILImage
 import numpy as np
+from scipy.spatial.transform import Rotation as Rot
 
 from fury.geometry import (
     buffer_to_geometry,
-    create_line,
-    create_mesh,
     line_buffer_separator,
+)
+from fury.lib import (
+    Geometry,
+    ImageBasicMaterial,
+    MeshBasicMaterial,
+    MeshPhongMaterial,
+    PointsGaussianBlobMaterial,
+    PointsMarkerMaterial,
+    PointsMaterial,
+    TextMaterial,
+    Texture,
+    gfx,
 )
 from fury.material import _create_line_material, _create_mesh_material
 import fury.primitive as fp
+
+
+class Actor:
+    """Base Actor class for making APIs user-friendly."""
+
+    def rotate(self, rotation):
+        """Rotate the actor by the given rotation.
+
+        Parameters
+        ----------
+        rotation : tuple
+            Rotation angles (in degrees) around the x, y, and z axes.
+        """
+        rotation = np.asarray(rotation, dtype=np.float32)
+        if rotation.shape != (3,):
+            raise ValueError("Rotation must contain three angles (degrees).")
+
+        quaternion = self._euler_to_quaternion(np.radians(rotation))
+        self.local.rotation = quaternion
+
+    def translate(self, translation):
+        """Translate the actor by the given translation vector.
+
+        Parameters
+        ----------
+        translation : tuple
+            Translation vector along the x, y, and z axes.
+        """
+        if not isinstance(translation, (list, tuple, np.ndarray)):
+            raise ValueError("Translation must be a sequence of three values.")
+        translation = np.asarray(translation, dtype=np.float32)
+        if translation.shape != (3,):
+            raise ValueError("Translation must contain three values.")
+        self.local.position = translation
+
+    def scale(self, scale):
+        """Scale the actor by the given scale factors.
+
+        Parameters
+        ----------
+        scale : tuple or float
+            Scale factors along the x, y, and z axes. If a single float
+            is provided, uniform scaling is applied.
+        """
+
+        if isinstance(scale, (int, float)):
+            scale = (scale, scale, scale)
+        elif not isinstance(scale, (list, tuple, np.ndarray)):
+            raise ValueError(
+                "Scale must be a sequence of three values or a single float."
+            )
+
+        scale = np.asarray(scale, dtype=np.float32)
+        if scale.shape != (3,):
+            raise ValueError("Scale must contain three values.")
+        self.local.scale = scale
+
+    def transform(self, matrix):
+        """Apply a transformation matrix to the actor.
+
+        Parameters
+        ----------
+        matrix : ndarray, shape (4, 4)
+            Transformation matrix to be applied to the actor.
+        """
+
+        if not isinstance(matrix, np.ndarray):
+            raise ValueError("Transformation matrix must be a numpy array.")
+        elif matrix.shape != (4, 4):
+            raise ValueError("Transformation matrix must be of shape (4, 4).")
+        self.local.matrix = matrix
+
+    def opacity(self, opacity):
+        """Set the opacity of the actor.
+
+        Parameters
+        ----------
+        opacity : float
+            Opacity value between 0 (fully transparent) and 1 (fully opaque).
+        """
+        if isinstance(opacity, (int, float)) is False:
+            raise ValueError("Opacity must be a float value between 0 and 1.")
+        if not (0.0 <= opacity <= 1.0):
+            raise ValueError("Opacity must be between 0 and 1.")
+        self.material.opacity = opacity
+
+    @staticmethod
+    def _euler_to_quaternion(rotation):
+        """Convert XYZ Euler angles (radians) to a quaternion.
+
+        Parameters
+        ----------
+        rotation : tuple or ndarray
+            Rotation angles (in radians) around the x, y, and z axes.
+
+        Returns
+        -------
+        ndarray
+            Quaternion representing the rotation.
+        """
+
+        return Rot.from_euler("xyz", rotation).as_quat()
+
+
+class Mesh(gfx.Mesh, Actor):
+    """Mesh actor class."""
+
+
+class Points(gfx.Points, Actor):
+    """Points actor class."""
+
+
+class Line(gfx.Line, Actor):
+    """Line actor class."""
+
+
+class Text(gfx.Text, Actor):
+    """Text actor class."""
+
+
+class Image(gfx.Image, Actor):
+    """Image actor class."""
+
+
+class Volume(gfx.Volume, Actor):
+    """Volume actor class."""
+
+
+class Group(gfx.Group, Actor):
+    """Group actor class."""
+
+
+def create_mesh(geometry, material):
+    """Create a mesh object.
+
+    Parameters
+    ----------
+    geometry : Geometry
+        The geometry object.
+    material : Material
+        The material object. Must be either MeshPhongMaterial or MeshBasicMaterial.
+
+    Returns
+    -------
+    Mesh
+        The mesh object.
+
+    Raises
+    ------
+    TypeError
+        If geometry is not an instance of Geometry or material is not an
+        instance of MeshPhongMaterial or MeshBasicMaterial.
+    """
+    if not isinstance(geometry, Geometry):
+        raise TypeError("geometry must be an instance of Geometry.")
+
+    if not isinstance(material, (MeshPhongMaterial, MeshBasicMaterial)):
+        raise TypeError(
+            "material must be an instance of MeshPhongMaterial or MeshBasicMaterial."
+        )
+
+    mesh = Mesh(geometry=geometry, material=material)
+    return mesh
+
+
+def create_line(geometry, material):
+    """
+    Create a line object.
+
+    Parameters
+    ----------
+    geometry : Geometry
+        The geometry object.
+    material : Material
+        The material object.
+
+    Returns
+    -------
+    Line
+        The line object.
+    """
+    line = Line(geometry=geometry, material=material)
+    return line
+
+
+def create_point(geometry, material):
+    """Create a point object.
+
+    Parameters
+    ----------
+    geometry : Geometry
+        The geometry object.
+    material : Material
+        The material object. Must be either PointsMaterial, PointsGaussianBlobMaterial,
+        or PointsMarkerMaterial.
+
+    Returns
+    -------
+    Points
+        The point object.
+
+    Raises
+    ------
+    TypeError
+        If geometry is not an instance of Geometry or material is not an
+        instance of PointsMaterial, PointsGaussianBlobMaterial, or PointsMarkerMaterial.
+    """
+    if not isinstance(geometry, Geometry):
+        raise TypeError("geometry must be an instance of Geometry.")
+
+    if not isinstance(
+        material, (PointsMaterial, PointsGaussianBlobMaterial, PointsMarkerMaterial)
+    ):
+        raise TypeError(
+            "material must be an instance of PointsMaterial, "
+            "PointsGaussianBlobMaterial or PointsMarkerMaterial."
+        )
+
+    point = Points(geometry=geometry, material=material)
+    return point
+
+
+def create_text(text, material, **kwargs):
+    """Create a text object.
+
+    Parameters
+    ----------
+    text : str
+        The text content.
+    material : TextMaterial
+        The material object.
+    **kwargs : dict
+        Additional properties like font_size, anchor, etc.
+
+    Returns
+    -------
+    Text
+        The text object.
+
+    Raises
+    ------
+    TypeError
+        If text is not a string or material is not an instance of TextMaterial.
+    """
+    if not isinstance(text, str):
+        raise TypeError("text must be a string.")
+
+    if not isinstance(material, TextMaterial):
+        raise TypeError("material must be an instance of TextMaterial.")
+
+    text = Text(text=text, material=material, **kwargs)
+    return text
+
+
+def create_image(image_input, material, **kwargs):
+    """Create an image object.
+
+    Parameters
+    ----------
+    image_input : str or np.ndarray, optional
+        The image content.
+    material : Material
+        The material object.
+    **kwargs : dict, optional
+        Additional properties like position, visible, etc.
+
+    Returns
+    -------
+    Image
+        The image object.
+    """
+    if isinstance(image_input, str):
+        image = np.flipud(np.array(PILImage.open(image_input)).astype(np.float32))
+    elif isinstance(image_input, np.ndarray):
+        if image_input.ndim not in (2, 3):
+            raise ValueError("image_input must be a 2D or 3D NumPy array.")
+        if image_input.ndim == 3 and image_input.shape[2] not in (1, 3, 4):
+            raise ValueError("image_input must have 1, 3, or 4 channels.")
+        image = image_input
+    else:
+        raise TypeError("image_input must be a file path (str) or a NumPy array.")
+
+    if image.ndim != 2:
+        raise ValueError("Only 2D grayscale images are supported.")
+
+    if image.max() > 1.0 or image.min() < 0.0:
+        if image.max() == image.min():
+            raise ValueError("Cannot normalize an image with constant pixel values.")
+        image = (image - image.min()) / (image.max() - image.min())
+
+    if not isinstance(material, ImageBasicMaterial):
+        raise TypeError("material must be an instance of ImageBasicMaterial.")
+
+    image = Image(
+        Geometry(grid=Texture(image.astype(np.float32), dim=2)), material=material
+    )
+    return image
 
 
 def actor_from_primitive(

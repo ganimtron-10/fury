@@ -9,8 +9,9 @@ from __future__ import annotations
 
 import numpy as np
 
+from fury.actor.core import Mesh
 from fury.geometry import buffer_to_geometry
-from fury.lib import Mesh, register_wgpu_render_function
+from fury.lib import register_wgpu_render_function
 from fury.material import BillboardMaterial, validate_opacity
 
 

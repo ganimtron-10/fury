@@ -2,7 +2,8 @@ import numpy as np
 import pytest
 
 from fury.actor import peaks_slicer, volume_slicer
-from fury.lib import AffineTransform, Group
+from fury.actor.core import Group
+from fury.lib import AffineTransform
 
 
 def test_volume_slicer_comprehensive():

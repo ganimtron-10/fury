@@ -11,7 +11,8 @@ import numpy as np
 from scipy.ndimage import map_coordinates
 from scipy.special import factorial, lpmv
 
-from fury.lib import AffineTransform, Group, RecursiveTransform, WorldObject
+from fury.actor.core import Group
+from fury.lib import AffineTransform, RecursiveTransform, WorldObject
 from fury.material import validate_opacity
 from fury.transform import cart2sphere
 

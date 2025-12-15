@@ -4,12 +4,11 @@ from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 
-from fury.actor import actor_from_primitive
-from fury.geometry import buffer_to_geometry, create_mesh, line_buffer_separator
+from fury.actor import actor_from_primitive, create_mesh
+from fury.actor.core import Line, Mesh
+from fury.geometry import buffer_to_geometry, line_buffer_separator
 from fury.lib import (
     Buffer,
-    Line,
-    Mesh,
     register_wgpu_render_function,
 )
 from fury.material import (

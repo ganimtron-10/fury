@@ -2,7 +2,8 @@ import numpy as np
 import pytest
 
 from fury import material, window
-from fury.geometry import buffer_to_geometry, create_mesh
+from fury.actor import create_mesh
+from fury.geometry import buffer_to_geometry
 from fury.lib import (
     ImageBasicMaterial,
     LineArrowMaterial,

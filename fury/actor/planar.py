@@ -6,16 +6,13 @@ import logging
 import numpy as np
 from scipy.spatial.transform import Rotation as R
 
-from fury.actor import actor_from_primitive
+from fury.actor import actor_from_primitive, create_image, create_point, create_text
+from fury.actor.core import Points
 from fury.geometry import (
     buffer_to_geometry,
-    create_image,
-    create_point,
-    create_text,
     line_buffer_separator,
 )
 from fury.lib import (
-    Points,
     PointsMarkerMaterial,
     PointsMaterial,
     PointsShader,
