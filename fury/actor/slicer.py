@@ -2,7 +2,15 @@
 
 import numpy as np
 
-from fury.actor.core import Actor, Group, Mesh, Volume
+from fury.actor import (
+    Actor,
+    Group,
+    Mesh,
+    Volume,
+    set_group_opacity,
+    set_group_visibility,
+    show_slices,
+)
 from fury.geometry import buffer_to_geometry
 from fury.lib import (
     Geometry,
@@ -32,9 +40,6 @@ from fury.utils import (
     create_sh_basis_matrix,
     get_lmax,
     get_n_coeffs,
-    set_group_opacity,
-    set_group_visibility,
-    show_slices,
 )
 
 

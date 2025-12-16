@@ -16,7 +16,7 @@ from PIL.Image import fromarray as image_from_array
 import numpy as np
 from scipy import ndimage
 
-from fury.actor.core import Group as GfxGroup
+from fury.actor import Group as GfxGroup
 from fury.io import load_image
 from fury.lib import (
     AmbientLight,

@@ -45,11 +45,33 @@ __all__ = [
     "create_point",
     "create_text",
     "create_image",
+    "Mesh",
+    "Line",
+    "Points",
+    "Text",
+    "Image",
+    "Group",
+    "Volume",
+    "Actor",
+    "set_group_opacity",
+    "set_group_visibility",
+    "apply_affine_to_group",
+    "apply_affine_to_actor",
+    "get_slices",
+    "show_slices",
 ]
 
 from .billboard import billboard
 from .bio import peaks_slicer, volume_slicer
 from .core import (
+    Actor,
+    Group,
+    Image,
+    Line,
+    Mesh,
+    Points,
+    Text,
+    Volume,
     actor_from_primitive,
     arrow,
     axes,
@@ -93,3 +115,11 @@ from .slicer import (
     vector_field_slicer,
 )
 from .surface import surface
+from .utils import (
+    apply_affine_to_actor,
+    apply_affine_to_group,
+    get_slices,
+    set_group_opacity,
+    set_group_visibility,
+    show_slices,
+)
