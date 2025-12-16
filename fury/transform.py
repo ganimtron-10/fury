@@ -215,13 +215,53 @@ def cart2sphere(x, y, z):
     return r, theta, phi
 
 
-def translate(translation):
+def _apply_actor_transform(matrix, actor, transfomation_type):
+    """Apply a transformation matrix to an actor based on the given mode.
+
+    Parameters
+    ----------
+    matrix : ndarray (4, 4)
+        Homogeneous transformation matrix to be applied.
+    actor : Actor
+        The actor to which the transformation will be applied.
+    transfomation_type : str
+        Type of transformation to apply to the actor. Can be either
+        `relative` or `absolute`.
+        - The `relative` transformation multiplies the current transformation matrix
+        with the new matrix.
+        - The `absolute` transformation sets the actor's transformation matrix to the
+        new matrix.
+    """
+    if actor is None:
+        return
+
+    if transfomation_type not in ["relative", "absolute"]:
+        raise ValueError(
+            "transfomation_type should be either `relative` or `absolute`."
+        )
+
+    if transfomation_type == "relative":
+        actor.local.matrix = matrix @ actor.local.matrix
+    else:
+        actor.local.matrix = matrix
+
+
+def translate(translation, *, actor=None, transfomation_type="relative"):
     """Create a transformation matrix for translation.
 
     Parameters
     ----------
     translation : ndarray (3,)
         Translation vector in x, y and z directions.
+    actor : Actor, optional
+        If provided, the transformation will be applied to this actor.
+    transfomation_type : str, optional
+        Type of transformation to apply to the actor. Can be either
+        `relative` or `absolute`.
+        - The `relative` transformation multiplies the current transformation matrix
+        with the new translation matrix.
+        - The `absolute` transformation sets the actor's transformation matrix to the
+        new translation matrix.
 
     Returns
     -------
@@ -250,16 +290,26 @@ def translate(translation):
     translation = np.multiply(t, translation)
     translation = np.add(iden, translation)
 
+    _apply_actor_transform(translation, actor, transfomation_type)
     return translation
 
 
-def rotate(quat):
+def rotate(quat, *, actor=None, transfomation_type="relative"):
     """Create a transformation matrix for rotation using quaternion.
 
     Parameters
     ----------
     quat : ndarray (4,)
         Rotation quaternion in form [x, y, z, w].
+    actor : Actor, optional
+        If provided, the transformation will be applied to this actor.
+    transfomation_type : str, optional
+        Type of transformation to apply to the actor. Can be either
+        `relative` or `absolute`.
+        - The `relative` transformation multiplies the current transformation matrix
+        with the new rotation matrix.
+        - The `absolute` transformation sets the actor's transformation matrix to the
+        new rotation matrix.
 
     Returns
     -------
@@ -286,16 +336,26 @@ def rotate(quat):
     iden = np.array([[0, 0, 0, 1]]).reshape(-1, 1)
 
     rotation_mat = np.concatenate((rotation_mat, iden), axis=1)
+    _apply_actor_transform(rotation_mat, actor, transfomation_type)
     return rotation_mat
 
 
-def scale(scales):
+def scale(scales, *, actor=None, transfomation_type="relative"):
     """Create a transformation matrix for scaling.
 
     Parameters
     ----------
     scales : ndarray (3,)
         Scale factors for x, y and z directions.
+    actor : Actor, optional
+        If provided, the transformation will be applied to this actor.
+    transfomation_type : str, optional
+        Type of transformation to apply to the actor. Can be either
+        `relative` or `absolute`.
+        - The `relative` transformation multiplies the current transformation matrix
+        with the new scaling matrix.
+        - The `absolute` transformation sets the actor's transformation matrix
+        to the new scaling matrix.
 
     Returns
     -------
@@ -319,6 +379,7 @@ def scale(scales):
     for i in range(len(scales)):
         scale_mat[i][i] = scales[i]
 
+    _apply_actor_transform(scale_mat, actor, transfomation_type)
     return scale_mat
 
 

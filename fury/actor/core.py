@@ -23,6 +23,7 @@ from fury.lib import (
 )
 from fury.material import _create_line_material, _create_mesh_material
 import fury.primitive as fp
+from fury.transform import rotate, scale, translate
 
 
 class Actor:
@@ -41,7 +42,7 @@ class Actor:
             raise ValueError("Rotation must contain three angles (degrees).")
 
         quaternion = self._euler_to_quaternion(np.radians(rotation))
-        self.local.rotation = quaternion
+        rotate(quaternion, actor=self)
 
     def translate(self, translation):
         """Translate the actor by the given translation vector.
@@ -56,32 +57,34 @@ class Actor:
         translation = np.asarray(translation, dtype=np.float32)
         if translation.shape != (3,):
             raise ValueError("Translation must contain three values.")
-        self.local.position = translation
+        translate(translation, actor=self)
 
-    def scale(self, scale):
+    def scale(self, scales):
         """Scale the actor by the given scale factors.
 
         Parameters
         ----------
-        scale : tuple or float
+        scales : tuple or float
             Scale factors along the x, y, and z axes. If a single float
             is provided, uniform scaling is applied.
         """
 
-        if isinstance(scale, (int, float)):
-            scale = (scale, scale, scale)
-        elif not isinstance(scale, (list, tuple, np.ndarray)):
+        if isinstance(scales, (int, float)):
+            scales = (scales, scales, scales)
+        elif not isinstance(scales, (list, tuple, np.ndarray)):
             raise ValueError(
                 "Scale must be a sequence of three values or a single float."
             )
 
-        scale = np.asarray(scale, dtype=np.float32)
-        if scale.shape != (3,):
+        scales = np.asarray(scales, dtype=np.float32)
+        if scales.shape != (3,):
             raise ValueError("Scale must contain three values.")
-        self.local.scale = scale
+        scale(scales, actor=self)
 
     def transform(self, matrix):
         """Apply a transformation matrix to the actor.
+
+        This transformation replaces any existing transformations.
 
         Parameters
         ----------
