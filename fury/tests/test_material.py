@@ -38,6 +38,8 @@ def test_create_mesh_material():
     assert isinstance(mat, material.MeshPhongMaterial)
     assert mat.color == color + (0.5,)
     assert mat.color_mode == "auto"
+    assert mat.alpha_mode == "blend"
+    assert mat.depth_write is True
 
     color = (1, 0, 0, 0.5)
     mat = material._create_mesh_material(
@@ -89,12 +91,40 @@ def test_create_mesh_material():
     scene.add(obj)
 
 
+def test_create_material_custom_alpha_depth():
+    mat = material._create_mesh_material(alpha_mode="weighted_blend", depth_write=False)
+    assert mat.alpha_mode == "weighted_blend"
+    assert mat.depth_write is False
+
+    mat = material._create_line_material(alpha_mode="weighted_blend", depth_write=False)
+    assert mat.alpha_mode == "weighted_blend"
+    assert mat.depth_write is False
+
+    mat = material._create_points_material(
+        alpha_mode="weighted_blend", depth_write=False
+    )
+    assert mat.alpha_mode == "weighted_blend"
+    assert mat.depth_write is False
+
+    mat = material._create_text_material(alpha_mode="weighted_blend", depth_write=False)
+    assert mat.alpha_mode == "weighted_blend"
+    assert mat.depth_write is False
+
+    mat = material._create_image_material(
+        alpha_mode="weighted_blend", depth_write=False
+    )
+    assert mat.alpha_mode == "weighted_blend"
+    assert mat.depth_write is False
+
+
 def test_create_point_material():
     color = (1, 0, 0)
     mat = material._create_points_material(material="basic", color=color, mode="auto")
     assert isinstance(mat, PointsMaterial)
     assert mat.color == color
     assert mat.color_mode == "auto"
+    assert mat.alpha_mode == "blend"
+    assert mat.depth_write is True
 
     color = (1, 0, 0)
     mat = material._create_points_material(
@@ -139,6 +169,8 @@ def test_create_text_material():
     assert mat.outline_thickness == 0.0
     assert mat.weight_offset == 1.0
     assert mat.aa is True
+    assert mat.alpha_mode == "blend"
+    assert mat.depth_write is True
 
     color = (1, 0, 0, 0.5)
     mat = material._create_text_material(color=color, opacity=0.5)
@@ -158,6 +190,8 @@ def test_create_line_material():
     assert isinstance(mat, LineMaterial)
     assert mat.color == color + (0.5,)
     assert mat.color_mode == "auto"
+    assert mat.alpha_mode == "blend"
+    assert mat.depth_write is True
 
     color = (1, 0, 0)
     mat = material._create_line_material(
@@ -199,6 +233,8 @@ def test_create_image_material():
     assert mat.map is None
     assert mat.gamma == 1.0
     assert mat.interpolation == "nearest"
+    assert mat.alpha_mode == "blend"
+    assert mat.depth_write is True
 
     texture = Texture(np.random.rand(256, 256).astype(np.float32), dim=2)
     mat = material._create_image_material(
@@ -336,6 +372,8 @@ def test_create_vector_field_material_thin_line():
     assert material.thickness == 1.0
     assert material.thickness_space == "screen"
     assert material.aa is True
+    assert material.alpha_mode == "blend"
+    assert material.depth_write is True
     assert np.array_equal(material.cross_section, cross_section)
 
 
@@ -358,6 +396,8 @@ def test_create_vector_field_material_line():
     assert material.thickness == 2.0
     assert material.thickness_space == "world"
     assert material.aa is False
+    assert material.alpha_mode == "blend"
+    assert material.depth_write is True
     assert np.array_equal(material.cross_section, cross_section)
 
 
@@ -377,6 +417,8 @@ def test_create_vector_field_material_arrow():
     assert material.thickness == 1.5
     assert material.thickness_space == "screen"  # default
     assert material.aa is True  # default
+    assert material.alpha_mode == "blend"
+    assert material.depth_write is True
     assert np.array_equal(material.cross_section, cross_section)
 
 
