@@ -21,7 +21,7 @@ intensity value and use arrow keys to navigate through the slices.
 
 import numpy as np
 from fury import actor, window
-from fury.utils import get_slices, show_slices
+from fury.actor import get_slices, show_slices
 from fury.lib import EventType
 from dipy.data import read_mni_template
 

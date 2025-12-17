@@ -2,13 +2,14 @@
 
 import numpy as np
 
-from fury.actor import data_slicer, vector_field_slicer
-from fury.utils import (
+from fury.actor import (
     apply_affine_to_actor,
     apply_affine_to_group,
-    get_transformed_cube_bounds,
+    data_slicer,
     show_slices,
+    vector_field_slicer,
 )
+from fury.utils import get_transformed_cube_bounds
 
 
 def volume_slicer(

@@ -16,6 +16,7 @@ from PIL.Image import fromarray as image_from_array
 import numpy as np
 from scipy import ndimage
 
+from fury.actor import Group as GfxGroup
 from fury.io import load_image
 from fury.lib import (
     AmbientLight,
@@ -26,7 +27,6 @@ from fury.lib import (
     Controller,
     DirectionalLight,
     EventType,
-    Group as GfxGroup,  # type: ignore
     JupyterCanvas,
     OffscreenCanvas,
     PerspectiveCamera,

@@ -67,13 +67,12 @@ if have_py_qt6:
 if have_py_qt5:
     from PyQt5 import QtWidgets
 
+
 Texture = gfx.Texture
 TextureMap = gfx.TextureMap
 VolumeSliceMaterial = gfx.VolumeSliceMaterial
-Group = gfx.Group
 AffineTransform = gfx.objects._base.AffineTransform
 RecursiveTransform = gfx.objects._base.RecursiveTransform
-Volume = gfx.Volume
 WorldObject = gfx.WorldObject
 AmbientLight = gfx.AmbientLight
 Background = gfx.Background
@@ -87,12 +86,7 @@ Viewport: TypeAlias = gfx.Viewport
 
 Geometry = gfx.Geometry
 Material = gfx.Material
-Mesh = gfx.Mesh
-Points = gfx.Points
-Line = gfx.Line
-Text = gfx.Text
-Image = gfx.Image
-TextureMap = gfx.TextureMap
+
 
 MeshBasicMaterial = gfx.MeshBasicMaterial
 MeshPhongMaterial = gfx.MeshPhongMaterial
@@ -136,7 +130,6 @@ Buffer = gfx.Buffer
 register_wgpu_render_function = gfx.renderers.wgpu.register_wgpu_render_function
 load_wgsl = gfx.renderers.wgpu.load_wgsl
 register_wgsl_loader = gfx.renderers.wgpu.shader.register_wgsl_loader
-WorldObject = gfx.WorldObject
 
 Event = gfx.Event
 EventType = gfx.EventType

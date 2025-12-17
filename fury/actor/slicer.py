@@ -2,14 +2,20 @@
 
 import numpy as np
 
+from fury.actor import (
+    Actor,
+    Group,
+    Mesh,
+    Volume,
+    set_group_opacity,
+    set_group_visibility,
+    show_slices,
+)
 from fury.geometry import buffer_to_geometry
 from fury.lib import (
     Geometry,
-    Group,
-    Mesh,
     MeshPhongShader,
     Texture,
-    Volume,
     VolumeSliceMaterial,
     WorldObject,
     register_wgpu_render_function,
@@ -34,9 +40,6 @@ from fury.utils import (
     create_sh_basis_matrix,
     get_lmax,
     get_n_coeffs,
-    set_group_opacity,
-    set_group_visibility,
-    show_slices,
 )
 
 
@@ -128,7 +131,7 @@ def data_slicer(
     return obj
 
 
-class VectorField(WorldObject):
+class VectorField(WorldObject, Actor):
     """Class to visualize a vector field.
 
     Parameters

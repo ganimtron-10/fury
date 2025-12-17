@@ -4,8 +4,9 @@ import abc
 
 import numpy as np
 
+from fury.actor import create_mesh
 from fury.decorators import warn_on_args_to_kwargs
-from fury.geometry import buffer_to_geometry, create_mesh
+from fury.geometry import buffer_to_geometry
 from fury.lib import (
     EventType,
     plane_geometry,
