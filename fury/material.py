@@ -92,6 +92,8 @@ def _create_mesh_material(
     texture=None,
     wireframe=False,
     wireframe_thickness=-1.0,
+    alpha_mode="blend",
+    depth_write=True,
 ):
     """Create a mesh material.
 
@@ -119,6 +121,11 @@ def _create_mesh_material(
         Whether to render the mesh as a wireframe.
     wireframe_thickness : float, optional
         The thickness of the wireframe lines.
+    alpha_mode : str, optional
+        The alpha mode for the material. Please see the below link for details:
+        https://docs.pygfx.org/stable/_autosummary/materials/pygfx.materials.Material.html#pygfx.materials.Material.alpha_mode.
+    depth_write : bool, optional
+        Whether to write depth information for the material.
 
     Returns
     -------
@@ -142,6 +149,8 @@ def _create_mesh_material(
         "map": texture,
         "wireframe": wireframe,
         "wireframe_thickness": wireframe_thickness,
+        "alpha_mode": alpha_mode,
+        "depth_write": depth_write,
     }
 
     if material == "phong":
@@ -164,6 +173,8 @@ def _create_line_material(
     dash_pattern=(),
     dash_offset=0.0,
     anti_aliasing=True,
+    alpha_mode="blend",
+    depth_write=True,
 ):
     """
     Create a line material.
@@ -196,6 +207,11 @@ def _create_line_material(
         The offset into the dash cycle to start drawing at.
     anti_aliasing : bool, optional
         Whether or not the line is anti-aliased in the shader.
+    alpha_mode : str, optional
+        The alpha mode for the material. Please see the below link for details:
+        https://docs.pygfx.org/stable/_autosummary/materials/pygfx.materials.Material.html#pygfx.materials.Material.alpha_mode.
+    depth_write : bool, optional
+        Whether to write depth information for the material.
 
     Returns
     -------
@@ -215,6 +231,8 @@ def _create_line_material(
         "dash_pattern": dash_pattern,
         "dash_offset": dash_offset,
         "aa": anti_aliasing,
+        "alpha_mode": alpha_mode,
+        "depth_write": depth_write,
     }
 
     if material == "basic":
@@ -241,6 +259,8 @@ def _create_vector_field_material(
     thickness=1.0,
     thickness_space="screen",
     anti_aliasing=True,
+    alpha_mode="blend",
+    depth_write=True,
 ):
     """
     Create a line material.
@@ -269,6 +289,11 @@ def _create_vector_field_material(
         expressed ('screen', 'world', 'model').
     anti_aliasing : bool, optional
         Whether or not the line is anti-aliased in the shader.
+    alpha_mode : str, optional
+        The alpha mode for the material. Please see the below link for details:
+        https://docs.pygfx.org/stable/_autosummary/materials/pygfx.materials.Material.html#pygfx.materials.Material.alpha_mode.
+    depth_write : bool, optional
+        Whether to write depth information for the material.
 
     Returns
     -------
@@ -284,6 +309,8 @@ def _create_vector_field_material(
         "thickness": thickness,
         "thickness_space": thickness_space,
         "aa": anti_aliasing,
+        "alpha_mode": alpha_mode,
+        "depth_write": depth_write,
     }
 
     if material == "thin_line":
@@ -309,6 +336,8 @@ def _create_points_material(
     mode="vertex",
     opacity=1.0,
     enable_picking=True,
+    alpha_mode="blend",
+    depth_write=True,
 ):
     """Create a points material.
 
@@ -341,6 +370,11 @@ def _create_points_material(
         final_alpha = alpha_in_RGBA * opacity.
     enable_picking : bool, optional
         Whether the material should be pickable in a scene.
+    alpha_mode : str, optional
+        The alpha mode for the material. Please see the below link for details:
+        https://docs.pygfx.org/stable/_autosummary/materials/pygfx.materials.Material.html#pygfx.materials.Material.alpha_mode.
+    depth_write : bool, optional
+        Whether to write depth information for the material.
 
     Returns
     -------
@@ -355,36 +389,25 @@ def _create_points_material(
     opacity = validate_opacity(opacity)
     color = validate_color(color, 1.0, mode)
 
+    args = {
+        "color": color,
+        "size": size,
+        "color_mode": mode,
+        "map": map,
+        "aa": aa,
+        "pick_write": enable_picking,
+        "opacity": opacity,
+        "alpha_mode": alpha_mode,
+        "depth_write": depth_write,
+    }
+
     if material == "basic":
-        return PointsMaterial(
-            color=color,
-            size=size,
-            color_mode=mode,
-            map=map,
-            aa=aa,
-            pick_write=enable_picking,
-            opacity=opacity,
-        )
+        return PointsMaterial(**args)
     elif material == "gaussian":
-        return PointsGaussianBlobMaterial(
-            color=color,
-            size=size,
-            color_mode=mode,
-            map=map,
-            aa=aa,
-            pick_write=enable_picking,
-            opacity=opacity,
-        )
+        return PointsGaussianBlobMaterial(**args)
     elif material == "marker":
         return PointsMarkerMaterial(
-            color=color,
-            size=size,
-            marker=marker,
-            edge_color=edge_color,
-            edge_width=edge_width,
-            pick_write=enable_picking,
-            color_mode=mode,
-            opacity=opacity,
+            marker=marker, edge_color=edge_color, edge_width=edge_width, **args
         )
     else:
         raise ValueError(f"Unsupported material type: {material}")
@@ -398,6 +421,8 @@ def _create_text_material(
     outline_thickness=0.0,
     weight_offset=1.0,
     aliasing=True,
+    alpha_mode="blend",
+    depth_write=True,
 ):
     """Create a text material.
 
@@ -421,6 +446,11 @@ def _create_text_material(
     aliasing : bool, optional
         If True, use anti-aliasing while rendering glyphs. Aliasing gives
         prettier results, but may affect performance for very large texts.
+    alpha_mode : str, optional
+        The alpha mode for the material. Please see the below link for details:
+        https://docs.pygfx.org/stable/_autosummary/materials/pygfx.materials.Material.html#pygfx.materials.Material.alpha_mode.
+    depth_write : bool, optional
+        Whether to write depth information for the material.
 
     Returns
     -------
@@ -444,6 +474,8 @@ def _create_text_material(
         outline_thickness=outline_thickness,
         weight_offset=weight_offset,
         aa=aliasing,
+        alpha_mode=alpha_mode,
+        depth_write=depth_write,
     )
 
 
@@ -453,6 +485,8 @@ def _create_image_material(
     map=None,
     gamma=1.0,
     interpolation="nearest",
+    alpha_mode="blend",
+    depth_write=True,
 ):
     """
     Rasterized image material.
@@ -469,6 +503,11 @@ def _create_image_material(
     interpolation : str, optional
         The method to interpolate the image data.
         Either 'nearest' or 'linear'.
+    alpha_mode : str, optional
+        The alpha mode for the material. Please see the below link for details:
+        https://docs.pygfx.org/stable/_autosummary/materials/pygfx.materials.Material.html#pygfx.materials.Material.alpha_mode.
+    depth_write : bool, optional
+        Whether to write depth information for the material.
 
     Returns
     -------
@@ -480,6 +519,8 @@ def _create_image_material(
         map=map,
         gamma=gamma,
         interpolation=interpolation,
+        alpha_mode=alpha_mode,
+        depth_write=depth_write,
     )
 
 
