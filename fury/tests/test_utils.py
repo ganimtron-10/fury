@@ -1,8 +1,11 @@
 import numpy as np
 import pytest
+from scipy.ndimage import generate_binary_structure
 
 from fury.utils import (
     create_sh_basis_matrix,
+    extract_surface_voxels,
+    face_generation,
     generate_planar_uvs,
     get_lmax,
     get_n_coeffs,
@@ -350,3 +353,321 @@ def test_get_transformed_cube_bounds_degenerate_case():
 
     assert np.array_equal(result[0], expected[0])
     assert np.array_equal(result[1], expected[1])
+
+
+def test_extract_surface_voxels_basic_and_missing_label():
+    """Test extract_surface_voxels for existing and missing labels."""
+
+    volume = np.zeros((3, 3, 3), dtype=np.uint8)
+    volume[1, 1, 1] = 1
+
+    struct = generate_binary_structure(rank=3, connectivity=1)
+
+    # Existing label should return surface coordinates and object mask
+    surface_data = extract_surface_voxels(volume, 1, structuring_element=struct)
+    assert surface_data is not None
+    surface_coords, object_mask = surface_data
+
+    assert surface_coords.shape == (1, 3)
+    np.testing.assert_array_equal(surface_coords[0], np.array([1, 1, 1]))
+    np.testing.assert_array_equal(object_mask, volume == 1)
+
+    # Missing label should return None
+    assert extract_surface_voxels(volume, 2, structuring_element=struct) is None
+
+
+def test_face_generation_basic_axes_and_signs():
+    """Test face_generation for simple coords with positive and negative signs."""
+
+    coords = np.array([[0, 0, 0]], dtype=int)
+
+    # Positive X face (axis=0, sign=+1)
+    quads_pos = face_generation(coords, axis=0, sign=1)
+    expected_pos = np.array([[[1, 0, 0], [1, 1, 0], [1, 1, 1], [1, 0, 1]]], dtype=int)
+
+    assert quads_pos.shape == (1, 4, 3)
+    np.testing.assert_array_equal(quads_pos, expected_pos)
+
+    # Negative X face (axis=0, sign=-1) should flip winding
+    quads_neg = face_generation(coords, axis=0, sign=-1)
+    expected_neg = np.array([[[0, 0, 1], [0, 1, 1], [0, 1, 0], [0, 0, 0]]], dtype=int)
+
+    assert quads_neg.shape == (1, 4, 3)
+    np.testing.assert_array_equal(quads_neg, expected_neg)
+
+
+def test_face_generation_broadcasting_and_invalid_coords():
+    """Test face_generation broadcasting behavior and input validation."""
+
+    # Broadcasting over multiple coordinates and axes
+    coords = np.array([[0, 0, 0], [1, 1, 1]], dtype=int)
+    axes = np.array([0, 1], dtype=int)
+    signs = np.array([1, -1], dtype=int)
+
+    quads = face_generation(coords, axis=axes, sign=signs)
+    assert quads.shape == (2, 4, 3)
+
+    # Single 1D coordinate should be accepted and reshaped
+    quad_single = face_generation(np.array([0, 0, 0]), axis=0, sign=1)
+    assert quad_single.shape == (1, 4, 3)
+
+    # Invalid coord shape should raise ValueError
+    with pytest.raises(ValueError, match=r"coords must have shape \(N, 3\)."):
+        face_generation(np.array([[0, 0]]), axis=0, sign=1)
+
+
+# Test cases for voxel_mesh_by_object
+def test_voxel_mesh_by_object_input_validation():
+    """Test invalid inputs raise appropriate errors."""
+    # Invalid volume (not a 3D array)
+    with pytest.raises(ValueError, match="volume must be a 3D numpy array"):
+        from fury.utils import voxel_mesh_by_object
+
+        voxel_mesh_by_object(np.array([[1, 2], [3, 4]]))
+
+    # Invalid connectivity
+    with pytest.raises(ValueError, match="connectivity must be one of"):
+        from fury.utils import voxel_mesh_by_object
+
+        voxel_mesh_by_object(np.ones((3, 3, 3)), connectivity=4)
+
+    # Invalid spacing
+    with pytest.raises(ValueError, match="spacing must be a tuple of 3 elements"):
+        from fury.utils import voxel_mesh_by_object
+
+        voxel_mesh_by_object(np.ones((3, 3, 3)), spacing=(1.0, 1.0))
+
+    # Invalid triangulate parameter
+    with pytest.raises(ValueError, match="triangulate must be a boolean value"):
+        from fury.utils import voxel_mesh_by_object
+
+        voxel_mesh_by_object(np.ones((3, 3, 3)), triangulate="yes")
+
+
+def test_voxel_mesh_by_object_empty_volume():
+    """Test that an empty volume (all zeros) returns an empty dictionary."""
+    from fury.utils import voxel_mesh_by_object
+
+    volume = np.zeros((5, 5, 5))
+    result = voxel_mesh_by_object(volume)
+
+    assert isinstance(result, dict)
+    assert len(result) == 0
+
+
+def test_voxel_mesh_by_object_single_voxel():
+    """Test mesh generation for a single voxel."""
+    from fury.utils import voxel_mesh_by_object
+
+    volume = np.zeros((3, 3, 3))
+    volume[1, 1, 1] = 1
+
+    result = voxel_mesh_by_object(volume)
+
+    assert len(result) == 1
+    assert 1 in result
+    assert "verts" in result[1]
+    assert "faces" in result[1]
+
+    # A single voxel should have 8 vertices (cube corners)
+    assert result[1]["verts"].shape[0] == 8
+    # A single voxel should have 6 quad faces (or 12 triangular faces if triangulated)
+    assert result[1]["faces"].shape[0] == 6
+
+
+def test_voxel_mesh_by_object_single_voxel_triangulated():
+    """Test mesh generation for a single voxel with triangulation."""
+    from fury.utils import voxel_mesh_by_object
+
+    volume = np.zeros((3, 3, 3))
+    volume[1, 1, 1] = 1
+
+    result = voxel_mesh_by_object(volume, triangulate=True)
+
+    assert len(result) == 1
+    assert 1 in result
+
+    # With triangulation, 6 quad faces become 12 triangular faces
+    assert result[1]["faces"].shape[0] == 12
+    # Each face should have 3 vertices (triangles)
+    assert result[1]["faces"].shape[1] == 3
+
+
+def test_voxel_mesh_by_object_multiple_objects():
+    """Test mesh generation for multiple disconnected objects."""
+    from fury.utils import voxel_mesh_by_object
+
+    volume = np.zeros((10, 10, 10))
+    # Object 1
+    volume[2:4, 2:4, 2:4] = 1
+    # Object 2 (disconnected)
+    volume[6:8, 6:8, 6:8] = 1
+
+    result = voxel_mesh_by_object(volume, connectivity=1)
+
+    # Should have 2 separate objects
+    assert len(result) == 2
+    assert 1 in result
+    assert 2 in result
+
+    # Both objects should have vertices and faces
+    for obj_id in [1, 2]:
+        assert "verts" in result[obj_id]
+        assert "faces" in result[obj_id]
+        assert result[obj_id]["verts"].shape[0] > 0
+        assert result[obj_id]["faces"].shape[0] > 0
+
+
+def test_voxel_mesh_by_object_connectivity():
+    """Test different connectivity options."""
+    from fury.utils import voxel_mesh_by_object
+
+    # Create a diagonal configuration
+    volume = np.zeros((5, 5, 5))
+    volume[1, 1, 1] = 1
+    volume[2, 2, 2] = 1
+
+    # With connectivity=1 (6-neighborhood), should be 2 separate objects
+    result_6 = voxel_mesh_by_object(volume, connectivity=1)
+    assert len(result_6) == 2
+
+    # With connectivity=3 (26-neighborhood), should be 1 connected object
+    result_26 = voxel_mesh_by_object(volume, connectivity=3)
+    assert len(result_26) == 1
+
+
+def test_voxel_mesh_by_object_spacing():
+    """Test that spacing correctly scales the mesh vertices."""
+    from fury.utils import voxel_mesh_by_object
+
+    volume = np.zeros((3, 3, 3))
+    volume[1, 1, 1] = 1
+
+    # Test with different spacing
+    spacing = (2.0, 3.0, 4.0)
+    result = voxel_mesh_by_object(volume, spacing=spacing)
+
+    verts = result[1]["verts"]
+
+    # Check that vertices are scaled by the spacing
+    # For a voxel at position (1,1,1), vertices should be in range
+    # [1*spacing[i], 2*spacing[i]] for each dimension
+    assert np.min(verts[:, 0]) >= 1.0 * spacing[0]
+    assert np.max(verts[:, 0]) <= 2.0 * spacing[0]
+    assert np.min(verts[:, 1]) >= 1.0 * spacing[1]
+    assert np.max(verts[:, 1]) <= 2.0 * spacing[1]
+    assert np.min(verts[:, 2]) >= 1.0 * spacing[2]
+    assert np.max(verts[:, 2]) <= 2.0 * spacing[2]
+
+
+def test_voxel_mesh_by_object_cube_block():
+    """Test mesh generation for a 2x2x2 cube block."""
+    from fury.utils import voxel_mesh_by_object
+
+    volume = np.zeros((5, 5, 5))
+    volume[1:3, 1:3, 1:3] = 1
+
+    result = voxel_mesh_by_object(volume)
+
+    assert len(result) == 1
+    assert 1 in result
+
+    # A 2x2x2 block has 8 voxels but shares internal faces
+    # Only exterior faces should be generated
+    verts = result[1]["verts"]
+    faces = result[1]["faces"]
+
+    assert verts.shape[0] > 0
+    assert faces.shape[0] > 0
+
+    # Vertices should be within the block bounds
+    assert np.min(verts[:, 0]) >= 1.0
+    assert np.max(verts[:, 0]) <= 3.0
+
+
+def test_voxel_mesh_by_object_output_types():
+    """Test that output arrays have correct dtypes."""
+    from fury.utils import voxel_mesh_by_object
+
+    volume = np.zeros((3, 3, 3))
+    volume[1, 1, 1] = 1
+
+    result = voxel_mesh_by_object(volume)
+
+    assert result[1]["verts"].dtype == np.float32
+    assert result[1]["faces"].dtype == np.int32
+
+
+def test_voxel_mesh_by_object_face_orientation():
+    """Test that faces are properly oriented (watertight mesh)."""
+    from fury.utils import voxel_mesh_by_object
+
+    volume = np.zeros((3, 3, 3))
+    volume[1, 1, 1] = 1
+
+    result = voxel_mesh_by_object(volume, triangulate=True)
+
+    faces = result[1]["faces"]
+    verts = result[1]["verts"]
+
+    # Check that all face indices are valid
+    assert np.all(faces >= 0)
+    assert np.all(faces < len(verts))
+
+    # Check that each face has 3 unique vertices
+    for face in faces:
+        assert len(np.unique(face)) == 3
+
+
+def test_voxel_mesh_by_object_large_volume():
+    """Test with a larger volume to ensure scalability."""
+    from fury.utils import voxel_mesh_by_object
+
+    # Create a sphere-like object
+    volume = np.zeros((20, 20, 20))
+    center = np.array([10, 10, 10])
+    radius = 5
+
+    for i in range(20):
+        for j in range(20):
+            for k in range(20):
+                if np.linalg.norm(np.array([i, j, k]) - center) <= radius:
+                    volume[i, j, k] = 1
+
+    result = voxel_mesh_by_object(volume)
+
+    assert len(result) == 1
+    assert 1 in result
+
+    # Should have a reasonable number of vertices and faces
+    verts = result[1]["verts"]
+    faces = result[1]["faces"]
+
+    assert verts.shape[0] > 100  # Sphere surface should have many vertices
+    assert faces.shape[0] > 100  # And many faces
+
+
+def test_voxel_mesh_by_object_hollow_object():
+    """Test mesh generation for a hollow object (only surface voxels)."""
+    from fury.utils import voxel_mesh_by_object
+
+    volume = np.zeros((7, 7, 7))
+    # Create a hollow cube
+    volume[2:5, 2:5, 2] = 1  # Bottom
+    volume[2:5, 2:5, 4] = 1  # Top
+    volume[2:5, 2, 2:5] = 1  # Front
+    volume[2:5, 4, 2:5] = 1  # Back
+    volume[2, 2:5, 2:5] = 1  # Left
+    volume[4, 2:5, 2:5] = 1  # Right
+
+    result = voxel_mesh_by_object(volume)
+
+    assert len(result) == 1
+    assert 1 in result
+
+    # Should generate a mesh
+    verts = result[1]["verts"]
+    faces = result[1]["faces"]
+
+    assert verts.shape[0] > 0
+    assert faces.shape[0] > 0

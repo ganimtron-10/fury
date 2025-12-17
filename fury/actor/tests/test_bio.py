@@ -1,7 +1,13 @@
 import numpy as np
 import pytest
 
-from fury.actor import Group, peaks_slicer, volume_slicer
+from fury.actor import (
+    Group,
+    contour_from_label,
+    contour_from_roi,
+    peaks_slicer,
+    volume_slicer,
+)
 from fury.lib import AffineTransform
 
 
@@ -137,3 +143,64 @@ def test_peaks_slicer_cross_section():
 
     with pytest.raises(ValueError):
         peaks_slicer(peak_dirs, cross_section=0.0)
+
+
+@pytest.mark.parametrize("affine", [None, np.diag([1, 1, 1, 1])])
+def test_contour_from_roi(affine):
+    """Test contour_from_roi with optional affine transformation."""
+    data = np.zeros((5, 5, 5), dtype=int)
+    data[2, 2, 2] = 1
+
+    contours = contour_from_roi(data, affine=affine)
+    assert isinstance(contours, Group)
+    assert len(contours.children) > 0
+    actor = contours.children[0]
+    assert np.allclose(actor.material.color[:3], [1, 0, 0])
+    assert actor.material.opacity == pytest.approx(0.5)
+
+
+@pytest.mark.parametrize(
+    "colors,opacities",
+    [
+        (None, None),
+        (np.array([[1, 0, 0], [0, 1, 0]]), np.array([0.8, 0.2])),
+        (np.array([[0, 0, 1, 0.3]]), None),
+    ],
+)
+def test_contour_from_label(colors, opacities):
+    """Test contour_from_label with various color and opacity configurations."""
+    data = np.zeros((5, 5, 5), dtype=int)
+    data[1, 1, 1] = 1
+    if colors is None or colors.shape[0] == 2:
+        data[3, 3, 3] = 2
+
+    contours = contour_from_label(data, colors=colors, opacities=opacities)
+    assert isinstance(contours, Group)
+    assert len(contours.children) == (colors.shape[0] if colors is not None else 2)
+
+    if colors is not None and colors.shape[1] == 4:
+        actor = contours.children[0].children[0]
+        assert np.allclose(actor.material.color[:3], colors[0, :3])
+        assert actor.material.opacity == pytest.approx(colors[0, 3])
+    elif colors is not None:
+        for i in range(len(contours.children)):
+            actor = contours.children[i].children[0]
+            assert np.allclose(actor.material.color[:3], colors[i])
+            if opacities is not None:
+                assert actor.material.opacity == pytest.approx(opacities[i])
+
+
+@pytest.mark.parametrize(
+    "colors,opacities,error_msg",
+    [
+        (np.array([[1, 0]]), None, "Incorrect color array shape"),
+        (np.array([[1, 0, 0]]), np.array([0.5, 0.5]), "Incorrect opacity array shape"),
+    ],
+)
+def test_contour_from_label_errors(colors, opacities, error_msg):
+    """Test contour_from_label error conditions."""
+    data = np.zeros((5, 5, 5), dtype=int)
+    data[1, 1, 1] = 1
+
+    with pytest.raises(ValueError, match=error_msg):
+        contour_from_label(data, colors=colors, opacities=opacities)

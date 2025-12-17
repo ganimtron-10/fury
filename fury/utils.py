@@ -7,11 +7,43 @@ to work with numpy arrays and are useful for manipulating 3D data
 structures, such as meshes and point clouds.
 """
 
+import logging
+
 import numpy as np
-from scipy.ndimage import map_coordinates
+from scipy.ndimage import (
+    binary_erosion,
+    find_objects,
+    generate_binary_structure,
+    label,
+    map_coordinates,
+)
 from scipy.special import factorial, lpmv
 
 from fury.transform import cart2sphere
+
+_FACE_QUAD_OFFSETS = np.array(
+    [
+        [[0, 0, 0], [0, 1, 0], [0, 1, 1], [0, 0, 1]],  # axis 0 (YZ plane)
+        [[0, 0, 0], [1, 0, 0], [1, 0, 1], [0, 0, 1]],  # axis 1 (XZ plane)
+        [[0, 0, 0], [1, 0, 0], [1, 1, 0], [0, 1, 0]],  # axis 2 (XY plane)
+    ],
+    dtype=np.int8,
+)
+
+_FACE_DIRECTIONS = np.array(
+    [
+        [1, 0, 0],
+        [-1, 0, 0],
+        [0, 1, 0],
+        [0, -1, 0],
+        [0, 0, 1],
+        [0, 0, -1],
+    ],
+    dtype=np.int8,
+)
+
+_FACE_AXES = np.array([0, 0, 1, 1, 2, 2], dtype=np.int8)
+_FACE_SIGNS = np.array([1, -1, 1, -1, 1, -1], dtype=np.int8)
 
 
 def map_coordinates_3d_4d(input_array, indices):
@@ -579,3 +611,214 @@ def get_transformed_cube_bounds(affine_matrix, vertex1, vertex2):
     max_vals = np.max(transformed_vertices, axis=0)
 
     return [min_vals, max_vals]
+
+
+def extract_surface_voxels(volume, label_value, *, structuring_element=None):
+    """Extract boundary voxel coordinates for a label within a volume.
+
+    Parameters
+    ----------
+    volume : ndarray
+        Labeled volume containing the objects of interest; can be a full volume
+        or a cropped sub-section.
+    label_value : int
+        The label identifying the object whose surface voxels should be returned.
+    structuring_element : ndarray, optional
+        Structuring element defining the desired connectivity. If None,
+        a default 1-connectivity structuring element is used.
+
+    Returns
+    -------
+    tuple or None
+        Returns (surface_coords, object_mask) when a surface is found, where
+        surface_coords has shape (N, 3) ordered as (x, y, z). Returns None when
+        the label does not have exposed voxels.
+    """
+
+    if structuring_element is None:
+        structuring_element = generate_binary_structure(rank=3, connectivity=1)
+
+    object_mask = volume == label_value
+
+    volume_interior_mask = binary_erosion(
+        object_mask, structure=structuring_element, border_value=0
+    )
+    background_and_surface_mask = np.logical_not(volume_interior_mask)
+    surface_mask = np.logical_and(object_mask, background_and_surface_mask)
+
+    z_coords, y_coords, x_coords = np.nonzero(surface_mask)
+
+    if x_coords.size == 0:
+        logging.info(f"No surface found for label {label_value}.")
+        return None
+
+    surface_coords = np.stack((x_coords, y_coords, z_coords), axis=1)
+    return surface_coords, object_mask
+
+
+def face_generation(coords, axis, sign):
+    """Generate voxel face corners for scalar or vector inputs.
+
+    Parameters
+    ----------
+    coords : array_like
+        Voxel origins shaped as (..., 3). Arrays are broadcast with `axis` and
+        `sign` to produce multiple quads simultaneously.
+    axis : array_like
+        Axis orthogonal to each face (0=x, 1=y, 2=z).
+    sign : array_like
+        Orientation of each face normal (+1 or -1).
+
+    Returns
+    -------
+    ndarray
+        Array of quad vertices with shape (..., 4, 3), where the leading
+        dimensions match the broadcasted inputs.
+    """
+    coords = np.asarray(coords)
+    if coords.ndim == 1:
+        coords = coords[np.newaxis, :]
+    if coords.ndim != 2 or coords.shape[1] != 3:
+        raise ValueError("coords must have shape (N, 3).")
+
+    axis = np.broadcast_to(np.asarray(axis), (coords.shape[0],)).astype(
+        np.int8, copy=False
+    )
+    sign = np.broadcast_to(np.asarray(sign), (coords.shape[0],)).astype(
+        np.int8, copy=False
+    )
+
+    flat_quads = np.empty((coords.shape[0], 4, 3), dtype=coords.dtype)
+
+    for axis_id in range(3):
+        axis_mask = axis == axis_id
+        if not np.any(axis_mask):
+            continue
+
+        coords_subset = coords[axis_mask].copy()
+        subset_signs = sign[axis_mask]
+
+        positive_mask = subset_signs > 0
+        coords_subset[positive_mask, axis_id] += 1
+
+        offsets = _FACE_QUAD_OFFSETS[axis_id].astype(coords_subset.dtype, copy=False)
+        quad_values = coords_subset[:, None, :] + offsets
+
+        negative_mask = subset_signs < 0
+        if np.any(negative_mask):
+            quad_values[negative_mask] = quad_values[negative_mask][:, ::-1, :]
+
+        flat_quads[axis_mask] = quad_values
+
+    return flat_quads
+
+
+def voxel_mesh_by_object(
+    volume, *, connectivity=1, spacing=(1.0, 1.0, 1.0), triangulate=False
+):
+    """Build a watertight mesh from a 3D volume where objects are volume > 0.
+
+    Parameters
+    ----------
+    volume : ndarray
+        3D array where objects are represented by non-zero values.
+    connectivity : int, optional
+        Possible options are {1, 2, 3}. 1 -> 6-neighborhood, 2 -> 18, 3 -> 26.
+    spacing : tuple, optional
+        Voxel spacing along each axis (dx, dy, dz).
+    triangulate : bool, optional
+        Whether to triangulate the resulting mesh faces.
+
+    Returns
+    -------
+    dict
+        A dictionary where keys are object labels and values are dictionaries
+        with 'verts' and 'faces' of the generated meshes.
+    """
+
+    if not isinstance(volume, np.ndarray) or volume.ndim != 3:
+        raise ValueError("volume must be a 3D numpy array.")
+
+    if connectivity not in (1, 2, 3):
+        raise ValueError("connectivity must be one of {1, 2, 3}.")
+
+    if spacing is None or len(spacing) != 3:
+        raise ValueError("spacing must be a tuple of 3 elements.")
+
+    if triangulate not in (True, False):
+        raise ValueError("triangulate must be a boolean value.")
+
+    struct = generate_binary_structure(rank=3, connectivity=connectivity)
+    labels, n = label(volume > 0, structure=struct)
+
+    if n == 0:
+        logging.info("No objects found in the volume.")
+        return {}
+
+    boxes = find_objects(labels)
+    spacing = np.asarray(spacing)
+
+    objects = {}
+
+    for lbl in range(1, n + 1):
+        slc = boxes[lbl - 1]
+        if slc is None:
+            continue
+        sublab = labels[slc]
+        surface_data = extract_surface_voxels(sublab, lbl, structuring_element=struct)
+
+        if surface_data is None:
+            continue
+
+        surface_coords, object_mask = surface_data
+        if surface_coords.size == 0:
+            continue
+
+        offset = np.array([slc[2].start, slc[1].start, slc[0].start])
+        global_surface = surface_coords + offset
+
+        neighbors = surface_coords[:, None, :] + _FACE_DIRECTIONS
+        nx = neighbors[..., 0]
+        ny = neighbors[..., 1]
+        nz = neighbors[..., 2]
+
+        Z, Y, X = object_mask.shape
+        valid = (nx >= 0) & (nx < X) & (ny >= 0) & (ny < Y) & (nz >= 0) & (nz < Z)
+
+        occupied = np.zeros_like(valid, dtype=bool)
+        valid_idx = np.where(valid)
+        occupied[valid_idx] = object_mask[nz[valid_idx], ny[valid_idx], nx[valid_idx]]
+        exposed = np.logical_not(occupied)
+
+        if not np.any(exposed):
+            continue
+
+        surface_expanded = np.broadcast_to(global_surface[:, None, :], neighbors.shape)
+        face_coords = surface_expanded[exposed]
+        face_axes = np.broadcast_to(
+            _FACE_AXES, (surface_coords.shape[0], _FACE_AXES.size)
+        )[exposed]
+        face_signs = np.broadcast_to(
+            _FACE_SIGNS, (surface_coords.shape[0], _FACE_SIGNS.size)
+        )[exposed]
+
+        quads = face_generation(face_coords, face_axes, face_signs)
+        quad_vertices = quads.reshape(-1, 3)
+
+        unique_vertices, inverse = np.unique(quad_vertices, axis=0, return_inverse=True)
+        faces_array = inverse.reshape(-1, 4)
+
+        if triangulate:
+            faces_array = np.concatenate(
+                (faces_array[:, [0, 1, 2]], faces_array[:, [0, 2, 3]]), axis=0
+            )
+
+        verts_array = (unique_vertices * spacing).astype(np.float32, copy=False)
+        faces_array = faces_array.astype(np.int32, copy=False)
+
+        objects[lbl] = {"verts": verts_array, "faces": faces_array}
+
+    if not objects:
+        logging.info("No objects were extracted from the volume.")
+
+    return objects

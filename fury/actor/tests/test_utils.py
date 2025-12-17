@@ -1,11 +1,14 @@
 import numpy as np
 import pytest
 
-from fury.actor import Group, Mesh, data_slicer, line_projection
-from fury.actor.utils import (
+from fury.actor import (
+    Group,
+    Mesh,
     apply_affine_to_actor,
     apply_affine_to_group,
+    data_slicer,
     get_slices,
+    line_projection,
     set_group_opacity,
     set_group_visibility,
     show_slices,
