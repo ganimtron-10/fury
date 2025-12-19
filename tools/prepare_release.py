@@ -107,11 +107,13 @@ def update_authors(*, file_path="AUTHORS.rst"):
     lines = lines[: contributors_index + 1]
 
     # Get the list of unique authors from git log
-    git_log_cmd = "git log --format='%aN' | sort -u"
+    # git_log_cmd = "git log --format='%aN' | sort -u"
     try:
-        authors = (
-            subprocess.check_output(git_log_cmd, shell=True).decode("utf-8").split("\n")
-        )
+        git = subprocess.Popen(["git", "log", "--format=%aN"], stdout=subprocess.PIPE)
+        authors = git.stdout.read().decode("utf-8").split("\n")
+        authors = sorted(set(authors))
+        authors.remove("")
+        authors.remove("dependabot[bot]")
     except subprocess.CalledProcessError as e:
         raise RuntimeError(f"Failed to execute git command: {e}") from e
 
@@ -122,7 +124,7 @@ def update_authors(*, file_path="AUTHORS.rst"):
     lines[contributors_index + 1 : contributors_index + 1] = authors
 
     # Write the updated content back to the file
-    with open(file_path, "w") as file:
+    with open(file_path, "w", newline="\n") as file:
         file.writelines(lines)
 
     run("git diff AUTHORS.rst")
@@ -177,7 +179,7 @@ def update_release_history(
     # Insert the authors after the "Contributors" line
     lines[insert_index:insert_index] = release_notes
     # Write the updated content back to the file
-    with open(file_path, "w") as file:
+    with open(file_path, "w", newline="\n") as file:
         file.writelines(lines)
 
     run("git diff docs/source/release-history.rst")
@@ -197,7 +199,7 @@ def check_license_year():
                     f"Copyright (c) 2014–{current_year}, FURY - Free Unified Rendering "
                     "in Python. All rights reserved.\n"
                 )
-                with open("LICENSE", "w") as f_out:
+                with open("LICENSE", "w", newline="\n") as f_out:
                     f_out.writelines(lines)
                 run("git diff LICENSE")
             else:
@@ -316,6 +318,17 @@ def get_new_version(default_version):
         return new_version
 
 
+def is_powershell():
+    """Detect if the current shell is PowerShell or cmd.
+
+    Returns
+    -------
+    bool
+        True if the current shell is PowerShell or cmd, False otherwise.
+    """
+    return "PSModulePath" in os.environ
+
+
 def main():
     """Main function to prepare the release."""
     series = input("Enter the FURY series (e.g. 0.x or 2.x): ").strip()
@@ -382,14 +395,22 @@ def main():
 
     # 7. Run tests and build docs
     while True:
+        os.environ["FURY_OFFSCREEN"] = "1"
         if platform.system().lower() == "windows":
-            run("set FURY_OFFSCREEN=1 && pytest -svv --doctest-modules fury")
-            run(
-                "cd docs && make.bat clean && set FURY_OFFSCREEN=1 && make.bat -C . html && cd .."  # noqa
-            )
+            if is_powershell():
+                run("pytest -c pyproject.toml -svv --doctest-modules fury")
+                run(
+                    "cd docs; .\\make.bat clean; .\\make.bat html; cd .."  # noqa
+                )
+            else:
+                run("pytest -c pyproject.toml -svv --doctest-modules fury")
+                run(
+                    "cd docs && .\\make.bat clean && .\\make.bat html && cd .."  # noqa
+                )
         else:
-            run("FURY_OFFSCREEN=1 pytest -svv --doctest-modules fury")
-            run("cd docs && make clean && FURY_OFFSCREEN=1 make -C . html && cd ..")
+            run("pytest -c pyproject.toml -svv --doctest-modules fury")
+            run("cd docs && make clean && make -C . html && cd ..")
+        os.environ["FURY_OFFSCREEN"] = "0"
 
         answer = input("Have you checked the generated docs [yes/no]: ").strip()
         if answer.lower() in ["yes", "y"]:

@@ -51,5 +51,5 @@ scene.add(sphere_actor)
 
 
 if __name__ == "__main__":
-    show_m = ShowManager(scene=scene, title="FURY 2.0: Skybox Example")
+    show_m = ShowManager(scene=scene, title="FURY Skybox Example")
     show_m.start()

@@ -81,6 +81,6 @@ if __name__ == "__main__":
     show_manager = ShowManager(
         scene=scene,
         size=current_size,
-        title="FURY 2.0: Shapes Example",
+        title="FURY Shapes Example",
     )
     show_manager.start()

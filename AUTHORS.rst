@@ -100,7 +100,6 @@ Contributors
 * Wachiou BOURAÏMA
 * Yaroslav Halchenko
 * Zhiwen Shi
-* dependabot[bot]
 * ibrahimAnis
 * sailesh
 * sparshg

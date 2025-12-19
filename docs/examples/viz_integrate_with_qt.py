@@ -29,7 +29,7 @@ class Main(QtWidgets.QWidget):
         self.show_manager = ShowManager(
             scene=self.scene,
             window_type="qt",
-            title="FURY 2.0: Integrate Qt Example",
+            title="Integrate Qt Example",
             qt_app=app,
             qt_parent=self,
         )
@@ -59,7 +59,7 @@ class Main(QtWidgets.QWidget):
 
 
 m = Main()
-m.setWindowTitle("FURY 2.0: Qt Example")
+m.setWindowTitle("FURY Qt Example")
 
-if __name__ == "__main__":
-    m.show_manager.start()
+# if __name__ == "__main__":
+m.show_manager.start()

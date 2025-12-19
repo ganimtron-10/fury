@@ -80,7 +80,7 @@ def handle_key_event(event):
 ################################################################################
 # Add event handlers to the slice actor for key events.
 
-show_m = window.ShowManager(scene=scene, title="FURY 2.0: Cube Slicer Example")
+show_m = window.ShowManager(scene=scene, title="FURY Cube Slicer Example")
 show_m.renderer.add_event_handler(handle_key_event, EventType.KEY_DOWN)
 
 
@@ -129,7 +129,7 @@ def handle_pick_event(event):
 
 slicer_actor.add_event_handler(handle_pick_event, EventType.POINTER_DOWN)
 
-show_m = window.ShowManager(scene=scene, title="FURY 2.0: MNI Template Slicer Example")
+show_m = window.ShowManager(scene=scene, title="FURY MNI Template Slicer Example")
 show_m.renderer.add_event_handler(handle_key_event, EventType.KEY_DOWN)
 
 ################################################################################
