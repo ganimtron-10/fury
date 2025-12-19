@@ -5,15 +5,13 @@ import abc
 import numpy as np
 
 from fury.actor import create_mesh
-from fury.decorators import warn_on_args_to_kwargs
 from fury.geometry import buffer_to_geometry
+from fury.io import load_image_texture
 from fury.lib import (
     EventType,
     plane_geometry,
 )
-from fury.material import (
-    _create_mesh_material,
-)
+from fury.material import _create_mesh_material
 from fury.primitive import prim_ring
 from fury.ui import UIContext
 from fury.ui.helpers import UI_Z_RANGE, Anchor, get_anchor_to_multiplier
@@ -523,7 +521,6 @@ class Rectangle2D(UI):
         `0` is fully transparent, `1` is fully opaque.
     """
 
-    @warn_on_args_to_kwargs()
     def __init__(
         self, *, size=(100, 100), position=(0, 0), color=(1, 1, 1), opacity=1.0
     ):
@@ -704,7 +701,6 @@ class Disk2D(UI):
         Must take values in [0, 1].
     """
 
-    @warn_on_args_to_kwargs()
     def __init__(
         self,
         outer_radius,
@@ -927,7 +923,6 @@ class Disk2D(UI):
 
 #     """
 
-#     @warn_on_args_to_kwargs()
 #     def __init__(
 #         self,
 #         *,
@@ -1401,7 +1396,6 @@ class Disk2D(UI):
 #         max_length = max(len(line) for line in lines)
 #         return [max_length * self.font_size, len(lines) * self.font_size]
 
-#     @warn_on_args_to_kwargs()
 #     def update_bounding_box(self, *, size=None):
 #         """Update Text Bounding Box.
 
@@ -1453,222 +1447,183 @@ class Disk2D(UI):
 #         return self.cal_size_from_message()
 
 
-# class Button2D(UI):
-#     """A 2D overlay button and is of type vtkTexturedActor2D.
+class Button2D(UI):
+    """A 2D overlay button component.
 
-#     Currently supports::
+    Currently supports:
+        - Multiple icons for visual states.
+        - Switching between icons via `next_icon()`.
+    """
 
-#         - Multiple icons.
-#         - Switching between icons.
+    def __init__(self, icon_fnames, *, position=(0, 0), size=(30, 30)):
+        """Initialize the button instance.
 
-#     """
+        Parameters
+        ----------
+        icon_fnames : list(string, string)
+            List of tuples `[(icon_name, filename), ...]` defining the icons
+            available for the button.
+        position : (float, float), optional
+            Absolute coordinates `(x, y)` which define the button's initial
+            placement.
+        size : (int, int), optional
+            Width and height in pixels of the button.
+        """
+        super(Button2D, self).__init__(position=position)
 
-#     @warn_on_args_to_kwargs()
-#     def __init__(self, icon_fnames, *, position=(0, 0), size=(30, 30)):
-#         """Init class instance.
+        self.icon_extents = {}
+        self.icons = self._build_icons(icon_fnames)
+        self.icon_names = [icon[0] for icon in self.icons]
+        self.current_icon_id = 0
+        self.current_icon_name = self.icon_names[self.current_icon_id]
+        self.set_icon(self.icons[self.current_icon_id][1])
+        self.resize(size)
 
-#         Parameters
-#         ----------
-#         icon_fnames : List(string, string)
-#             ((iconname, filename), (iconname, filename), ....)
-#         position : (float, float), optional
-#             Absolute coordinates (x, y) of the lower-left corner of the button.
-#         size : (int, int), optional
-#             Width and height in pixels of the button.
+    def _get_size(self):
+        """Get the current size of the button actor.
 
-#         """
-#         super(Button2D, self).__init__(position=position)
+        Returns
+        -------
+        (float, float)
+            The current `(width, height)` of the button in pixels.
+        """
+        bounds = self.actor.get_bounding_box()
+        minx, miny, minz = bounds[0]
+        maxx, maxy, maxz = bounds[1]
+        return [maxx - minx, maxy - miny]
 
-#         self.icon_extents = {}
-#         self.icons = self._build_icons(icon_fnames)
-#         self.icon_names = [icon[0] for icon in self.icons]
-#         self.current_icon_id = 0
-#         self.current_icon_name = self.icon_names[self.current_icon_id]
-#         self.set_icon(self.icons[self.current_icon_id][1])
-#         self.resize(size)
+    def _build_icons(self, icon_fnames):
+        """Convert file names to PyGfx Texture.
 
-#     def _get_size(self):
-#         lower_left_corner = self.texture_points.GetPoint(0)
-#         upper_right_corner = self.texture_points.GetPoint(2)
-#         size = np.array(upper_right_corner) - np.array(lower_left_corner)
-#         return abs(size[:2])
 
-#     def _build_icons(self, icon_fnames):
-#         """Convert file names to ImageData.
+        Parameters
+        ----------
+        icon_fnames : List(string, string)
+            List of tuples `[(iconname, filename), (iconname, filename), ...]`
+            defining the icon files.
 
-#         A pre-processing step to prevent re-read of file names during every
-#         state change.
+        Returns
+        -------
+        list
+            List of corresponding `(icon_name, Texture)` tuples.
+        """
+        icons = []
+        for icon_name, icon_fname in icon_fnames:
+            icons.append((icon_name, load_image_texture(icon_fname)))
+        return icons
 
-#         Parameters
-#         ----------
-#         icon_fnames : List(string, string)
-#             ((iconname, filename), (iconname, filename), ....)
+    def _setup(self):
+        """Set up this UI component.
 
-#         Returns
-#         -------
-#         icons : List
-#             A list of corresponding ImageData.
+        Creating the button actor used internally.
+        """
+        geo = plane_geometry(width=1, height=1)
+        mat = _create_mesh_material(material="basic")
+        self.actor = create_mesh(geometry=geo, material=mat)
+        self.handle_events(self.actor)
 
-#         """
-#         icons = []
-#         for icon_name, icon_fname in icon_fnames:
-#             icons.append((icon_name, load_image(icon_fname, as_vtktype=True)))
+    def _get_actors(self):
+        """Get the actors composing this UI component.
 
-#         return icons
+        Returns
+        -------
+        list
+            List of actors composing this UI component.
+        """
+        return [self.actor]
 
-#     def _setup(self):
-#         """Set up this UI component.
+    def resize(self, size):
+        """Resize the button.
 
-#         Creating the button actor used internally.
+        Parameters
+        ----------
+        size : (float, float)
+            Button size (width, height) in pixels.
+        """
+        self.actor.geometry = plane_geometry(width=size[0], height=size[1])
+        self._update_actors_position()
 
-#         """
-#         # This is highly inspired by
-#         # https://github.com/Kitware/VTK/blob/c3ec2495b183e3327820e927af7f8f90d34c3474/Interaction/Widgets/vtkBalloonRepresentation.cxx#L47
+    @property
+    def color(self):
+        """Get the button's color.
 
-#         self.texture_polydata = PolyData()
-#         self.texture_points = Points()
-#         self.texture_points.SetNumberOfPoints(4)
+        Returns
+        -------
+        (float, float, float)
+            RGB color.
+        """
+        return self.actor.material.color
 
-#         polys = CellArray()
-#         polys.InsertNextCell(4)
-#         polys.InsertCellPoint(0)
-#         polys.InsertCellPoint(1)
-#         polys.InsertCellPoint(2)
-#         polys.InsertCellPoint(3)
-#         self.texture_polydata.SetPolys(polys)
+    @color.setter
+    def color(self, color):
+        """Set the button's color.
 
-#         tc = FloatArray()
-#         tc.SetNumberOfComponents(2)
-#         tc.SetNumberOfTuples(4)
-#         tc.InsertComponent(0, 0, 0.0)
-#         tc.InsertComponent(0, 1, 0.0)
-#         tc.InsertComponent(1, 0, 1.0)
-#         tc.InsertComponent(1, 1, 0.0)
-#         tc.InsertComponent(2, 0, 1.0)
-#         tc.InsertComponent(2, 1, 1.0)
-#         tc.InsertComponent(3, 0, 0.0)
-#         tc.InsertComponent(3, 1, 1.0)
-#         self.texture_polydata.GetPointData().SetTCoords(tc)
+        Parameters
+        ----------
+        color : (float, float, float)
+            RGB. Must take values in [0, 1].
+        """
+        self.actor.material.color = np.array([*color, 1.0])
 
-#         texture_mapper = PolyDataMapper2D()
-#         texture_mapper = set_input(texture_mapper, self.texture_polydata)
+    def scale(self, factor):
+        """Scale the button.
 
-#         button = TexturedActor2D()
-#         button.SetMapper(texture_mapper)
+        Parameters
+        ----------
+        factor : (float, float)
+            Scaling factor (width, height) in pixels.
 
-#         self.texture = Texture()
-#         button.SetTexture(self.texture)
+        """
+        self.resize(self.size * factor)
 
-#         button_property = Property2D()
-#         button_property.SetOpacity(1.0)
-#         button.SetProperty(button_property)
-#         self.actor = button
+    def set_icon_by_name(self, icon_name: str):
+        """Set the button icon using its name.
 
-#         # Add default events listener to the VTK actor.
-#         self.handle_events(self.actor)
+        Parameters
+        ----------
+        icon_name : str
+            The name of the icon (as provided in `icon_fnames`).
 
-#     def _get_actors(self):
-#         """Get the actors composing this UI component."""
-#         return [self.actor]
+        Raises
+        ------
+        ValueError
+            If the `icon_name` is not found.
+        """
+        icon_id = self.icon_names.index(icon_name)
+        self.set_icon(self.icons[icon_id][1])
+        self.current_icon_id = icon_id
+        self.current_icon_name = icon_name
 
-#     def _add_to_scene(self, scene):
-#         """Add all subcomponents or VTK props that compose this UI component.
+    def set_icon(self, icon):
+        """Modify the icon used by the button actor.
 
-#         Parameters
-#         ----------
-#         scene : scene
 
-#         """
-#         scene.add(self.actor)
+        Parameters
+        ----------
+        icon : Texture
+            The PyGfx-compatible image data (texture).
+        """
+        self.actor.material = _create_mesh_material(
+            material="basic", texture=icon, mode="auto"
+        )
 
-#     def resize(self, size):
-#         """Resize the button.
+    def next_icon_id(self):
+        """Set the next icon ID while cycling through icons."""
+        self.current_icon_id += 1
+        if self.current_icon_id == len(self.icons):
+            self.current_icon_id = 0
+        self.current_icon_name = self.icon_names[self.current_icon_id]
 
-#         Parameters
-#         ----------
-#         size : (float, float)
-#             Button size (width, height) in pixels.
+    def next_icon(self):
+        """Increment the state of the Button.
 
-#         """
-#         # Update actor.
-#         self.texture_points.SetPoint(0, 0, 0, 0.0)
-#         self.texture_points.SetPoint(1, size[0], 0, 0.0)
-#         self.texture_points.SetPoint(2, size[0], size[1], 0.0)
-#         self.texture_points.SetPoint(3, 0, size[1], 0.0)
-#         self.texture_polydata.SetPoints(self.texture_points)
+        This advances the `current_icon_id` and changes the displayed icon.
+        """
+        self.next_icon_id()
+        self.set_icon(self.icons[self.current_icon_id][1])
 
-#     def _set_position(self, coords):
-#         """Set the lower-left corner position of this UI component.
+    def _update_actors_position(self):
+        """Set the position of the internal actor."""
+        position = self.get_position(x_anchor=Anchor.CENTER, y_anchor=Anchor.CENTER)
 
-#         Parameters
-#         ----------
-#         coords: (float, float)
-#             Absolute pixel coordinates (x, y).
-
-#         """
-#         self.actor.SetPosition(*coords)
-
-#     @property
-#     def color(self):
-#         """Get the button's color."""
-#         color = self.actor.GetProperty().GetColor()
-#         return np.asarray(color)
-
-#     @color.setter
-#     def color(self, color):
-#         """Set the button's color.
-
-#         Parameters
-#         ----------
-#         color : (float, float, float)
-#             RGB. Must take values in [0, 1].
-
-#         """
-#         self.actor.GetProperty().SetColor(*color)
-
-#     def scale(self, factor):
-#         """Scale the button.
-
-#         Parameters
-#         ----------
-#         factor : (float, float)
-#             Scaling factor (width, height) in pixels.
-
-#         """
-#         self.resize(self.size * factor)
-
-#     def set_icon_by_name(self, icon_name):
-#         """Set the button icon using its name.
-
-#         Parameters
-#         ----------
-#         icon_name : str
-
-#         """
-#         icon_id = self.icon_names.index(icon_name)
-#         self.set_icon(self.icons[icon_id][1])
-
-#     def set_icon(self, icon):
-#         """Modify the icon used by the vtkTexturedActor2D.
-
-#         Parameters
-#         ----------
-#         icon : imageData
-
-#         """
-#         self.texture = set_input(self.texture, icon)
-
-#     def next_icon_id(self):
-#         """Set the next icon ID while cycling through icons."""
-#         self.current_icon_id += 1
-#         if self.current_icon_id == len(self.icons):
-#             self.current_icon_id = 0
-#         self.current_icon_name = self.icon_names[self.current_icon_id]
-
-#     def next_icon(self):
-#         """Increment the state of the Button.
-
-#         Also changes the icon.
-#         """
-#         self.next_icon_id()
-#         self.set_icon(self.icons[self.current_icon_id][1])
+        self.set_actor_position(self.actor, position, self.z_order)
