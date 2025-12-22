@@ -39,10 +39,9 @@ jobs:
       run: |
         python -c "import sys; print(sys.version)"
         python -m pip install -U pip setuptools>=30.3.0 wheel
-        python -m pip install -U numpy
         python -m pip install -U -r requirements/default.txt
         python -m pip install -U -r requirements/optional.txt
-        python -m pip install -U -r requirements/docs.txt
+        python -m pip install -U -r requirements/doc.txt
     - name: Install FURY
       run: pip install .
     - name: Build docs

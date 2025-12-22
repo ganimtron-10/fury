@@ -50,6 +50,7 @@ dependencies = [
     "lazy_loader>=0.4",
     "pygfx>=0.14.0",
     "glfw>=2.7.0",
+    "aiohttp"
 ]
 
 dynamic = ["version"]
@@ -61,22 +62,25 @@ Tracker = "https://github.com/fury-gl/fury/issues"
 
 [project.optional-dependencies]
 
-all = ["fury[window, plot, dev, doc, medical, style, test, typing]", "numba"]
-window = ["PySide6", "jupyter-rfb"]
+all = ["fury[optional, dev, doc, style, typing, test]"]
+window = ["PySide6", "jupyter-rfb", "imgui_bundle; python_version >= \"3.12\""]
 plot = ["matplotlib>=3.9.0"]
 medical = ["dipy", "nibabel"]
+compute = ["numba"]
+optional = ["fury[window, plot, medical, compute]"]
 dev = [
     "gitpython",
     "twine",
     ]
 doc = [
-    "fury[plot]",
     "numpydoc",
     "sphinx >=6.1.2,<9.0.0",
     "ablog >=0.11.1",
     "texext",
     "tomli; python_version < \"3.11\"",
-    "imgui_bundle",
+    "sphinx-copybutton",
+    "sphinx-gallery>=0.10.0",
+    "pydata-sphinx-theme==0.15.2",
     ]
 style = ["ruff", "pre-commit"]
 typing = ["mypy", "types-Pillow", "data-science-types"]
