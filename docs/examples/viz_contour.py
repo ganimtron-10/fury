@@ -57,7 +57,7 @@ scene.add(contour_actor)
 ###############################################################################
 # Create the ShowManager that we'll reuse throughout the tutorial
 
-show_m = window.ShowManager(scene=scene, title="FURY: Contour Examples")
+show_m = window.ShowManager(scene=scene, title="FURY Contour Examples")
 
 ###############################################################################
 # Display the first example
@@ -103,7 +103,7 @@ contour_actors = actor.contour_from_volume(
 )
 scene.add(contour_actors)
 
-show_m = window.ShowManager(scene=scene, title="FURY: Multi Contour Examples")
+show_m = window.ShowManager(scene=scene, title="FURY Multi Contour Examples")
 show_m.start()
 
 ###############################################################################
@@ -118,7 +118,7 @@ scene.add(multi_contour_actor)
 
 ###############################################################################
 # Display the scene with multiple contours
-show_m = window.ShowManager(scene=scene, title="FURY: Multi Contour Examples")
+show_m = window.ShowManager(scene=scene, title="FURY Multi Contour Examples")
 show_m.start()
 
 ###############################################################################
@@ -190,5 +190,5 @@ scene.add(slicer_actor)
 ###############################################################################
 # Display the scene with the ellipsoid contour and volume slices
 
-show_m = window.ShowManager(scene=scene, title="FURY: Contour from ROI Examples")
+show_m = window.ShowManager(scene=scene, title="FURY Contour from ROI Examples")
 show_m.start()

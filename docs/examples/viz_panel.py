@@ -44,6 +44,6 @@ if __name__ == "__main__":
     show_manager = ShowManager(
         scene=scene,
         size=current_size,
-        title="FURY 2.0: Panel2D Example",
+        title="FURY Panel2D Example",
     )
     show_manager.start()

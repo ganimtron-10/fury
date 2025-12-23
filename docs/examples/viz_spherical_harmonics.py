@@ -94,7 +94,7 @@ scene.add(
 )
 
 show_m = window.ShowManager(
-    scene=scene, size=(800, 600), title="FURY 2.0: Spherical Harmonics Visualization"
+    scene=scene, size=(800, 600), title="FURY Spherical Harmonics Visualization"
 )
 
 show_m.start()
