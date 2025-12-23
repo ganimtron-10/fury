@@ -14,7 +14,7 @@
 ```bash
 $ pip install -U -r requirements/default.txt
 $ pip install -U -r requirements/optional.txt
-$ pip install -U -r requirements/docs.txt
+$ pip install -U -r requirements/doc.txt
 ```
 
 ### Generate all the Documentation

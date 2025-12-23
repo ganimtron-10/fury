@@ -15,7 +15,7 @@ if [ "$INSTALL_TYPE" == "conda" ]; then
 	conda install -yq --name venv --file requirements/default.txt
     conda install -yq --name venv --file requirements/test.txt
     if [ "$DEPENDS" == "OPTIONAL_DEPS" ]; then conda install -yq --name venv --file requirements/optional.txt; fi
-    if [ "$BUILD_DOCS" == "1" ]; then conda install -yq --name venv --file requirements/docs.txt; fi
+    if [ "$BUILD_DOCS" == "1" ]; then conda install -yq --name venv --file requirements/doc.txt; fi
 else
     PIPI="pip install --timeout=60 "
 
@@ -28,7 +28,7 @@ else
     $PIPI -r requirements/test.txt
 
     if [ "$DEPENDS" == "OPTIONAL_DEPS" ]; then $PIPI -r requirements/optional.txt; fi
-    if [ "$BUILD_DOCS" == "1" ]; then $PIPI -r requirements/docs.txt; fi
+    if [ "$BUILD_DOCS" == "1" ]; then $PIPI -r requirements/doc.txt; fi
     if [ "$COVERAGE" == "1" ] || [ "$COVERAGE" = true ]; then pip install coverage coveralls; fi
 fi
 

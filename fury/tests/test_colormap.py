@@ -2,6 +2,7 @@
 
 import numpy as np
 import numpy.testing as npt
+import pytest
 
 from fury import colormap
 from fury.optpkg import optional_package
@@ -55,7 +56,7 @@ def test_get_cmap():
     cmap = colormap.get_cmap("Blues")
     npt.assert_array_almost_equal(cmap((1, 0, 0)), expected)
 
-    with npt.assert_warns(PendingDeprecationWarning):
+    with pytest.warns(PendingDeprecationWarning):
         cmap = colormap.get_cmap("Accent")
     npt.assert_array_almost_equal(cmap((1, 0, 0)), expected2)
 
@@ -85,16 +86,11 @@ def test_create_colormap():
         name="fake",
         auto=True,
     )
-    npt.assert_warns(
-        PendingDeprecationWarning,
-        colormap.create_colormap,
-        value,
-        name="jet",
-        auto=False,
-    )
+    with pytest.warns(PendingDeprecationWarning):
+        colormap.create_colormap(value, name="jet", auto=True)
 
     if not have_matplotlib:
-        with npt.assert_warns(UserWarning):
+        with pytest.warns(UserWarning):
             npt.assert_raises(ValueError, colormap.create_colormap, value)
 
 
