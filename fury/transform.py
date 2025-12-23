@@ -208,7 +208,9 @@ def cart2sphere(x, y, z):
     See sphere2cart for detailed description of the coordinate convention.
     """
     r = np.sqrt(x * x + y * y + z * z)
-    theta = np.arccos(np.divide(z, r, where=r > 0))
+    theta = np.arccos(
+        np.divide(z, r, where=r > 0, out=np.full_like(z, np.nan, dtype=np.float64))
+    )
     theta = np.where(r > 0, theta, 0.0)
     phi = np.arctan2(y, x)
     r, theta, phi = np.broadcast_arrays(r, theta, phi)

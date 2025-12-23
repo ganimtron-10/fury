@@ -1,6 +1,7 @@
 """Function for testing decorator module."""
 
 import numpy.testing as npt
+import pytest
 
 import fury
 from fury.decorators import doctest_skip_parser, warn_on_args_to_kwargs
@@ -76,17 +77,17 @@ def test_warn_on_args_to_kwargs():
     fury.__version__ = "0.12.0"
     npt.assert_equal(func(1, 2, c=3, d=4, e=5), 15)
     npt.assert_equal(func(1, 2, c=3, d=5), 16)
-    with npt.assert_warns(UserWarning):
+    with pytest.warns(UserWarning):
         npt.assert_equal(func(1, 2, 3, 4, 5), 15)
-    with npt.assert_warns(UserWarning):
+    with pytest.warns(UserWarning):
         npt.assert_equal(func(1, 2, 4), 16)
     npt.assert_raises(TypeError, func, 1, 3)
 
     # if FURY_CURRENT_VERSION is equal to until_version
     fury.__version__ = "0.14.0"
-    with npt.assert_warns(UserWarning):
+    with pytest.warns(UserWarning):
         npt.assert_equal(func(1, 2, 3, 6), 17)
-    with npt.assert_warns(UserWarning):
+    with pytest.warns(UserWarning):
         npt.assert_equal(func(1, 2, 10), 22)
     npt.assert_raises(TypeError, func, 1, 2, e=10)
     npt.assert_raises(TypeError, func, 1, 2, d=10)
