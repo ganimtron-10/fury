@@ -23,6 +23,8 @@ def volume_slicer(
     interpolation="linear",
     visibility=(True, True, True),
     initial_slices=None,
+    alpha_mode="auto",
+    depth_write=False,
 ):
     """Visualize a 3D volume data as a slice.
 
@@ -45,6 +47,11 @@ def volume_slicer(
     initial_slices : tuple, optional
         A tuple of three initial slice positions in the x, y, and z dimensions,
         respectively. If None, the slices are initialized to the middle of the volume.
+    alpha_mode : str, optional
+        The alpha mode for the material. Please see the below link for details:
+        https://docs.pygfx.org/stable/_autosummary/materials/pygfx.materials.Material.html#pygfx.materials.Material.alpha_mode.
+    depth_write : bool, optional
+        Whether to write depth information for the material.
 
     Returns
     -------
@@ -59,6 +66,8 @@ def volume_slicer(
         interpolation=interpolation,
         visibility=visibility,
         initial_slices=initial_slices,
+        alpha_mode=alpha_mode,
+        depth_write=depth_write,
     )
 
     if affine is not None:
