@@ -51,6 +51,8 @@ def data_slicer(
     interpolation="linear",
     visibility=(True, True, True),
     initial_slices=None,
+    alpha_mode="auto",
+    depth_write=False,
 ):
     """Visualize a 3D volume data as a slice.
 
@@ -71,6 +73,11 @@ def data_slicer(
     initial_slices : tuple, optional
         A tuple of three initial slice positions in the x, y, and z dimensions,
         respectively. If None, the slices are initialized to the middle of the volume.
+    alpha_mode : str, optional
+        The alpha mode for the material. Please see the below link for details:
+        https://docs.pygfx.org/stable/_autosummary/materials/pygfx.materials.Material.html#pygfx.materials.Material.alpha_mode.
+    depth_write : bool, optional
+        Whether to write depth information for the material.
 
     Returns
     -------
@@ -89,8 +96,8 @@ def data_slicer(
             "Input data must be 3-dimensional or "
             "4-dimensional with last dimension of size 3."
         )
-    elif data.ndim == 4 and data.shape[-1] != 3:
-        raise ValueError("Last dimension must be of size 3.")
+    elif data.ndim == 4 and (data.shape[-1] != 3 and data.shape[-1] != 4):
+        raise ValueError("Last dimension must be of size 3 or 4.")
 
     opacity = validate_opacity(opacity)
     data = data.astype(np.float32)
@@ -117,6 +124,8 @@ def data_slicer(
             clim=value_range,
             interpolation=interpolation,
             pick_write=True,
+            alpha_mode=alpha_mode,
+            depth_write=depth_write,
         )
         geo = Geometry(grid=texture)
         plane = Volume(geo, mat)

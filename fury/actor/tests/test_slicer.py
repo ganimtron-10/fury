@@ -14,7 +14,7 @@ from fury.material import (
 
 
 def test_valid_3d_data():
-    """Test valid 3D input with default parameters (Test Case 1)."""
+    """Test valid 3D input with default parameters."""
     data = np.random.rand(10, 20, 30)
     slicer_obj = actor.data_slicer(data)
 
@@ -25,12 +25,34 @@ def test_valid_3d_data():
     assert all(child.visible for child in slicer_obj.children)
 
 
-def test_invalid_4d_data():
-    """Test invalid 4D data shape (Test Case 4)."""
-    data = np.random.rand(10, 20, 30, 4)  # Last dim ≠ 3
+@pytest.mark.parametrize("channels", [3, 4])
+def test_valid_4d_data(channels):
+    """Test valid 4D RGB/RGBA input."""
+    shape = (4, 5, 6, channels)
+    data = np.arange(np.prod(shape), dtype=np.float32).reshape(shape)
+    slicer_obj = actor.data_slicer(data)
+
+    assert isinstance(slicer_obj, Group)
+    assert len(slicer_obj.children) == 3
+    assert all(child.visible for child in slicer_obj.children)
+
+    expected_slices = np.array([shape[0] // 2, shape[1] // 2, shape[2] // 2])
+    np.testing.assert_array_equal(get_slices(slicer_obj), expected_slices)
+
+    swapped_shape = (shape[2], shape[1], shape[0], channels)
+    expected_range = (float(data.min()), float(data.max()))
+    for child in slicer_obj.children:
+        assert child.geometry.grid.data.shape == swapped_shape
+        assert child.geometry.grid.data.dtype == np.float32
+        np.testing.assert_allclose(child.material.clim, expected_range)
+
+
+def test_invalid_4d_data_with_incorrect_color_channel():
+    """Test invalid 4D data shape."""
+    data = np.random.rand(10, 20, 30, 5)  # Last dim ≠ 3 or 4
     with pytest.raises(ValueError) as excinfo:
         actor.data_slicer(data)
-    assert "Last dimension must be of size 3" in str(excinfo.value)
+    assert "Last dimension must be of size 3 or 4." in str(excinfo.value)
 
 
 def test_opacity_validation():
