@@ -1,3 +1,4 @@
+import logging
 from unittest.mock import patch
 
 import numpy as np
@@ -237,6 +238,25 @@ def test_show_manager_update_viewports():
         assert screen.bounding_box == bb
 
 
+def test_show_manager_resize_callback():
+    """Test triggering and canceling the resize callback."""
+    show_m = ShowManager(window_type="offscreen")
+    resize_calls = []
+
+    def on_resize(size):
+        resize_calls.append(size)
+
+    show_m.resize_callback(on_resize)
+    new_size = (640, 480)
+    show_m._resize(new_size)
+
+    assert resize_calls == [new_size]
+
+    show_m.cancel_resize_callback()
+    show_m._resize((320, 240))
+    assert resize_calls == [new_size]
+
+
 def test_show_manager_calculate_screen_sizes():
     """Test calculating screen sizes based on configuration."""
     screen_config = [2, 3]  # 2 vertical sections, 3 horizontal sections
@@ -257,6 +277,32 @@ def test_show_manager_calculate_screen_sizes():
     np.testing.assert_array_almost_equal(
         screen_bbs[4], (400, 266.66 * 2, 400, 266.66), decimal=2
     )  # Fifth screen
+
+
+def test_show_manager_calculate_screen_sizes_explicit_bounding_boxes():
+    """Test calculate_screen_sizes with explicit bounding boxes."""
+    screen_config = [
+        (0, 0, 400, 400),
+        (400, 0, 400, 400),
+        (0, 400, 400, 400),
+    ]
+    window_size = (800, 800)
+    screen_bbs = calculate_screen_sizes(screen_config, window_size)
+
+    assert screen_bbs == screen_config
+
+
+def test_show_manager_calculate_screen_sizes_invalid_bounding_boxes(caplog):
+    """Test calculate_screen_sizes with invalid bounding box format."""
+    screen_config = [(0, 0, 400), (400, 0, 400, 400)]
+    window_size = (800, 800)
+
+    with caplog.at_level(logging.ERROR):
+        with pytest.raises(SystemExit) as excinfo:
+            calculate_screen_sizes(screen_config, window_size)
+
+    assert excinfo.value.code == 1
+    assert "Invalid screen bounding box format" in caplog.text
 
 
 def test_show_manager_set_enable_events():

@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from functools import reduce
 import logging
 import os
+import sys
 
 from PIL.Image import fromarray as image_from_array
 import numpy as np
@@ -443,10 +444,14 @@ def calculate_screen_sizes(screens, size):
 
     Parameters
     ----------
-    screens : list of int or None
-        Layout configuration. Each integer represents a vertical column
-        and specifies the number of horizontal rows within it. If None or
-        empty, assumes a single screen covering the full size.
+    screens : list of int or list of tuple or None
+        Layout configuration.
+        If a list of integers is provided, each integer represents a vertical column
+        and specifies the number of horizontal rows within it based on the size.
+        If a list of tuples is provided, and each tuple has 4 elements,
+        they are treated as explicit bounding boxes (x, y, w, h) for each screen.
+        regardless of the `size` parameter.
+        If None or empty, assumes a single screen covering the full size.
     size : tuple
         The total size (width, height) of the window or area to divide.
 
@@ -456,6 +461,13 @@ def calculate_screen_sizes(screens, size):
         A list of calculated bounding boxes (x, y, w, h) for each screen."""
     if screens is None or not screens:
         return [(0, 0, *size)]
+
+    if all(isinstance(screen, (tuple, list)) for screen in screens):
+        if all(len(screen) == 4 for screen in screens):
+            return screens
+        else:
+            logging.error("Invalid screen bounding box format. Expected (x, y, w, h).")
+            sys.exit(1)
 
     screen_bbs = []
 
@@ -635,10 +647,6 @@ class ShowManager:
         self._calculate_total_screens()
         self._screen_setup(scene, camera, controller, camera_light)
         self.screens = self._create_screens()
-        update_viewports(
-            self.screens,
-            calculate_screen_sizes(self._screen_config, self.renderer.logical_size),
-        )
         self._callbacks = {}
 
         self._stats = None
@@ -650,6 +658,7 @@ class ShowManager:
 
         self.enable_events = enable_events
         self._key_long_press = None
+        self._on_resize = lambda _size: None
         self._resize(self._size)
 
     def _handle_drag(self, event):
@@ -802,6 +811,7 @@ class ShowManager:
         size : tuple
             The size (width, height) of the window in pixels.
         """
+        self._on_resize(size)
         UIContext.canvas_size = size
         update_viewports(
             self.screens,
@@ -911,6 +921,21 @@ class ShowManager:
         """
         if name in self._callbacks:
             del self._callbacks[name]
+
+    def resize_callback(self, func):
+        """Set a callback function to be called on window resize events.
+
+        Parameters
+        ----------
+        func : callable
+            A function that takes a single argument (size tuple) and is called
+            whenever the window is resized.
+        """
+        self._on_resize = func
+
+    def cancel_resize_callback(self):
+        """Cancel the window resize callback function."""
+        self._on_resize = lambda _size: None
 
     def enable_imgui(self, *, imgui_draw_function=None):
         """Enable ImGui UI rendering support.
