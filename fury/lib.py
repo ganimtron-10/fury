@@ -142,7 +142,6 @@ run = loop.run
 call_later = loop.call_later
 Clock = gfx.Clock
 Stats = gfx.Stats
-Text = gfx.Text
 
 plane_geometry = gfx.plane_geometry
 if have_jupyter_rfb:

@@ -4,12 +4,11 @@ import abc
 
 import numpy as np
 
-from fury.actor import create_mesh
+from fury.actor import Text, create_mesh
 from fury.decorators import warn_on_args_to_kwargs
 from fury.geometry import buffer_to_geometry
 from fury.lib import (
     EventType,
-    Text,
     plane_geometry,
 )
 from fury.material import (
@@ -255,17 +254,18 @@ class UI(object, metaclass=abc.ABCMeta):
         ANCHOR_TO_MULTIPLIER = get_anchor_to_multiplier()
 
         self.perform_position_validation(x_anchor=x_anchor, y_anchor=y_anchor)
+        size = self.size
 
         return np.array(
             [
                 self._position[0]
-                + self.size[0]
+                + size[0]
                 * (
                     ANCHOR_TO_MULTIPLIER[x_anchor.upper()]
                     - ANCHOR_TO_MULTIPLIER[self._anchors[0].upper()]
                 ),
                 self._position[1]
-                + self.size[1]
+                + size[1]
                 * (
                     ANCHOR_TO_MULTIPLIER[y_anchor.upper()]
                     - ANCHOR_TO_MULTIPLIER[self._anchors[1].upper()]
@@ -963,6 +963,12 @@ class TextBlock2D(UI):
         self._message = text
         self._dynamic_bbox = dynamic_bbox
         self._bg_size = size
+
+        self._last_rendered_size = (0, 0)
+
+        if self._bg_size is None and not self.dynamic_bbox:
+            raise ValueError("TextBlock size is required as it is not dynamic.")
+
         self._justification = justification
         self._vertical_justification = vertical_justification
         super(TextBlock2D, self).__init__(position=position)
@@ -975,13 +981,7 @@ class TextBlock2D(UI):
         self.message = text
         self.font_size = font_size
 
-        if self._bg_size is None and not self.dynamic_bbox:
-            raise ValueError("TextBlock size is required as if is not dynamic.")
-
-        if self._bg_size is not None:
-            self.resize(size)
-        if self.dynamic_bbox:
-            self.update_bounding_box()
+        self.update_bounding_box()
 
     def _setup(self):
         """Set up this UI component."""
@@ -1001,6 +1001,19 @@ class TextBlock2D(UI):
         """
         self.actor.max_width = size[1]
         self.update_bounding_box(size=size)
+
+    def update_layout(self):
+        """Update the component layout based on current text dimensions."""
+        current_w, current_h = self.get_text_actor_size()
+        last_w, last_h = self._last_rendered_size
+
+        if abs(current_w - last_w) > 0.1 or abs(current_h - last_h) > 0.1:
+            self._last_rendered_size = (current_w, current_h)
+
+            if self.dynamic_bbox:
+                self.update_bounding_box()
+            else:
+                self.update_alignment()
 
     def _get_actors(self):
         """Get the actors composing this UI component.
@@ -1211,7 +1224,7 @@ class TextBlock2D(UI):
         return self.actor.material.color[:3]
 
     @color.setter
-    def color(self, color=(1, 0, 0)):
+    def color(self, color):
         """Set text color.
 
         Parameters
@@ -1219,6 +1232,8 @@ class TextBlock2D(UI):
         color : (float, float, float)
             RGB: Values must be between 0-1.
         """
+        if color is None:
+            color = (1, 1, 1)
         self.actor.material.color = np.array([*color, 1.0])
 
     @property
@@ -1281,12 +1296,11 @@ class TextBlock2D(UI):
     def update_alignment(self):
         """Update the text actor alignment within the bounding box."""
         updated_text_position = [0, 0]
+        text_actor_size = self.get_text_actor_size()
 
         if self.justification.lower() == "left":
             self.actor.text_align = "left"
-            updated_text_position[0] = (
-                self.boundingbox[0] + self.get_text_actor_size()[0] // 2
-            )
+            updated_text_position[0] = self.boundingbox[0] + text_actor_size[0] // 2
         elif self.justification.lower() == "center":
             self.actor.text_align = "center"
             updated_text_position[0] = (
@@ -1294,25 +1308,19 @@ class TextBlock2D(UI):
             )
         elif self.justification.lower() == "right":
             self.actor.text_align = "right"
-            updated_text_position[0] = (
-                self.boundingbox[2] - self.get_text_actor_size()[0] // 2
-            )
+            updated_text_position[0] = self.boundingbox[2] - text_actor_size[0] // 2
         else:
             msg = "Text can only be justified left, center and right."
             raise ValueError(msg)
 
         if self.vertical_justification.lower() == "top":
-            updated_text_position[1] = (
-                self.boundingbox[1] + self.get_text_actor_size()[1] // 2
-            )
+            updated_text_position[1] = self.boundingbox[1] + text_actor_size[1] // 2
         elif self.vertical_justification.lower() == "middle":
             updated_text_position[1] = (
                 self.boundingbox[1] + (self.boundingbox[3] - self.boundingbox[1]) // 2
             )
         elif self.vertical_justification.lower() == "bottom":
-            updated_text_position[1] = (
-                self.boundingbox[3] - self.get_text_actor_size()[1] // 2
-            )
+            updated_text_position[1] = self.boundingbox[3] - text_actor_size[1] // 2
         else:
             msg = "Vertical justification must be: top, middle or bottom."
             raise ValueError(msg)
