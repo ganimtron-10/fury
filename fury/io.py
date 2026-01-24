@@ -38,6 +38,7 @@ from fury.lib import (
 )
 
 # from fury.utils import set_input
+from fury.network.parser import parse_network, stringify_network
 
 
 def load_cube_map_texture(fnames, *, size=None, generate_mipmaps=True):
@@ -208,6 +209,34 @@ def save_image(
 
     im = Image.fromarray(arr)
     im.save(filename, quality=compression_quality, dpi=dpi)
+
+
+def load_network(file_path, format=None):
+    """
+    Loads a network from a file. Auto-detects format from extension if not provided.
+    """
+    if format is None:
+        _, ext = os.path.splitext(file_path)
+        format = ext.lstrip(".").lower()
+
+    with open(file_path, "r", encoding="utf-8") as f:
+        data = f.read()
+
+    return parse_network(data, format)
+
+
+def save_network(network, file_path, format=None):
+    """
+    Saves a network to a file. Auto-detects format from extension if not provided.
+    """
+    if format is None:
+        _, ext = os.path.splitext(file_path)
+        format = ext.lstrip(".").lower()
+
+    data = stringify_network(network, format)
+
+    with open(file_path, "w", encoding="utf-8") as f:
+        f.write(data)
 
 
 # def load_polydata(file_name):
