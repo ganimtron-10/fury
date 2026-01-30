@@ -144,7 +144,7 @@ def main():
         "--edges", type=int, default=1000, help="Number of edges for dummy graph"
     )
     parser.add_argument("--k", type=float, default=20.0, help="Optimal distance (K)")
-    parser.add_argument("--speed", type=float, default=1.0, help="Simulation speed")
+    parser.add_argument("--speed", type=float, default=0.01, help="Simulation speed")
 
     args = parser.parse_args()
 
@@ -169,6 +169,7 @@ def main():
         repulsion_strength=1.0,
         speed=args.speed,
     )
+    # network_actor.local.position = (10, 1, 10)
 
     # 3. Visualization Setup
     scene = window.Scene()
@@ -188,20 +189,22 @@ def main():
         title="FURY Network - Compute Shader Force Layout",
     )
 
-    # 4. Interaction
-    # Allow adjusting simulation parameters at runtime
-    def timer_callback(_obj, _event):
-        # We can update uniforms dynamically if needed,
-        # e.g. decay temperature or handle user inputs.
-        # For now, the shader runs continuously.
-        network_actor.material.uniform_buffer.update_full()
-        # show_m.render()
+    # # 4. Interaction
+    # # Allow adjusting simulation parameters at runtime
+    # def timer_callback():
+    #     # We can update uniforms dynamically if needed,
+    #     # e.g. decay temperature or handle user inputs.
+    #     # For now, the shader runs continuously.
+    #     # network_actor.material.uniform_buffer.update_full()
+    #     # show_m.render()
+    #     print(network_actor.local.position)
+    #     print(show_m.screens[0].camera.local.position)
 
-    # Register the callback (True for repeat, 16ms duration)
-    # show_m.register_callback(timer_callback, 100, True, "Network Update")
+    # # Register the callback (True for repeat, 16ms duration)
+    # show_m.register_callback(timer_callback, 1, True, "Network Update")
 
     # Ensure camera is updated before start
-    window.update_camera(show_m.screens[0].camera, None, scene)
+    # window.update_camera(show_m.screens[0].camera, None, scene)
 
     print("\nStarting simulation... Close window to exit.")
     show_m.start()
