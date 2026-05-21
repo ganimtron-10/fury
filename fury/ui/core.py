@@ -16,6 +16,38 @@ from fury.ui import UIContext
 from fury.ui.helpers import UI_Z_RANGE, Anchor, get_anchor_to_multiplier
 
 
+class MockEvent:
+    def __init__(self, pygfx_event, vtk_event_name):
+        self.pygfx_event = pygfx_event
+        self.name = vtk_event_name or getattr(pygfx_event, "type", "")
+        self._key = getattr(pygfx_event, "key", None)
+
+    @property
+    def key(self):
+        return self._key or ""
+
+    @property
+    def position(self):
+        if hasattr(self.pygfx_event, "x") and hasattr(self.pygfx_event, "y"):
+            return (self.pygfx_event.x, self.pygfx_event.y)
+        return (0, 0)
+
+    def abort(self):
+        if hasattr(self.pygfx_event, "stop_propagation"):
+            self.pygfx_event.stop_propagation()
+
+
+class MockInteractorStyle:
+    def __init__(self, pygfx_event, vtk_event_name):
+        self.event = MockEvent(pygfx_event, vtk_event_name)
+
+    def force_render(self):
+        pass
+
+    def exit(self):
+        pass
+
+
 class UI(object, metaclass=abc.ABCMeta):
     """An umbrella class for all UI elements.
 
@@ -162,7 +194,10 @@ class UI(object, metaclass=abc.ABCMeta):
         list
             List of actors composing this UI component.
         """
-        return self._get_actors()
+        all_actors = list(self._get_actors())
+        for child in self._children:
+            all_actors.extend(child.actors)
+        return all_actors
 
     def perform_position_validation(self, x_anchor, y_anchor):
         """Perform validation checks for anchor string and the 'size' property.
@@ -362,6 +397,73 @@ class UI(object, metaclass=abc.ABCMeta):
         actor.add_event_handler(self.key_press_callback, EventType.KEY_UP)
         actor.add_event_handler(self.pointer_enter_callback, EventType.POINTER_ENTER)
         actor.add_event_handler(self.pointer_leave_callback, EventType.POINTER_LEAVE)
+
+    def add_callback(self, prop, event_type, callback, *, priority=0):
+        """Add a callback to a specific event for this UI component.
+
+        Parameters
+        ----------
+        prop : Mesh
+            The PyGfx actor on which this callback is to be added.
+        event_type : string
+            The VTK legacy event code.
+        callback : function
+            The callback function.
+        priority : int
+            Higher number is higher priority.
+        """
+        pygfx_events = []
+        if event_type in ["CharEvent", "KeyPressEvent"]:
+            pygfx_events.append(("key_down", lambda e: True))
+        elif event_type == "KeyReleaseEvent":
+            pygfx_events.append(("key_up", lambda e: True))
+        elif event_type == "MouseMoveEvent":
+            pygfx_events.append(("pointer_move", lambda e: True))
+            pygfx_events.append(("pointer_drag", lambda e: True))
+        elif event_type == "LeftButtonPressEvent":
+            pygfx_events.append(("pointer_down", lambda e: getattr(e, "button", 0) == 1))
+        elif event_type == "LeftButtonReleaseEvent":
+            pygfx_events.append(("pointer_up", lambda e: getattr(e, "button", 0) == 1))
+        elif event_type == "RightButtonPressEvent":
+            pygfx_events.append(("pointer_down", lambda e: getattr(e, "button", 0) == 2))
+        elif event_type == "RightButtonReleaseEvent":
+            pygfx_events.append(("pointer_up", lambda e: getattr(e, "button", 0) == 2))
+        elif event_type == "MiddleButtonPressEvent":
+            pygfx_events.append(("pointer_down", lambda e: getattr(e, "button", 0) == 3))
+        elif event_type == "MiddleButtonReleaseEvent":
+            pygfx_events.append(("pointer_up", lambda e: getattr(e, "button", 0) == 3))
+        elif event_type == "MouseWheelForwardEvent":
+            pygfx_events.append(("wheel", lambda e: getattr(e, "dy", 0) < 0))
+        elif event_type == "MouseWheelBackwardEvent":
+            pygfx_events.append(("wheel", lambda e: getattr(e, "dy", 0) > 0))
+        elif event_type == "LeftButtonDoubleClickEvent":
+            pygfx_events.append(("double_click", lambda e: getattr(e, "button", 0) == 1))
+        elif event_type == "RightButtonDoubleClickEvent":
+            pygfx_events.append(("double_click", lambda e: getattr(e, "button", 0) == 2))
+        elif event_type == "MiddleButtonDoubleClickEvent":
+            pygfx_events.append(("double_click", lambda e: getattr(e, "button", 0) == 3))
+
+        if not pygfx_events:
+            pygfx_events.append((event_type, lambda e: True))
+
+        import inspect
+
+        for p_evt_type, filter_fn in pygfx_events:
+            def make_handler(f_fn, v_evt_name):
+                def handler(event):
+                    if f_fn(event):
+                        mock_style = MockInteractorStyle(event, v_evt_name)
+                        sig = inspect.signature(callback)
+                        num_params = len(sig.parameters)
+                        if num_params == 3:
+                            callback(mock_style, prop, self)
+                        elif num_params == 2:
+                            callback(mock_style, prop)
+                        else:
+                            callback(mock_style)
+                return handler
+
+            prop.add_event_handler(make_handler(filter_fn, event_type), p_evt_type)
 
     def mouse_button_down_callback(self, event):
         """Handle mouse button press event.

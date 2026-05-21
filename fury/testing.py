@@ -129,20 +129,19 @@ class EventCounter:
         Parameters
         ----------
         events_names : list of str, optional
-            List of event names to count. If None, defaults to common VTK events.
+            List of event names to count. If None, defaults to common PyGfx events.
         """
         if events_names is None:
             events_names = [
-                "CharEvent",
-                "MouseMoveEvent",
-                "KeyPressEvent",
-                "KeyReleaseEvent",
-                "LeftButtonPressEvent",
-                "LeftButtonReleaseEvent",
-                "RightButtonPressEvent",
-                "RightButtonReleaseEvent",
-                "MiddleButtonPressEvent",
-                "MiddleButtonReleaseEvent",
+                "pointer_down",
+                "pointer_up",
+                "pointer_move",
+                "pointer_drag",
+                "key_down",
+                "key_up",
+                "click",
+                "double_click",
+                "wheel",
             ]
 
         # Events to count
@@ -367,3 +366,165 @@ def check_for_warnings(warn_printed, w_msg):
     assert len(selected_w) >= 1
     msg = [str(m.message) for m in selected_w]
     assert_equal(w_msg in msg, True)
+
+
+def get_all_actors(scene):
+    """Recursively traverse the main scene, overlays, and UI scene to gather all actors."""
+    actors = []
+
+    def traverse(obj):
+        if obj is None:
+            return
+        if obj in actors:
+            return
+
+        if hasattr(obj, "add_event_handler"):
+            actors.append(obj)
+
+        if hasattr(obj, "children"):
+            for child in obj.children:
+                traverse(child)
+
+    traverse(scene)
+    if hasattr(scene, "main_scene"):
+        traverse(scene.main_scene)
+    if hasattr(scene, "ui_scene"):
+        traverse(scene.ui_scene)
+
+    return actors
+
+
+def record_events(show_manager):
+    """Record events during interaction."""
+    if getattr(show_manager, "_events_recording_active", False):
+        return
+
+    show_manager._events_recording_active = True
+    show_manager._recorded_events = []
+
+    original_dispatch_event = show_manager.renderer.dispatch_event
+
+    def wrapped_dispatch_event(event):
+        if event.type in ["resize", "close", "focus", "blur", "pointer_enter", "pointer_leave"]:
+            original_dispatch_event(event)
+            return
+
+        all_actors = get_all_actors(show_manager.scene)
+        target_index = -1
+        if event.target in all_actors:
+            target_index = all_actors.index(event.target)
+
+        event_dict = {
+            "class": event.__class__.__name__,
+            "type": event.type,
+            "target_index": target_index,
+        }
+        for attr in ["x", "y", "button", "buttons", "dy", "dx", "key", "modifiers", "ntouch", "clicks"]:
+            if hasattr(event, attr):
+                event_dict[attr] = getattr(event, attr)
+
+        show_manager._recorded_events.append(event_dict)
+        original_dispatch_event(event)
+
+    show_manager.renderer.dispatch_event = wrapped_dispatch_event
+
+
+def record_events_to_file(show_manager, filename):
+    """Record and save events to a file."""
+    record_events(show_manager)
+    show_manager.start()
+
+    import gzip
+    import json
+
+    events_json = json.dumps(show_manager._recorded_events)
+    if filename.endswith(".gz"):
+        with gzip.open(filename, "wt", encoding="utf-8") as f:
+            f.write(events_json)
+    else:
+        with open(filename, "w", encoding="utf-8") as f:
+            f.write(events_json)
+
+
+def play_events(show_manager, events):
+    """Play a sequence of recorded events."""
+    show_manager.render()
+    show_manager._draw_canvas()
+
+    show_manager._playing_back = True
+    try:
+        from pygfx import PointerEvent, KeyboardEvent, Event
+
+        all_actors = get_all_actors(show_manager.scene)
+
+        for event_dict in events:
+            cls_name = event_dict.get("class", "Event")
+            evt_type = event_dict.get("type")
+            target_index = event_dict.get("target_index", -1)
+
+            kwargs = {}
+            for attr in ["x", "y", "button", "buttons", "dy", "dx", "key", "modifiers", "ntouch", "clicks"]:
+                if attr in event_dict:
+                    kwargs[attr] = event_dict[attr]
+
+            if cls_name == "PointerEvent":
+                event = PointerEvent(type=evt_type, **kwargs)
+            elif cls_name == "KeyboardEvent":
+                event = KeyboardEvent(type=evt_type, **kwargs)
+            else:
+                event = Event(type=evt_type, **kwargs)
+
+            target = None
+            if target_index != -1 and target_index < len(all_actors):
+                target = all_actors[target_index]
+            else:
+                target = show_manager.renderer
+
+            path = []
+            curr = target
+            while curr is not None:
+                if curr not in path:
+                    path.append(curr)
+                curr = getattr(curr, "parent", None)
+
+            if show_manager.scene not in path:
+                path.append(show_manager.scene)
+            if show_manager.renderer not in path:
+                path.append(show_manager.renderer)
+
+            event._target = target
+            for obj in path:
+                if hasattr(obj, "handle_event"):
+                    event._current_target = obj
+                    obj.handle_event(event)
+                    if getattr(event, "_propagation_stopped", False):
+                        break
+
+            show_manager._draw_canvas()
+
+            # Add a small delay and poll events so that the user can visually see the simulation flow
+            if not hasattr(show_manager.window, "draw"):  # not offscreen
+                import time
+                time.sleep(0.01)
+                try:
+                    import glfw
+                    glfw.poll_events()
+                except Exception:
+                    pass
+    finally:
+        show_manager._playing_back = False
+
+
+def play_events_from_file(show_manager, filename):
+    """Load events from a file and replay them."""
+    import gzip
+    import json
+
+    if filename.endswith(".gz"):
+        with gzip.open(filename, "rt", encoding="utf-8") as f:
+            events = json.loads(f.read())
+    else:
+        with open(filename, "r", encoding="utf-8") as f:
+            events = json.loads(f.read())
+
+    play_events(show_manager, events)

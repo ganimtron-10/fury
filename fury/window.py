@@ -589,6 +589,11 @@ def calculate_screen_sizes(screens, size):
     return screen_bbs
 
 
+def get_all_actors(root):
+    from fury.testing import get_all_actors as _get_all_actors
+    return _get_all_actors(root)
+
+
 class ShowManager:
     """Show manager for the rendering window.
 
@@ -768,6 +773,8 @@ class ShowManager:
         event : PointerEvent
             The PyGfx pointer event object.
         """
+        if getattr(self, "_playing_back", False):
+            return
         if self._drag_target is None:
             self._drag_target = event.target
         drag_event = PointerEvent(
@@ -1255,6 +1262,15 @@ class ShowManager:
         )
 
     @property
+    def scene(self):
+        """Get the primary scene associated with the show manager."""
+        if hasattr(self, "screens") and self.screens:
+            return self.screens[0].scene
+        if self._scene and len(self._scene) > 0:
+            return self._scene[0]
+        return None
+
+    @property
     def app(self):
         """Get the associated QApplication instance, if any.
 
@@ -1409,6 +1425,17 @@ class ShowManager:
         self._imgui and self._imgui.render()
         self.window.request_draw()
 
+    def _draw_canvas(self):
+        """Draw a single canvas frame synchronously across different canvas types."""
+        if hasattr(self.window, "force_draw"):
+            self.window.force_draw()
+        elif hasattr(self.window, "draw"):
+            self.window.draw()
+        elif hasattr(self.window, "draw_frame"):
+            self.window.draw_frame()
+        else:
+            self.window.request_draw()
+
     def render(self):
         """Request a redraw of all screens in the window."""
         if self._is_qt and self._qt_parent is not None:
@@ -1443,6 +1470,26 @@ class ShowManager:
     def close(self):
         """Close the rendering window and terminate the application if necessary."""
         self.window.close()
+
+    def record_events(self):
+        """Start recording UI events."""
+        from fury.testing import record_events
+        record_events(self)
+
+    def record_events_to_file(self, filename):
+        """Record and save events to a file."""
+        from fury.testing import record_events_to_file
+        record_events_to_file(self, filename)
+
+    def play_events(self, events):
+        """Play a sequence of recorded events."""
+        from fury.testing import play_events
+        play_events(self, events)
+
+    def play_events_from_file(self, filename):
+        """Load events from a file and replay them."""
+        from fury.testing import play_events_from_file
+        play_events_from_file(self, filename)
 
 
 def snapshot(

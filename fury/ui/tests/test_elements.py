@@ -1,12 +1,14 @@
 """Test for components module."""
 
+from os.path import join as pjoin
 from PIL import Image
 import numpy as np
 import numpy.testing as npt
 
 from fury import ui, window
-from fury.data import fetch_viz_icons, read_viz_icons
+from fury.data import fetch_viz_icons, read_viz_icons, DATA_DIR
 from fury.ui.helpers import Anchor
+from fury.testing import EventCounter
 
 
 def test_textured_button_2d_initialization():
@@ -385,40 +387,44 @@ def test_playback_panel_layout_and_visibility():
 #     npt.assert_equal(is_off_focused[0], True)
 
 
-# def test_ui_line_slider_2d_horizontal_bottom(recording=False):
-#     filename = "test_ui_line_slider_2d_horizontal_bottom"
-#     recording_filename = pjoin(DATA_DIR, filename + ".log.gz")
-#     expected_events_counts_filename = pjoin(DATA_DIR, filename + ".json")
+def test_ui_line_slider_2d_horizontal_bottom(recording=0, view_simulation=1):
+    filename = "test_ui_line_slider_2d_horizontal_bottom"
+    recording_filename = pjoin(DATA_DIR, filename + ".log.gz")
+    expected_events_counts_filename = pjoin(DATA_DIR, filename + ".json")
 
-#     line_slider_2d_test = ui.LineSlider2D(
-#         initial_value=-2,
-#         min_value=-5,
-#         max_value=5,
-#         orientation="horizontal",
-#         text_alignment="bottom",
-#     )
-#     line_slider_2d_test.center = (300, 300)
+    line_slider_2d_test = ui.LineSlider2D(
+        initial_value=-2,
+        min_value=-5,
+        max_value=5,
+        orientation="horizontal",
+    )
+    line_slider_2d_test.center = (300, 300)
 
-#     # Assign the counter callback to every possible event.
-#     event_counter = EventCounter()
-#     event_counter.monitor(line_slider_2d_test)
+    # Assign the counter callback to every possible event.
+    event_counter = EventCounter()
+    event_counter.monitor(line_slider_2d_test)
 
-#     current_size = (600, 600)
-#     show_manager = window.ShowManager(
-#         size=current_size, title="FURY Horizontal Line Slider"
-#     )
+    current_size = (600, 600)
+    w_type = "glfw" if (recording or view_simulation) else "offscreen"
+    show_manager = window.ShowManager(
+        size=current_size, title="FURY Horizontal Line Slider", window_type=w_type
+    )
 
-#     show_manager.scene.add(line_slider_2d_test)
+    show_manager.scene.add(line_slider_2d_test)
 
-#     if recording:
-#         show_manager.record_events_to_file(recording_filename)
-#         print(list(event_counter.events_counts.items()))
-#         event_counter.save(expected_events_counts_filename)
+    if recording:
+        show_manager.record_events_to_file(recording_filename)
+        print(list(event_counter.events_counts.items()))
+        event_counter.save(expected_events_counts_filename)
 
-#     else:
-#         show_manager.play_events_from_file(recording_filename)
-#         expected = EventCounter.load(expected_events_counts_filename)
-#         event_counter.check_counts(expected)
+    else:
+        show_manager.play_events_from_file(recording_filename)
+        if view_simulation:
+            import time
+            time.sleep(0.5)
+            show_manager.close()
+        expected = EventCounter.load(expected_events_counts_filename)
+        event_counter.check_counts(expected)
 
 
 # def test_ui_line_slider_2d_horizontal_top(recording=False):
