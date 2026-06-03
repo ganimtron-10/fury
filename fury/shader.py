@@ -76,7 +76,7 @@ class VectorFieldComputeShader(BaseShader):
         """
         return {}
 
-    def get_bindings(self, wobject, _shared, _scene):
+    def get_bindings(self, wobject, _shared, _scene=None):
         """Get the bindings for the vector field compute shader.
 
         Parameters
@@ -317,7 +317,7 @@ class _StreamlineBakingShader(BaseShader):
         """
         return {}
 
-    def get_bindings(self, wobject, _shared, _scene):
+    def get_bindings(self, wobject, _shared, _scene=None):
         """Get the bindings for the streamline baking compute shader.
 
         Parameters
@@ -492,7 +492,7 @@ class SphGlyphComputeShader(BaseShader):
         """
         return {}
 
-    def get_bindings(self, wobject, _shared, _scene):
+    def get_bindings(self, wobject, _shared, _scene=None):
         """Get the bindings for the spherical harmonic glyph compute shader.
 
         Parameters
@@ -612,7 +612,7 @@ class LineProjectionComputeShader(BaseShader):
             "indices": (n, 1, 1),
         }
 
-    def get_bindings(self, wobject, _shared, _scene):
+    def get_bindings(self, wobject, _shared, _scene=None):
         """Get the bindings for the line projection compute shader.
 
         Parameters
@@ -791,7 +791,7 @@ class _StreamtubeBakingShader(BaseShader):
 
         return {}
 
-    def get_bindings(self, wobject, _shared, _scene):
+    def get_bindings(self, wobject, _shared, _scene=None):
         """Describe storage buffers used by the compute shader.
 
         Parameters
