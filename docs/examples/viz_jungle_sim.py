@@ -73,21 +73,85 @@ state = {
     # Params
     "cohesion_mult": 1.0,
     "separation_mult": 1.0,
+    "sim_speed": 1.0,
 }
 
 # Setup Scene
 scene = window.Scene()
 scene.background = (0.04, 0.08, 0.04)
 
-# Ground
-ground = actor.box(
-    centers=np.array([[0.0, -0.5, 0.0]]),
-    colors=(0.06, 0.12, 0.06),
-    scales=(JUNGLE_SIZE, 1.0, JUNGLE_SIZE),
-)
+
+# Height map generator for rolling hills and valleys terrain
+def get_terrain_height(x, z):
+    # Base height function (sine/cosine waves)
+    y = 12.0 * np.sin(x / 45.0) * np.cos(z / 45.0) + 6.0 * np.cos(x / 90.0)
+
+    # Flatten lake and river
+    d_lake = np.sqrt(x**2 + z**2)
+    d_river = 9999.0
+    for i in range(len(river_pts) - 1):
+        ap = np.array([x, 0.0, z]) - river_pts[i]
+        ab = river_pts[i + 1] - river_pts[i]
+        t = np.clip(np.dot(ap, ab) / (np.dot(ab, ab) + 1e-8), 0.0, 1.0)
+        closest = river_pts[i] + t * ab
+        d_river = min(d_river, np.linalg.norm(np.array([x, 0.0, z]) - closest))
+
+    lake_factor = np.clip((d_lake - LAKE_RADIUS) / 25.0, 0.0, 1.0)
+    river_factor = np.clip((d_river - 12.0) / 15.0, 0.0, 1.0)
+    return y * (lake_factor * river_factor)
+
+
+# Procedural Terrain Generation
+def generate_terrain(grid_size=60, size=600.0):
+    M = grid_size + 1
+    N = grid_size + 1
+    xs = np.linspace(-size / 2, size / 2, M)
+    zs = np.linspace(-size / 2, size / 2, N)
+
+    vertices = []
+    colors = []
+
+    for r in range(M):
+        for c in range(N):
+            x = xs[r]
+            z = zs[c]
+            y = get_terrain_height(x, z)
+            vertices.append([x, y, z])
+
+            # Color mapping by elevation
+            h_norm = np.clip((y + 15.0) / 30.0, 0.0, 1.0)
+            col = (
+                0.05 + 0.1 * h_norm,
+                0.12 + 0.08 * h_norm,
+                0.05 + 0.05 * h_norm,
+                1.0,
+            )
+            colors.append(col)
+
+    vertices = np.array(vertices, dtype=np.float32)
+    colors = np.array(colors, dtype=np.float32)
+
+    faces = []
+    for r in range(M - 1):
+        for c in range(N - 1):
+            idx0 = r * N + c
+            idx1 = (r + 1) * N + c
+            idx2 = r * N + (c + 1)
+            idx3 = (r + 1) * N + (c + 1)
+
+            faces.append([idx0, idx1, idx2])
+            faces.append([idx1, idx3, idx2])
+
+    faces = np.array(faces, dtype=np.int32)
+    return vertices, faces, colors
+
+
+# Generate Ground surface
+verts, faces, cols = generate_terrain()
+ground = actor.surface(verts, faces=faces, colors=cols)
 scene.add(ground)
 
-# Lake
+# Lake surface
 lake = actor.cylinder(
     centers=np.array([[LAKE_CENTER[0], 0.02, LAKE_CENTER[2]]]),
     directions=np.array([[0.0, 1.0, 0.0]]),
@@ -101,12 +165,15 @@ scene.add(lake)
 river = actor.line([np.array(river_pts)], colors=(0.12, 0.45, 0.8), material="basic")
 scene.add(river)
 
-# Vegetation patches (represented by small green cones)
+# Vegetation patches (represented by small green cones on terrain)
 for vp in veg_patches:
     for _ in range(12):
         offset_x = np.random.uniform(-15.0, 15.0)
         offset_z = np.random.uniform(-15.0, 15.0)
-        c_pos = vp + np.array([offset_x, 0.5, offset_z])
+        wx = vp[0] + offset_x
+        wz = vp[2] + offset_z
+        wy = get_terrain_height(wx, wz) + 0.5
+        c_pos = np.array([wx, wy, wz])
         sh = np.random.uniform(1.0, 2.0)
         bush = actor.cone(
             centers=np.array([c_pos]),
@@ -152,19 +219,26 @@ def rotate_vector(quat, vec):
 # Animal Spawn Helper
 def spawn_animal(species, position, is_child=False):
     color = ANIMAL_COLOR[species]
+    # Height offset depending on size
+    h_offset = 0.6 if species == "lion" else 0.5
+    if species == "elephant":
+        h_offset = 1.0
+
+    position[1] = get_terrain_height(position[0], position[2]) + h_offset
+
     if species == "lion":
         art = actor.ellipsoid(
-            centers=np.array([[0.0, 0.6, 0.0]]),
+            centers=np.array([[0.0, 0.0, 0.0]]),
             lengths=(2.0, 1.0, 1.0),
             colors=color,
         )
     elif species == "elephant":
         art = actor.box(
-            centers=np.array([[0.0, 1.0, 0.0]]), colors=color, scales=(3.2, 1.8, 1.6)
+            centers=np.array([[0.0, 0.0, 0.0]]), colors=color, scales=(3.2, 1.8, 1.6)
         )
     else:
         art = actor.cone(
-            centers=np.array([[0.0, 0.5, 0.0]]),
+            centers=np.array([[0.0, 0.0, 0.0]]),
             directions=np.array([[0.0, 0.0, 1.0]]),
             colors=color,
             height=1.5,
@@ -206,17 +280,17 @@ def spawn_animal(species, position, is_child=False):
 for _ in range(55):
     rx = np.random.uniform(-250.0, 250.0)
     rz = np.random.uniform(-250.0, 250.0)
-    spawn_animal("deer", np.array([rx, 0.5, rz]))
+    spawn_animal("deer", np.array([rx, 0.0, rz]))
 
 for _ in range(12):
     rx = np.random.uniform(-250.0, 250.0)
     rz = np.random.uniform(-250.0, 250.0)
-    spawn_animal("lion", np.array([rx, 0.6, rz]))
+    spawn_animal("lion", np.array([rx, 0.0, rz]))
 
 for _ in range(10):
     rx = np.random.uniform(-250.0, 250.0)
     rz = np.random.uniform(-250.0, 250.0)
-    spawn_animal("elephant", np.array([rx, 1.0, rz]))
+    spawn_animal("elephant", np.array([rx, 0.0, rz]))
 
 
 # Project 3D to Screen Coordinates
@@ -234,91 +308,107 @@ def world_to_screen(world_pos, camera, screen_size):
     return np.array([screen_x, screen_y])
 
 
-# UI Control Panel setup (Left side) - Height expanded to 540 to fit all controls
-panel = ui.Panel2D(
-    size=(320, 540), color=(0.08, 0.12, 0.08), has_border=True, border_width=2
+# UI Redesign - Two separate aligned panels (Info & Controls)
+info_panel = ui.Panel2D(
+    size=(320, 190), color=(0.06, 0.09, 0.06), has_border=True, border_width=2
 )
-panel.set_position((15, 15))
+info_panel.set_position((15, 15))
 
 lbl_title = ui.TextBlock2D(
-    text="JUNGLE SIMULATOR",
-    position=(20, 20),
-    font_size=14,
+    text="JUNGLE ECOSYSTEM",
+    position=(20, 15),
+    font_size=13,
     color=(0.9, 0.75, 0.2),
     bold=True,
     dynamic_bbox=True,
 )
-panel.add_element(lbl_title, (20, 20))
+info_panel.add_element(lbl_title, (20, 15))
 
 lbl_legend = ui.TextBlock2D(
     text="Lions: 0 | Elephants: 0 | Deers: 0",
-    position=(20, 50),
-    font_size=11,
+    position=(20, 42),
+    font_size=10,
     color=(0.85, 0.85, 0.85),
     dynamic_bbox=True,
 )
-panel.add_element(lbl_legend, (20, 50))
+info_panel.add_element(lbl_legend, (20, 42))
 
-# Card for selected animal details
 lbl_card_title = ui.TextBlock2D(
     text="SELECTED ANIMAL STATUS",
-    position=(20, 80),
-    font_size=11,
+    position=(20, 75),
+    font_size=10,
     color=(0.95, 0.8, 0.2),
     bold=True,
     dynamic_bbox=True,
 )
-panel.add_element(lbl_card_title, (20, 80))
+info_panel.add_element(lbl_card_title, (20, 75))
 
 lbl_animal_info = ui.TextBlock2D(
     text="Click an animal to monitor it.",
-    position=(20, 105),
-    font_size=10,
+    position=(20, 95),
+    font_size=9.5,
     color=(0.8, 0.8, 0.8),
     dynamic_bbox=True,
 )
-panel.add_element(lbl_animal_info, (20, 105))
+info_panel.add_element(lbl_animal_info, (20, 95))
 
-# Dynamic stats editing sliders
+scene.add(info_panel)
+
+# Controls Panel (Spaced below Info panel)
+control_panel = ui.Panel2D(
+    size=(320, 520), color=(0.06, 0.09, 0.06), has_border=True, border_width=2
+)
+control_panel.set_position((15, 220))
+
+lbl_sect1 = ui.TextBlock2D(
+    text="EDIT SELECTED STATS",
+    position=(20, 15),
+    font_size=10,
+    color=(0.95, 0.8, 0.2),
+    bold=True,
+    dynamic_bbox=True,
+)
+control_panel.add_element(lbl_sect1, (20, 15))
+
 slider_hunger = ui.LineSlider2D(
-    position=(20, 175),
+    position=(20, 40),
     initial_value=0.0,
     min_value=0.0,
     max_value=100.0,
     length=180,
-    text_template="Edit Hunger: {value:.0f}%",
+    text_template="Hunger: {value:.0f}%",
 )
-panel.add_element(slider_hunger, (20, 175))
+control_panel.add_element(slider_hunger, (20, 40))
 
 slider_thirst = ui.LineSlider2D(
-    position=(20, 220),
+    position=(20, 85),
     initial_value=0.0,
     min_value=0.0,
     max_value=100.0,
     length=180,
-    text_template="Edit Thirst: {value:.0f}%",
+    text_template="Thirst: {value:.0f}%",
 )
-panel.add_element(slider_thirst, (20, 220))
+control_panel.add_element(slider_thirst, (20, 85))
 
 slider_health = ui.LineSlider2D(
-    position=(20, 265),
+    position=(20, 130),
     initial_value=100.0,
     min_value=0.0,
     max_value=100.0,
     length=180,
-    text_template="Edit Health: {value:.0f}%",
+    text_template="Health: {value:.0f}%",
 )
-panel.add_element(slider_health, (20, 265))
+control_panel.add_element(slider_health, (20, 130))
 
 slider_age = ui.LineSlider2D(
-    position=(20, 310),
+    position=(20, 175),
     initial_value=0.0,
     min_value=0.0,
     max_value=140.0,
     length=180,
-    text_template="Edit Age: {value:.1f}",
+    text_template="Age: {value:.1f}",
 )
-panel.add_element(slider_age, (20, 310))
+control_panel.add_element(slider_age, (20, 175))
 
 
 def on_hunger_slide(slider):
@@ -344,7 +434,6 @@ def on_health_slide(slider):
     if sel is not None:
         for a in state["animals"]:
             if a["id"] == sel:
-                # Map percentage to species max health
                 mx = MAX_HEALTH[a["species"]]
                 a["health"] = (slider.value / 100.0) * mx
                 break
@@ -364,14 +453,24 @@ slider_thirst.on_change = on_thirst_slide
 slider_health.on_change = on_health_slide
 slider_age.on_change = on_age_slide
 
-# Animal highlight focus buttons
+lbl_sect2 = ui.TextBlock2D(
+    text="QUICK ANIMAL SELECT",
+    position=(20, 230),
+    font_size=10,
+    color=(0.95, 0.8, 0.2),
+    bold=True,
+    dynamic_bbox=True,
+)
+control_panel.add_element(lbl_sect2, (20, 230))
+
+# Snug fit Animal focus buttons
 btn_states_lion = {
     "hover": {"text": "LION", "color": (0.3, 0.4, 0.3)},
     "pressed": {"text": "LION", "color": (0.1, 0.2, 0.1)},
     "default": {"text": "LION", "color": (0.15, 0.25, 0.15)},
 }
 btn_lion = ui.TextButton2D(
-    label="LION", size=(80, 25), position=(20, 370), states=btn_states_lion
+    label="LION", size=(80, 25), position=(20, 255), states=btn_states_lion
 )
 
 btn_states_ele = {
@@ -380,7 +479,7 @@ btn_states_ele = {
     "default": {"text": "ELEPHANT", "color": (0.15, 0.25, 0.15)},
 }
 btn_ele = ui.TextButton2D(
-    label="ELEPHANT", size=(90, 25), position=(110, 370), states=btn_states_ele
+    label="ELEPHANT", size=(90, 25), position=(110, 255), states=btn_states_ele
 )
 
 btn_states_deer = {
@@ -389,53 +488,55 @@ btn_states_deer = {
     "default": {"text": "DEER", "color": (0.15, 0.25, 0.15)},
 }
 btn_deer = ui.TextButton2D(
-    label="DEER", size=(80, 25), position=(210, 370), states=btn_states_deer
+    label="DEER", size=(80, 25), position=(210, 255), states=btn_states_deer
 )
 
 
 def select_closest_animal_by_species(species):
-    # Find one of this species to select
     candidates = [a for a in state["animals"] if a["species"] == species]
     if len(candidates) > 0:
         target = candidates[0]
-        # Highlight old selected
-        if state["selected_animal"] is not None:
-            for a in state["animals"]:
-                if a["id"] == state["selected_animal"]:
-                    a["actor"].color = ANIMAL_COLOR[a["species"]]
-                    break
         state["selected_animal"] = target["id"]
-        target["actor"].color = (1.0, 0.2, 0.1)
+        print(f"Selected Species Snapping focus to animal ID #{target['id']}")
 
 
 btn_lion.on_clicked = lambda event: select_closest_animal_by_species("lion")
 btn_ele.on_clicked = lambda event: select_closest_animal_by_species("elephant")
 btn_deer.on_clicked = lambda event: select_closest_animal_by_species("deer")
 
-panel.add_element(btn_lion, (20, 370))
-panel.add_element(btn_ele, (110, 370))
-panel.add_element(btn_deer, (210, 370))
+control_panel.add_element(btn_lion, (20, 255))
+control_panel.add_element(btn_ele, (110, 255))
+control_panel.add_element(btn_deer, (210, 255))
 
-# Global cohesion and separation sliders
+lbl_sect3 = ui.TextBlock2D(
+    text="GLOBAL SIMULATION PARAMS",
+    position=(20, 310),
+    font_size=10,
+    color=(0.95, 0.8, 0.2),
+    bold=True,
+    dynamic_bbox=True,
+)
+control_panel.add_element(lbl_sect3, (20, 310))
+
 slider_global_coh = ui.LineSlider2D(
-    position=(20, 430),
+    position=(20, 335),
     initial_value=1.0,
     min_value=0.0,
     max_value=3.0,
     length=180,
     text_template="Cohesion Mult: {value:.1f}",
 )
-panel.add_element(slider_global_coh, (20, 430))
+control_panel.add_element(slider_global_coh, (20, 335))
 
 slider_global_sep = ui.LineSlider2D(
-    position=(20, 485),
+    position=(20, 385),
     initial_value=1.0,
     min_value=0.0,
     max_value=3.0,
     length=180,
     text_template="Separation Mult: {value:.1f}",
 )
-panel.add_element(slider_global_sep, (20, 485))
+control_panel.add_element(slider_global_sep, (20, 385))
 
 
 def on_global_coh_change(slider):
@@ -449,7 +550,24 @@ def on_global_sep_change(slider):
 slider_global_coh.on_change = on_global_coh_change
 slider_global_sep.on_change = on_global_sep_change
 
-scene.add(panel)
+slider_global_speed = ui.LineSlider2D(
+    position=(20, 435),
+    initial_value=1.0,
+    min_value=1.0,
+    max_value=20.0,
+    length=180,
+    text_template="Sim Speed: {value:.1f}x",
+)
+control_panel.add_element(slider_global_speed, (20, 435))
+
+
+def on_global_speed_change(slider):
+    state["sim_speed"] = slider.value
+
+
+slider_global_speed.on_change = on_global_speed_change
+
+scene.add(control_panel)
 
 # Minimap Configuration (Top-Right)
 minimap_panel = ui.Panel2D(
@@ -500,7 +618,6 @@ for vp in veg_patches:
 def on_click(event):
     target = event.target
     if hasattr(target, "agent_idx"):
-        # Highlight new selected
         state["selected_animal"] = target.agent_idx
         print(f"Selected Animal ID #{target.agent_idx}")
     elif target is ground or target is lake:
@@ -520,7 +637,11 @@ def on_key_up(event):
 # Drag input handlers for free look
 def on_pointer_down(event):
     if event.button == 1:
-        if not hasattr(event.target, "agent_idx") and event.target is not panel:
+        if (
+            not hasattr(event.target, "agent_idx")
+            and event.target is not control_panel
+            and event.target is not info_panel
+        ):
             state["is_dragging_cam"] = True
             state["last_mouse"] = (event.x, event.y)
 
@@ -547,7 +668,7 @@ def on_pointer_up(event):
 # Main simulation loop callback
 def sim_tick(showm):
     global pos, vel
-    dt = 0.016
+    dt = 0.016 * state["sim_speed"]
 
     animals = state["animals"]
     state["screen_size"] = showm.renderer.logical_size
@@ -556,13 +677,21 @@ def sim_tick(showm):
     mx_pos = state["screen_size"][0] - 195.0
     my_pos = 15.0
     minimap_panel.set_position((mx_pos, my_pos))
-    minimap_group.local.position = (mx_pos, my_pos, 0.0)
+
+    # Align minimap group elements (raw PyGfx coords Y Y-axis starts bottom-up)
+    minimap_group.local.position = (
+        mx_pos,
+        state["screen_size"][1] - 195.0,
+        0.0,
+    )
 
     # 1. Animal Needs & Aging Update loop
     for a in animals:
         a["age"] += dt * 0.08
-        a["hunger"] += dt * 1.6
-        a["thirst"] += dt * 2.2
+        h_rate = 0.8 if a["species"] == "lion" else 1.6
+        t_rate = 1.2 if a["species"] == "lion" else 2.2
+        a["hunger"] += dt * h_rate
+        a["thirst"] += dt * t_rate
         if a["cooldown"] > 0:
             a["cooldown"] -= dt
 
@@ -575,7 +704,7 @@ def sim_tick(showm):
 
         # Apply starvation/dehydration damage
         if a["hunger"] >= 100.0 or a["thirst"] >= 100.0:
-            a["health"] -= dt * 15.0
+            a["health"] -= dt * 4.0
         else:
             a["health"] = min(MAX_HEALTH[a["species"]], a["health"] + dt * 1.5)
 
@@ -660,19 +789,24 @@ def sim_tick(showm):
                     diffs[sep_mask] / (dists_sq[sep_mask][:, None] + 1e-5), axis=0
                 )
 
+        flock_weight = 1.0
+        if is_thirsty or is_hungry:
+            flock_weight = 0.1
+
         coeffs = GROUP_COEFFS[a["species"]]
         steer = (
             flock_cohesion * coeffs["cohesion"] * 0.1 * state["cohesion_mult"]
             + flock_alignment * coeffs["alignment"] * 0.1
-            + flock_separation * coeffs["separation"] * 0.3 * state["separation_mult"]
-        )
+        ) * flock_weight + flock_separation * coeffs["separation"] * 0.3 * state[
+            "separation_mult"
+        ]
 
         # Lake Seeking (Thirst)
         if is_thirsty:
             to_lake = LAKE_CENTER - a["pos"]
             d_lake = np.linalg.norm(to_lake)
             if d_lake > LAKE_RADIUS - 10.0:
-                steer += (to_lake / (d_lake + 1e-5)) * 1.5
+                steer += (to_lake / (d_lake + 1e-5)) * 2.8
             else:
                 a["thirst"] = max(0.0, a["thirst"] - dt * 25.0)
 
@@ -688,7 +822,7 @@ def sim_tick(showm):
 
             to_patch = best_patch - a["pos"]
             to_patch[1] = 0.0
-            steer += (to_patch / (min_d + 1e-5)) * 1.2
+            steer += (to_patch / (min_d + 1e-5)) * 2.2
             if min_d < 25.0:
                 a["hunger"] = max(0.0, a["hunger"] - dt * 35.0)
 
@@ -728,7 +862,7 @@ def sim_tick(showm):
                 current_max_speed = RUN_SPEED["lion"]
                 to_prey = target_deer["pos"] - a["pos"]
                 to_prey[1] = 0.0
-                steer += (to_prey / (min_d + 1e-5)) * 2.2
+                steer += (to_prey / (min_d + 1e-5)) * 3.8
 
                 # Attack/Deal damage over time instead of instant death
                 if min_d < 3.5:
@@ -758,21 +892,26 @@ def sim_tick(showm):
                 to_pred[1] = 0.0
                 steer -= (to_pred / (min_d + 1e-5)) * 3.8
 
+        # Lions avoid Elephants
+        if a["species"] == "lion":
+            for target in animals:
+                if target["species"] == "elephant":
+                    dist = np.linalg.norm(target["pos"] - a["pos"])
+                    if dist < 28.0:
+                        steer -= (target["pos"] - a["pos"]) / (dist + 1e-5) * 2.5
+
         # Elephant Family Defense & Retaliation against Lions
         if a["species"] == "elephant":
             is_rage = False
             target_lion = None
             if not a["is_child"]:
-                for calf in animals:
-                    if calf["species"] == "elephant" and calf["is_child"]:
-                        for lion in animals:
-                            if lion["species"] == "lion":
-                                d_lion_calf = np.linalg.norm(lion["pos"] - calf["pos"])
-                                if d_lion_calf < 25.0:
-                                    is_rage = True
-                                    target_lion = lion
-                                    break
-                        if is_rage:
+                # Chase any lion within 35 units
+                for lion in animals:
+                    if lion["species"] == "lion":
+                        dist_lion = np.linalg.norm(lion["pos"] - a["pos"])
+                        if dist_lion < 35.0:
+                            is_rage = True
+                            target_lion = lion
                             break
 
             if is_rage and target_lion is not None:
@@ -782,7 +921,7 @@ def sim_tick(showm):
                 dist = np.linalg.norm(to_lion)
                 steer += (to_lion / (dist + 1e-5)) * 4.2
                 if dist < 4.5:
-                    target_lion["health"] -= dt * 80.0
+                    target_lion["health"] -= dt * 90.0
 
         # Breeding Logic
         if a["cooldown"] <= 0.0 and not a["is_child"]:
@@ -799,9 +938,7 @@ def sim_tick(showm):
                         a["cooldown"] = 35.0
                         partner["cooldown"] = 35.0
                         mid_pos = (a["pos"] + partner["pos"]) * 0.5
-                        mid_pos[1] = 0.6 if a["species"] == "lion" else 0.5
-                        if a["species"] == "elephant":
-                            mid_pos[1] = 1.0
+                        mid_pos[1] = 0.0  # Computed height automatically
                         new_spawns.append((a["species"], mid_pos))
                         break
 
@@ -827,11 +964,11 @@ def sim_tick(showm):
             a["pos"] = (a["pos"] / (d_origin + 1e-5)) * 290.0
             a["vel"] = -(a["pos"] / 290.0) * np.linalg.norm(a["vel"])
 
-        a["pos"][1] = 0.5
-        if a["species"] == "lion":
-            a["pos"][1] = 0.6
-        elif a["species"] == "elephant":
-            a["pos"][1] = 1.0
+        # Project animal pos dynamically to follow terrain elevation changes
+        h_offset = 0.6 if a["species"] == "lion" else 0.5
+        if a["species"] == "elephant":
+            h_offset = 1.0
+        a["pos"][1] = get_terrain_height(a["pos"][0], a["pos"][2]) + h_offset
 
         # Update actor transforms
         a["actor"].local.position = a["pos"]
@@ -852,6 +989,19 @@ def sim_tick(showm):
 
     selected = state["selected_animal"]
     camera = showm.screens[0].camera
+
+    # Update highlighting: Selected animal is bright normal color, all others are dark
+    if selected is not None:
+        for a in animals:
+            if a["id"] == selected:
+                a["actor"].color = ANIMAL_COLOR[a["species"]]
+            else:
+                # Dim other animals to 30% brightness
+                a["actor"].color = tuple(np.array(ANIMAL_COLOR[a["species"]]) * 0.3)
+    else:
+        # All animals are normal color when none is selected
+        for a in animals:
+            a["actor"].color = ANIMAL_COLOR[a["species"]]
 
     # 4. Camera Control (Focus vs Free look Fly mode)
     if selected is not None:
