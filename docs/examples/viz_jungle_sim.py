@@ -212,8 +212,17 @@ def rotate_vector(quat, vec):
     q_vec = quat[:3]
     q_w = quat[3]
     uv = np.cross(q_vec, vec)
-    uuv = np.cross(q_vec, uv)
-    return vec + 2.0 * (q_w * uv + uuv)
+    uv_cross = np.cross(q_vec, uv)
+    return vec + 2.0 * (q_w * uv + uv_cross)
+
+
+def disable_depth_testing(world_object):
+    if hasattr(world_object, "material") and world_object.material is not None:
+        world_object.material.depth_test = False
+        world_object.material.depth_write = False
+    if hasattr(world_object, "children"):
+        for child in world_object.children:
+            disable_depth_testing(child)
 
 
 # Animal Spawn Helper
@@ -687,7 +696,7 @@ def sim_tick(showm):
 
     # 1. Animal Needs & Aging Update loop
     for a in animals:
-        a["age"] += dt * 0.08
+        a["age"] += dt * 0.008
         h_rate = 0.8 if a["species"] == "lion" else 1.6
         t_rate = 1.2 if a["species"] == "lion" else 2.2
         a["hunger"] += dt * h_rate
@@ -805,13 +814,18 @@ def sim_tick(showm):
         if is_thirsty:
             to_lake = LAKE_CENTER - a["pos"]
             d_lake = np.linalg.norm(to_lake)
-            if d_lake > LAKE_RADIUS - 10.0:
+            if d_lake > LAKE_RADIUS:
                 steer += (to_lake / (d_lake + 1e-5)) * 2.8
             else:
-                a["thirst"] = max(0.0, a["thirst"] - dt * 25.0)
+                a["thirst"] = max(0.0, a["thirst"] - dt * 30.0)
 
-        # Grazing (Deers feeding on vegetation)
-        if a["species"] == "deer" and is_hungry:
+        # Grazing (Deers and Elephants feeding on grass anywhere on land)
+        if a["species"] in ["deer", "elephant"] and is_hungry:
+            dist_to_lake = np.linalg.norm(a["pos"])
+            if dist_to_lake > LAKE_RADIUS:
+                # Can eat grass anywhere on land
+                a["hunger"] = max(0.0, a["hunger"] - dt * 20.0)
+
             best_patch = veg_patches[0]
             min_d = np.linalg.norm(a["pos"] - best_patch)
             for vp in veg_patches[1:]:
@@ -824,7 +838,7 @@ def sim_tick(showm):
             to_patch[1] = 0.0
             steer += (to_patch / (min_d + 1e-5)) * 2.2
             if min_d < 25.0:
-                a["hunger"] = max(0.0, a["hunger"] - dt * 35.0)
+                a["hunger"] = max(0.0, a["hunger"] - dt * 15.0)
 
         # Hunting state & pack coordination (Lions targeting Deers)
         if a["species"] == "lion" and is_hungry:
@@ -1090,6 +1104,12 @@ def sim_tick(showm):
             move_dir = move / np.linalg.norm(move)
             camera.local.position = camera.local.position + move_dir * fly_speed * dt
 
+    # Enforce camera does not move below ground
+    cx, cy, cz = camera.local.position
+    cam_terrain_h = get_terrain_height(cx, cz)
+    cy_new = max(cy, cam_terrain_h + 5.0)
+    camera.local.position = np.array([cx, cy_new, cz])
+
     # 5. Minimap Dynamic Dots rendering
     if state["minimap_dots_actor"] is not None:
         minimap_group.remove(state["minimap_dots_actor"])
@@ -1109,6 +1129,7 @@ def sim_tick(showm):
         state["minimap_dots_actor"] = actor.sphere(
             centers=m_centers, colors=colors, radii=1.2
         )
+        disable_depth_testing(state["minimap_dots_actor"])
         minimap_group.add(state["minimap_dots_actor"])
 
     # Update selected marker on minimap
@@ -1129,6 +1150,7 @@ def sim_tick(showm):
                 colors=(1.0, 0.1, 0.1),
                 radii=2.8,
             )
+            disable_depth_testing(state["minimap_selected_actor"])
             minimap_group.add(state["minimap_selected_actor"])
 
     showm.render()
@@ -1160,6 +1182,9 @@ if __name__ == "__main__":
     qy = axis_angle_to_quat(np.array([0, 1, 0]), np.degrees(state["cam_yaw"]))
     qx = axis_angle_to_quat(np.array([1, 0, 0]), np.degrees(state["cam_pitch"]))
     camera.local.rotation = quat_mult(qy, qx)
+
+    # Ensure UI elements always render on top
+    disable_depth_testing(scene.ui_scene)
 
     # Start simulation
     show_manager.register_callback(sim_tick, 0.016, True, "JungleLoop", show_manager)
