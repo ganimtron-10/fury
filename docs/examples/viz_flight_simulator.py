@@ -1,5 +1,4 @@
 import numpy as np
-import time
 from fury import window, actor, ui
 from fury.window import EventType
 
@@ -14,7 +13,7 @@ state = {
     "speed": 0.0,
     "max_speed": 180.0,
     "takeoff_speed": 60.0,
-    "player_pos": np.array([0.0, 2.1, 0.0]),
+    "player_pos": np.array([0.0, 3.1, 0.0]),
     "player_quat": np.array([0.0, 0.0, 0.0, 1.0]),
     "cam_pos": np.array([0.0, 10.1, -25.0]),
     "cam_up": np.array([0.0, 1.0, 0.0]),
@@ -22,15 +21,16 @@ state = {
     "roll_rate": 0.0,
     "yaw_rate": 0.0,
     "keys": set(),
+    "tick_count": 0,
 }
 
-SPAWN_DIST = 500.0
-DESPAWN_DIST = 150.0
+SPAWN_DIST = 1500.0
+DESPAWN_DIST = 350.0
 SPAWN_DIST_SQ = (SPAWN_DIST * 2.0) ** 2
-OBSTACLE_COUNT = 20
-CLOUD_COUNT = 35
-TREE_COUNT = 60
-MOUNTAIN_COUNT = 15
+OBSTACLE_COUNT = 0
+CLOUD_COUNT = 80
+TREE_COUNT = 150
+MOUNTAIN_COUNT = 40
 
 
 def axis_angle_to_quat(axis, angle_deg):
@@ -78,12 +78,14 @@ scene.add(sun)
 class RunwayManager:
     def __init__(self):
         self.runway = actor.box(
-            centers=np.array([V_ZERO]), colors=(0.15, 0.15, 0.15), scales=(24, 1.1, 800)
+            centers=np.array([V_ZERO]),
+            colors=(0.15, 0.15, 0.15),
+            scales=(24, 1.1, 3000),
         )
         scene.add(self.runway)
 
         self.dashes = []
-        for z in range(-200, 600, 40):
+        for z in range(-1000, 2000, 40):
             dash = actor.box(
                 centers=np.array([V_ZERO]),
                 colors=(0.9, 0.9, 0.9),
@@ -95,7 +97,7 @@ class RunwayManager:
 
         self.lights = []
         c = (0.95, 0.8, 0.2)
-        for z in range(-200, 600, 50):
+        for z in range(-1000, 2000, 50):
             l1 = actor.sphere(centers=np.array([V_ZERO]), colors=c, radii=0.25)
             l1.local.position = [-12.0, 0.58, float(z)]
             l2 = actor.sphere(centers=np.array([V_ZERO]), colors=c, radii=0.25)
@@ -110,17 +112,17 @@ class RunwayManager:
 
         for dash in self.dashes:
             dz = dash.local.position[2]
-            if dz < pz - 200:
-                dash.local.position = [0.0, 0.56, dz + 800]
-            elif dz > pz + 600:
-                dash.local.position = [0.0, 0.56, dz - 800]
+            if dz < pz - 1000:
+                dash.local.position = [0.0, 0.56, dz + 3000]
+            elif dz > pz + 2000:
+                dash.local.position = [0.0, 0.56, dz - 3000]
 
         for light in self.lights:
             lz = light.local.position[2]
-            if lz < pz - 200:
-                light.local.position = [light.local.position[0], 0.58, lz + 800]
-            elif lz > pz + 600:
-                light.local.position = [light.local.position[0], 0.58, lz - 800]
+            if lz < pz - 1000:
+                light.local.position = [light.local.position[0], 0.58, lz + 3000]
+            elif lz > pz + 2000:
+                light.local.position = [light.local.position[0], 0.58, lz - 3000]
 
 
 runway_mgr = RunwayManager()
@@ -301,9 +303,10 @@ class Tree:
 
 class Mountain:
     def __init__(self):
-        h = np.random.uniform(65.0, 135.0)
+        h = np.random.uniform(150.0, 250.0)
         r = h * np.random.uniform(0.65, 0.85)
         self.height = h
+        self.radius = r
         cap_h = h * 0.25
         c0 = np.array([V_ZERO])
         self.base = actor.cone(
@@ -318,9 +321,11 @@ class Mountain:
             directions=np.array([V_UP]),
             colors=(0.95, 0.95, 0.98),
             height=cap_h,
-            radii=r * 0.25,
+            radii=r * 0.25 * 1.04,
         )
         self.parts = [self.base, self.cap]
+        self.base.render_order = 0
+        self.cap.render_order = 1
         for p in self.parts:
             scene.add(p)
 
@@ -485,13 +490,14 @@ def on_key_down(event):
         state["is_playing"] = True
         state["score"] = 0.0
         state["speed"] = 0.0
-        state["player_pos"] = np.array([0.0, 2.1, 0.0])
+        state["player_pos"] = np.array([0.0, 3.1, 0.0])
         state["player_quat"] = np.array([0.0, 0.0, 0.0, 1.0])
-        state["cam_pos"] = np.array([0.0, 10.1, -25.0])
+        state["cam_pos"] = np.array([0.0, 15.1, -40.0])
         state["cam_up"] = np.array([0.0, 1.0, 0.0])
         state["pitch_rate"] = 0.0
         state["roll_rate"] = 0.0
         state["yaw_rate"] = 0.0
+        state["tick_count"] = 0
         game_over_text.position = (2000, 2000)
         for pool in [world.obstacles, world.clouds, world.trees, world.mountains]:
             for obj in pool:
@@ -505,9 +511,27 @@ def on_key_up(event):
 
 def check_collisions():
     p_pos = state["player_pos"]
-    for obs in world.obstacles:
-        if np.linalg.norm(p_pos - np.array(obs.core.local.position)) < 3.2:
+
+    # Tree collisions
+    for tree in world.trees:
+        tree_base = np.array(tree.trunk.local.position) - np.array([0.0, 1.75, 0.0])
+        horiz_dist = np.linalg.norm(p_pos[[0, 2]] - tree_base[[0, 2]])
+        if horiz_dist < 3.0 and p_pos[1] < 7.5:
             return True
+
+    # Mountain collisions
+    for mtn in world.mountains:
+        mtn_base = np.array(mtn.base.local.position) - np.array(
+            [0.0, mtn.height / 2.0, 0.0]
+        )
+        h = mtn.height
+        r = mtn.radius
+        if p_pos[1] < h:
+            horiz_dist = np.linalg.norm(p_pos[[0, 2]] - mtn_base[[0, 2]])
+            r_at_y = r * (1.0 - p_pos[1] / h)
+            if horiz_dist < r_at_y + 3.0:
+                return True
+
     return False
 
 
@@ -525,7 +549,7 @@ def game_tick(showm):
     up = rotate_vector(state["player_quat"], V_UP)
     right = rotate_vector(state["player_quat"], V_R)
 
-    min_y = get_surface_height(state["player_pos"]) + 1.55
+    min_y = get_surface_height(state["player_pos"]) + 2.55
 
     if " " in keys:
         state["speed"] += 50.0 * dt
@@ -612,13 +636,32 @@ def game_tick(showm):
     fwd_now = rotate_vector(state["player_quat"], V_FWD)
     up_now = rotate_vector(state["player_quat"], V_UP)
 
-    target_cam_pos = state["player_pos"] - fwd_now * 25.0 + up_now * 8.0
+    # Increased camera distance to 40.0 and height to 12.0 to prevent plane clipping
+    target_cam_pos = state["player_pos"] - fwd_now * 40.0 + up_now * 12.0
 
-    cam_min_y = get_surface_height(state["cam_pos"]) + 1.0
-    if target_cam_pos[1] < cam_min_y:
-        target_cam_pos[1] = cam_min_y
+    # Ensure target doesn't go below ground level relative to target's position
+    target_min_y = get_surface_height(target_cam_pos) + 1.0
+    if target_cam_pos[1] < target_min_y:
+        target_cam_pos[1] = target_min_y
 
-    state["cam_pos"] += (target_cam_pos - state["cam_pos"]) * 4.0 * dt
+    # Snap camera directly behind the plane to override startup resets
+    if state["tick_count"] < 10:
+        state["cam_pos"] = np.copy(target_cam_pos)
+    else:
+        # Faster follow rate (8.0) to keep the plane centered
+        state["cam_pos"] += (target_cam_pos - state["cam_pos"]) * 8.0 * dt
+
+    # Cap camera position itself to not go below the ground at its current location
+    cam_current_min_y = get_surface_height(state["cam_pos"]) + 1.0
+    if state["cam_pos"][1] < cam_current_min_y:
+        state["cam_pos"][1] = cam_current_min_y
+
+    state["tick_count"] += 1
+    if state["tick_count"] % 100 == 0:
+        print(
+            f"[Diag] Frame {state['tick_count']} | Plane Pos: \
+            {state['player_pos']} | Cam Pos: {state['cam_pos']}"
+        )
 
     state["cam_up"] += (up_now - state["cam_up"]) * 5.0 * dt
     state["cam_up"] /= np.linalg.norm(state["cam_up"])
@@ -641,7 +684,7 @@ if __name__ == "__main__":
     # Block orbit controller from messing with the chase camera
     showm.screens[0].controller.enabled = False
 
-    # Force initial camera positioning before the first FURY render to prevent frame-1 snap
+    # Force initial camera positioning to prevent frame-1 snap
     game_tick(showm)
 
     showm.register_callback(game_tick, 0.01, True, "GameLoop", showm)
