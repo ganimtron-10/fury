@@ -322,16 +322,16 @@ def world_to_screen(world_pos, camera, screen_size):
     return np.array([screen_x, screen_y])
 
 
-# UI Redesign - Info Panel (Height expanded to 220 to hold Selector buttons)
+# UI Redesign - Info Panel (Height expanded to 280 to hold two-column status)
 info_panel = ui.Panel2D(
-    size=(320, 225), color=(0.06, 0.09, 0.06), has_border=True, border_width=2
+    size=(320, 280), color=(0.06, 0.09, 0.06), has_border=True, border_width=2
 )
 info_panel.set_position((15, 15))
 
 lbl_title = ui.TextBlock2D(
     text="JUNGLE ECOSYSTEM",
     position=(20, 15),
-    font_size=13,
+    font_size=16,
     color=(0.9, 0.75, 0.2),
     bold=True,
     dynamic_bbox=True,
@@ -341,39 +341,24 @@ info_panel.add_element(lbl_title, (20, 15))
 lbl_legend = ui.TextBlock2D(
     text="Lions: 0 | Elephants: 0 | Deers: 0",
     position=(20, 42),
-    font_size=10,
+    font_size=13,
     color=(0.85, 0.85, 0.85),
     dynamic_bbox=True,
 )
 info_panel.add_element(lbl_legend, (20, 42))
 
-lbl_card_title = ui.TextBlock2D(
-    text="SELECTED ANIMAL STATUS",
-    position=(20, 70),
-    font_size=10,
-    color=(0.95, 0.8, 0.2),
-    bold=True,
-    dynamic_bbox=True,
-)
-info_panel.add_element(lbl_card_title, (20, 70))
-
-lbl_animal_info = ui.TextBlock2D(
-    text="Click an animal to monitor it.",
-    position=(20, 90),
-    font_size=9.5,
-    color=(0.8, 0.8, 0.8),
-    dynamic_bbox=True,
-)
-info_panel.add_element(lbl_animal_info, (20, 90))
-
-# Snug fit Animal focus buttons placed inside Info panel at bottom
+# Snug fit Animal focus buttons placed inside Info panel below legend
 btn_states_lion = {
     "hover": {"text": "LION", "color": (0.3, 0.4, 0.3)},
     "pressed": {"text": "LION", "color": (0.1, 0.2, 0.1)},
     "default": {"text": "LION", "color": (0.15, 0.25, 0.15)},
 }
 btn_lion = ui.TextButton2D(
-    label="LION", size=(80, 25), position=(20, 185), states=btn_states_lion
+    label="LION",
+    size=(80, 26),
+    position=(20, 68),
+    font_size=14,
+    states=btn_states_lion,
 )
 
 btn_states_ele = {
@@ -382,7 +367,11 @@ btn_states_ele = {
     "default": {"text": "ELEPHANT", "color": (0.15, 0.25, 0.15)},
 }
 btn_ele = ui.TextButton2D(
-    label="ELEPHANT", size=(90, 25), position=(110, 185), states=btn_states_ele
+    label="ELEPHANT",
+    size=(90, 26),
+    position=(110, 68),
+    font_size=14,
+    states=btn_states_ele,
 )
 
 btn_states_deer = {
@@ -391,7 +380,11 @@ btn_states_deer = {
     "default": {"text": "DEER", "color": (0.15, 0.25, 0.15)},
 }
 btn_deer = ui.TextButton2D(
-    label="DEER", size=(80, 25), position=(210, 185), states=btn_states_deer
+    label="DEER",
+    size=(80, 26),
+    position=(210, 68),
+    font_size=14,
+    states=btn_states_deer,
 )
 
 
@@ -407,9 +400,38 @@ btn_lion.on_clicked = lambda event: select_closest_animal_by_species("lion")
 btn_ele.on_clicked = lambda event: select_closest_animal_by_species("elephant")
 btn_deer.on_clicked = lambda event: select_closest_animal_by_species("deer")
 
-info_panel.add_element(btn_lion, (20, 185))
-info_panel.add_element(btn_ele, (110, 185))
-info_panel.add_element(btn_deer, (210, 185))
+info_panel.add_element(btn_lion, (20, 68))
+info_panel.add_element(btn_ele, (110, 68))
+info_panel.add_element(btn_deer, (210, 68))
+
+lbl_card_title = ui.TextBlock2D(
+    text="SELECTED ANIMAL STATUS",
+    position=(20, 108),
+    font_size=13,
+    color=(0.95, 0.8, 0.2),
+    bold=True,
+    dynamic_bbox=True,
+)
+info_panel.add_element(lbl_card_title, (20, 108))
+
+# Two columns TextBlock2D info
+lbl_animal_info_left = ui.TextBlock2D(
+    text="Click an animal\nto monitor.",
+    position=(20, 132),
+    font_size=14,
+    color=(0.85, 0.85, 0.85),
+    dynamic_bbox=True,
+)
+info_panel.add_element(lbl_animal_info_left, (20, 132))
+
+lbl_animal_info_right = ui.TextBlock2D(
+    text="",
+    position=(165, 132),
+    font_size=14,
+    color=(0.85, 0.85, 0.85),
+    dynamic_bbox=True,
+)
+info_panel.add_element(lbl_animal_info_right, (165, 132))
 
 scene.add(info_panel)
 
@@ -420,7 +442,7 @@ control_panel = ui.TabUI(
     size=(320, 480),
     tab_titles=["Global", "Lion", "Elephant", "Deer"],
     startup_tab_id=0,
-    font_size=11,
+    font_size=14,
     active_color=(0.1, 0.2, 0.1),
     inactive_color=(0.04, 0.06, 0.04),
 )
@@ -429,7 +451,7 @@ control_panel = ui.TabUI(
 lbl_g_title = ui.TextBlock2D(
     text="GLOBAL TUNING FACTORS",
     position=(20, 15),
-    font_size=10,
+    font_size=13,
     color=(0.95, 0.8, 0.2),
     bold=True,
     dynamic_bbox=True,
@@ -499,7 +521,7 @@ control_panel.add_element(0, slider_g_hunting, (20, 235))
 lbl_g_sim = ui.TextBlock2D(
     text="SIMULATION RATE CONTROLS",
     position=(20, 280),
-    font_size=10,
+    font_size=13,
     color=(0.95, 0.8, 0.2),
     bold=True,
     dynamic_bbox=True,
@@ -607,7 +629,7 @@ def build_species_tab(tab_idx, species_name):
     lbl_title = ui.TextBlock2D(
         text=f"{species_name.upper()} FACTOR ADJUSTERS",
         position=(20, 15),
-        font_size=10,
+        font_size=13,
         color=(0.95, 0.8, 0.2),
         bold=True,
         dynamic_bbox=True,
@@ -746,40 +768,6 @@ build_species_tab(3, "deer")
 
 scene.add(control_panel)
 
-# Minimap Configuration (Top-Right)
-minimap_panel = ui.Panel2D(
-    size=(180, 180), color=(0.04, 0.07, 0.04), has_border=True, border_width=2
-)
-scene.add(minimap_panel)
-
-minimap_group = gfx.Group()
-scene.ui_scene.add(minimap_group)
-
-# Local coordinate map scaling helper
-map_w, map_h = 180.0, 180.0
-
-
-def get_map_coords(wx, wz):
-    mx = ((wx - (-300.0)) / 600.0) * map_w
-    my = ((wz - (-300.0)) / 600.0) * map_h
-    return mx, my
-
-
-# Draw Lake on minimap
-lx, ly = get_map_coords(LAKE_CENTER[0], LAKE_CENTER[2])
-map_lake_circ = actor.sphere(
-    centers=np.array([[lx, ly, 0.0]]), colors=(0.15, 0.45, 0.8), radii=16.0
-)
-minimap_group.add(map_lake_circ)
-
-# Draw static vegetation patches on minimap
-for vp in veg_patches:
-    vx, vy = get_map_coords(vp[0], vp[2])
-    map_veg = actor.sphere(
-        centers=np.array([[vx, vy, 0.0]]), colors=(0.15, 0.5, 0.2), radii=4.0
-    )
-    minimap_group.add(map_veg)
-
 
 # Click selection logic
 def on_click(event):
@@ -840,17 +828,10 @@ def sim_tick(showm):
     animals = state["animals"]
     state["screen_size"] = showm.renderer.logical_size
 
-    # Position minimap dynamically relative to window size
-    mx_pos = state["screen_size"][0] - 195.0
-    my_pos = 15.0
-    minimap_panel.set_position((mx_pos, my_pos))
-
-    # Align minimap group elements (raw PyGfx coords Y Y-axis starts bottom-up)
-    minimap_group.local.position = (
-        mx_pos,
-        state["screen_size"][1] - 195.0,
-        0.0,
-    )
+    # Position TabUI dynamically relative to window size on the right side
+    tx_pos = state["screen_size"][0] - 335.0
+    ty_pos = 15.0
+    control_panel.set_position((tx_pos, ty_pos))
 
     # 1. Animal Needs & Aging Update loop
     for a in animals:
@@ -893,6 +874,10 @@ def sim_tick(showm):
                 * state["global_hunger_factor"]
                 * state[f"{sp}_hunger_factor"]
             )
+
+        # Update mating cooldown
+        if a["cooldown"] > 0.0:
+            a["cooldown"] -= dt
 
         # Growth scaling for children
         if a["is_child"]:
@@ -1071,12 +1056,15 @@ def sim_tick(showm):
 
                 # Attack/Deal damage over time
                 if min_d < 3.5:
-                    target_deer["health"] -= (
+                    damage = (
                         dt
                         * 45.0
                         * state["global_hunting_factor"]
                         * state["lion_hunting_factor"]
                     )
+                    target_deer["health"] -= damage
+                    # Reduce hunger while eating
+                    a["hunger"] = max(0.0, a["hunger"] - damage * 1.5)
                     if target_deer["health"] <= 0.0:
                         a["hunger"] = 0.0
                         a["hunt_target_id"] = None
@@ -1231,13 +1219,18 @@ def sim_tick(showm):
                 type_txt = "Cub" if selected_a["is_child"] else "Adult"
 
             # Display stats on details card
-            lbl_animal_info.message = (
+            # Display stats on details card (Two columns)
+            lbl_animal_info_left.message = (
                 f"Species: {selected_a['species'].upper()}\n"
-                f"Class: {type_txt} ({gender_txt})\n"
-                f"Health: {selected_a['health']:.1f} / "
-                f"{MAX_HEALTH[selected_a['species']]}\n"
+                f"Class: {type_txt}\n"
+                f"Sex: {gender_txt}\n"
+                f"Health: {selected_a['health']:.1f}"
+            )
+            lbl_animal_info_right.message = (
                 f"Hunger: {selected_a['hunger']:.1f}%\n"
-                f"Thirst: {selected_a['thirst']:.1f}%"
+                f"Thirst: {selected_a['thirst']:.1f}%\n"
+                f"Age: {selected_a['age']:.1f}\n"
+                f"CD: {selected_a['cooldown']:.1f}s"
             )
 
             # Chase camera positioning
@@ -1260,9 +1253,11 @@ def sim_tick(showm):
             )
         else:
             state["selected_animal"] = None
-            lbl_animal_info.message = "Click an animal to monitor it."
+            lbl_animal_info_left.message = "Click an animal\nto monitor."
+            lbl_animal_info_right.message = ""
     else:
-        lbl_animal_info.message = "Click an animal to monitor it."
+        lbl_animal_info_left.message = "Click an animal\nto monitor."
+        lbl_animal_info_right.message = ""
 
         # Counterstrike style WASD fly camera mode
         qy = axis_angle_to_quat(np.array([0, 1, 0]), np.degrees(state["cam_yaw"]))
@@ -1298,49 +1293,6 @@ def sim_tick(showm):
     cam_terrain_h = get_terrain_height(cx, cz)
     cy_new = max(cy, cam_terrain_h + 5.0)
     camera.local.position = np.array([cx, cy_new, cz])
-
-    # 5. Minimap Dynamic Dots rendering
-    if state["minimap_dots_actor"] is not None:
-        minimap_group.remove(state["minimap_dots_actor"])
-
-    if len(animals) > 0:
-        bx = np.zeros(len(animals))
-        by = np.zeros(len(animals))
-        colors = []
-
-        for idx, a in enumerate(animals):
-            mx, my = get_map_coords(a["pos"][0], a["pos"][2])
-            bx[idx] = mx
-            by[idx] = my
-            colors.append(ANIMAL_COLOR[a["species"]])
-
-        m_centers = np.stack([bx, by, np.zeros(len(animals))], axis=-1)
-        state["minimap_dots_actor"] = actor.sphere(
-            centers=m_centers, colors=colors, radii=1.2
-        )
-        disable_depth_testing(state["minimap_dots_actor"])
-        minimap_group.add(state["minimap_dots_actor"])
-
-    # Update selected marker on minimap
-    if state["minimap_selected_actor"] is not None:
-        minimap_group.remove(state["minimap_selected_actor"])
-        state["minimap_selected_actor"] = None
-
-    if selected is not None:
-        selected_a = None
-        for a in animals:
-            if a["id"] == selected:
-                selected_a = a
-                break
-        if selected_a is not None:
-            sbx, sby = get_map_coords(selected_a["pos"][0], selected_a["pos"][2])
-            state["minimap_selected_actor"] = actor.sphere(
-                centers=np.array([[sbx, sby, 0.0]]),
-                colors=(1.0, 0.1, 0.1),
-                radii=2.8,
-            )
-            disable_depth_testing(state["minimap_selected_actor"])
-            minimap_group.add(state["minimap_selected_actor"])
 
     showm.render()
 
