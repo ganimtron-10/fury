@@ -4,9 +4,9 @@ Interactive 3D Jungle Survival Flocking Simulation
 =============================================
 
 An interactive 3D jungle ecosystem simulation containing Lions, Elephants,
-and Deers navigating land, lakes, rivers, hills, and vegetation patches.
+and Deers navigating land, lakes, rivers, and vegetation patches.
 Features survival states (thirst, hunger, aging, mating, hunting, and death),
-a dynamic minimap, and diagnostic control interfaces.
+a dynamic minimap, WASD free fly camera, and diagnostic control interfaces.
 """
 
 import numpy as np
@@ -22,7 +22,6 @@ LAKE_CENTER = np.array([0.0, 0.0, 0.0])
 # Species characteristics
 MAX_HEALTH = {"lion": 150.0, "elephant": 500.0, "deer": 100.0}
 MAX_AGE = {"lion": 90.0, "elephant": 140.0, "deer": 75.0}
-MAX_SPEED = {"lion": 9.0, "elephant": 5.0, "deer": 11.0}
 BASE_SPEED = {"lion": 7.0, "elephant": 3.5, "deer": 10.0}
 RUN_SPEED = {"lion": 12.0, "elephant": 8.5, "deer": 14.0}
 MIN_SPEED = 2.0
@@ -65,6 +64,15 @@ state = {
     "next_animal_id": 0,
     "minimap_dots_actor": None,
     "minimap_selected_actor": None,
+    # Camera states
+    "keys": set(),
+    "cam_yaw": 0.0,
+    "cam_pitch": -np.radians(45.0),
+    "is_dragging_cam": False,
+    "last_mouse": None,
+    # Params
+    "cohesion_mult": 1.0,
+    "separation_mult": 1.0,
 }
 
 # Setup Scene
@@ -109,26 +117,36 @@ for vp in veg_patches:
         )
         scene.add(bush)
 
-# Hills
-hills = [
-    np.array([-200.0, 0.0, 50.0]),
-    np.array([200.0, 0.0, -50.0]),
-    np.array([-60.0, 0.0, 200.0]),
-    np.array([80.0, 0.0, -180.0]),
-]
-for h in hills:
-    hill_scale = np.random.uniform(18.0, 30.0, size=3)
-    hill_scale[1] *= 0.4
-    mound = actor.ellipsoid(
-        centers=np.array([[h[0], hill_scale[1] / 2.0, h[2]]]),
-        lengths=tuple(hill_scale),
-        colors=(0.2, 0.18, 0.15),
-    )
-    scene.add(mound)
-
 # Lights
 ambient = gfx.AmbientLight(color=(0.55, 0.6, 0.55), intensity=1.8)
 scene.add(ambient)
+
+
+# Quaternion helpers
+def axis_angle_to_quat(axis, angle_deg):
+    angle_rad = np.radians(angle_deg)
+    s = np.sin(angle_rad / 2.0)
+    c = np.cos(angle_rad / 2.0)
+    return np.array([axis[0] * s, axis[1] * s, axis[2] * s, c])
+
+
+def quat_mult(q1, q2):
+    x1, y1, z1, w1 = q1
+    x2, y2, z2, w2 = q2
+    w = w1 * w2 - x1 * x2 - y1 * y2 - z1 * z2
+    x = w1 * x2 + x1 * w2 + y1 * z2 - z1 * y2
+    y = w1 * y2 - x1 * z2 + y1 * w2 + z1 * x2
+    z = w1 * z2 + x1 * y2 - y1 * x2 + z1 * w2
+    q = np.array([x, y, z, w])
+    return q / np.linalg.norm(q)
+
+
+def rotate_vector(quat, vec):
+    q_vec = quat[:3]
+    q_w = quat[3]
+    uv = np.cross(q_vec, vec)
+    uuv = np.cross(q_vec, uv)
+    return vec + 2.0 * (q_w * uv + uuv)
 
 
 # Animal Spawn Helper
@@ -216,9 +234,9 @@ def world_to_screen(world_pos, camera, screen_size):
     return np.array([screen_x, screen_y])
 
 
-# UI Control Panel setup (Left side)
+# UI Control Panel setup (Left side) - Height expanded to 540 to fit all controls
 panel = ui.Panel2D(
-    size=(310, 360), color=(0.08, 0.12, 0.08), has_border=True, border_width=2
+    size=(320, 540), color=(0.08, 0.12, 0.08), has_border=True, border_width=2
 )
 panel.set_position((15, 15))
 
@@ -234,53 +252,73 @@ panel.add_element(lbl_title, (20, 20))
 
 lbl_legend = ui.TextBlock2D(
     text="Lions: 0 | Elephants: 0 | Deers: 0",
-    position=(20, 55),
+    position=(20, 50),
     font_size=11,
     color=(0.85, 0.85, 0.85),
     dynamic_bbox=True,
 )
-panel.add_element(lbl_legend, (20, 55))
+panel.add_element(lbl_legend, (20, 50))
 
 # Card for selected animal details
 lbl_card_title = ui.TextBlock2D(
     text="SELECTED ANIMAL STATUS",
-    position=(20, 90),
+    position=(20, 80),
     font_size=11,
     color=(0.95, 0.8, 0.2),
     bold=True,
     dynamic_bbox=True,
 )
-panel.add_element(lbl_card_title, (20, 90))
+panel.add_element(lbl_card_title, (20, 80))
 
 lbl_animal_info = ui.TextBlock2D(
     text="Click an animal to monitor it.",
-    position=(20, 115),
+    position=(20, 105),
     font_size=10,
     color=(0.8, 0.8, 0.8),
     dynamic_bbox=True,
 )
-panel.add_element(lbl_animal_info, (20, 115))
+panel.add_element(lbl_animal_info, (20, 105))
 
-# Sliders to manipulate selected animal
+# Dynamic stats editing sliders
 slider_hunger = ui.LineSlider2D(
-    position=(20, 210),
+    position=(20, 175),
     initial_value=0.0,
     min_value=0.0,
     max_value=100.0,
     length=180,
     text_template="Edit Hunger: {value:.0f}%",
 )
-panel.add_element(slider_hunger, (20, 210))
+panel.add_element(slider_hunger, (20, 175))
 
 slider_thirst = ui.LineSlider2D(
-    position=(20, 270),
+    position=(20, 220),
     initial_value=0.0,
     min_value=0.0,
     max_value=100.0,
     length=180,
     text_template="Edit Thirst: {value:.0f}%",
 )
-panel.add_element(slider_thirst, (20, 270))
+panel.add_element(slider_thirst, (20, 220))
+
+slider_health = ui.LineSlider2D(
+    position=(20, 265),
+    initial_value=100.0,
+    min_value=0.0,
+    max_value=100.0,
+    length=180,
+    text_template="Edit Health: {value:.0f}%",
+)
+panel.add_element(slider_health, (20, 265))
+
+slider_age = ui.LineSlider2D(
+    position=(20, 310),
+    initial_value=0.0,
+    min_value=0.0,
+    max_value=140.0,
+    length=180,
+    text_template="Edit Age: {value:.1f}",
+)
+panel.add_element(slider_age, (20, 310))
 
 
 def on_hunger_slide(slider):
@@ -301,8 +339,115 @@ def on_thirst_slide(slider):
                 break
 
 
+def on_health_slide(slider):
+    sel = state["selected_animal"]
+    if sel is not None:
+        for a in state["animals"]:
+            if a["id"] == sel:
+                # Map percentage to species max health
+                mx = MAX_HEALTH[a["species"]]
+                a["health"] = (slider.value / 100.0) * mx
+                break
+
+
+def on_age_slide(slider):
+    sel = state["selected_animal"]
+    if sel is not None:
+        for a in state["animals"]:
+            if a["id"] == sel:
+                a["age"] = slider.value
+                break
+
+
 slider_hunger.on_change = on_hunger_slide
 slider_thirst.on_change = on_thirst_slide
+slider_health.on_change = on_health_slide
+slider_age.on_change = on_age_slide
+
+# Animal highlight focus buttons
+btn_states_lion = {
+    "hover": {"text": "LION", "color": (0.3, 0.4, 0.3)},
+    "pressed": {"text": "LION", "color": (0.1, 0.2, 0.1)},
+    "default": {"text": "LION", "color": (0.15, 0.25, 0.15)},
+}
+btn_lion = ui.TextButton2D(
+    label="LION", size=(80, 25), position=(20, 370), states=btn_states_lion
+)
+
+btn_states_ele = {
+    "hover": {"text": "ELEPHANT", "color": (0.3, 0.4, 0.3)},
+    "pressed": {"text": "ELEPHANT", "color": (0.1, 0.2, 0.1)},
+    "default": {"text": "ELEPHANT", "color": (0.15, 0.25, 0.15)},
+}
+btn_ele = ui.TextButton2D(
+    label="ELEPHANT", size=(90, 25), position=(110, 370), states=btn_states_ele
+)
+
+btn_states_deer = {
+    "hover": {"text": "DEER", "color": (0.3, 0.4, 0.3)},
+    "pressed": {"text": "DEER", "color": (0.1, 0.2, 0.1)},
+    "default": {"text": "DEER", "color": (0.15, 0.25, 0.15)},
+}
+btn_deer = ui.TextButton2D(
+    label="DEER", size=(80, 25), position=(210, 370), states=btn_states_deer
+)
+
+
+def select_closest_animal_by_species(species):
+    # Find one of this species to select
+    candidates = [a for a in state["animals"] if a["species"] == species]
+    if len(candidates) > 0:
+        target = candidates[0]
+        # Highlight old selected
+        if state["selected_animal"] is not None:
+            for a in state["animals"]:
+                if a["id"] == state["selected_animal"]:
+                    a["actor"].color = ANIMAL_COLOR[a["species"]]
+                    break
+        state["selected_animal"] = target["id"]
+        target["actor"].color = (1.0, 0.2, 0.1)
+
+
+btn_lion.on_clicked = lambda event: select_closest_animal_by_species("lion")
+btn_ele.on_clicked = lambda event: select_closest_animal_by_species("elephant")
+btn_deer.on_clicked = lambda event: select_closest_animal_by_species("deer")
+
+panel.add_element(btn_lion, (20, 370))
+panel.add_element(btn_ele, (110, 370))
+panel.add_element(btn_deer, (210, 370))
+
+# Global cohesion and separation sliders
+slider_global_coh = ui.LineSlider2D(
+    position=(20, 430),
+    initial_value=1.0,
+    min_value=0.0,
+    max_value=3.0,
+    length=180,
+    text_template="Cohesion Mult: {value:.1f}",
+)
+panel.add_element(slider_global_coh, (20, 430))
+
+slider_global_sep = ui.LineSlider2D(
+    position=(20, 485),
+    initial_value=1.0,
+    min_value=0.0,
+    max_value=3.0,
+    length=180,
+    text_template="Separation Mult: {value:.1f}",
+)
+panel.add_element(slider_global_sep, (20, 485))
+
+
+def on_global_coh_change(slider):
+    state["cohesion_mult"] = slider.value
+
+
+def on_global_sep_change(slider):
+    state["separation_mult"] = slider.value
+
+
+slider_global_coh.on_change = on_global_coh_change
+slider_global_sep.on_change = on_global_sep_change
 
 scene.add(panel)
 
@@ -355,12 +500,48 @@ for vp in veg_patches:
 def on_click(event):
     target = event.target
     if hasattr(target, "agent_idx"):
+        # Highlight new selected
         state["selected_animal"] = target.agent_idx
         print(f"Selected Animal ID #{target.agent_idx}")
     elif target is ground or target is lake:
         state["selected_animal"] = None
-        slider_hunger.value = 0.0
-        slider_thirst.value = 0.0
+
+
+# Keyboard input handlers for flying
+def on_key_down(event):
+    state["keys"].add(event.key.lower())
+
+
+def on_key_up(event):
+    if event.key.lower() in state["keys"]:
+        state["keys"].remove(event.key.lower())
+
+
+# Drag input handlers for free look
+def on_pointer_down(event):
+    if event.button == 1:
+        if not hasattr(event.target, "agent_idx") and event.target is not panel:
+            state["is_dragging_cam"] = True
+            state["last_mouse"] = (event.x, event.y)
+
+
+def on_pointer_move(event):
+    if state["is_dragging_cam"] and state["selected_animal"] is None:
+        if state["last_mouse"] is not None:
+            dx = event.x - state["last_mouse"][0]
+            dy = event.y - state["last_mouse"][1]
+            state["last_mouse"] = (event.x, event.y)
+
+            # Update orientation
+            state["cam_yaw"] -= dx * 0.003
+            state["cam_pitch"] = np.clip(
+                state["cam_pitch"] - dy * 0.003, -np.pi / 2.2, np.pi / 2.2
+            )
+
+
+def on_pointer_up(event):
+    state["is_dragging_cam"] = False
+    state["last_mouse"] = None
 
 
 # Main simulation loop callback
@@ -446,7 +627,6 @@ def sim_tick(showm):
         is_hungry = a["hunger"] > 40.0
 
         # Species Grouping / Flocking dynamics
-        # Compute same-species neighbors to calculate cohesion, alignment, separation
         same_species = [
             other
             for other in animals
@@ -458,7 +638,6 @@ def sim_tick(showm):
         flock_separation = np.zeros(3)
 
         if len(same_species) > 0:
-            # Calculate centers and velocities of same-species neighbors
             positions = np.array([other["pos"] for other in same_species])
             velocities = np.array([other["vel"] for other in same_species])
             diffs = a["pos"] - positions
@@ -483,9 +662,9 @@ def sim_tick(showm):
 
         coeffs = GROUP_COEFFS[a["species"]]
         steer = (
-            flock_cohesion * coeffs["cohesion"] * 0.1
+            flock_cohesion * coeffs["cohesion"] * 0.1 * state["cohesion_mult"]
             + flock_alignment * coeffs["alignment"] * 0.1
-            + flock_separation * coeffs["separation"] * 0.3
+            + flock_separation * coeffs["separation"] * 0.3 * state["separation_mult"]
         )
 
         # Lake Seeking (Thirst)
@@ -515,11 +694,9 @@ def sim_tick(showm):
 
         # Hunting state & pack coordination (Lions targeting Deers)
         if a["species"] == "lion" and is_hungry:
-            # Hunt individually or coordinate targets with nearby pack members
             target_deer = None
             min_d = 9999.0
 
-            # Scan for nearby pack members that already have a target
             pack_target_deer = None
             pack_members = [
                 other
@@ -529,7 +706,6 @@ def sim_tick(showm):
             ]
 
             if len(pack_members) > 0:
-                # Share the target (pack hunting of 2-5 lions)
                 shared_id = pack_members[0]["hunt_target_id"]
                 for target in animals:
                     if target["id"] == shared_id and target["species"] == "deer":
@@ -540,7 +716,6 @@ def sim_tick(showm):
             if pack_target_deer is not None:
                 target_deer = pack_target_deer
             else:
-                # Find closest Deer
                 for target in animals:
                     if target["species"] == "deer":
                         dist = np.linalg.norm(a["pos"] - target["pos"])
@@ -550,14 +725,14 @@ def sim_tick(showm):
 
             if target_deer is not None:
                 a["hunt_target_id"] = target_deer["id"]
-                current_max_speed = RUN_SPEED["lion"]  # Run speed in chase
+                current_max_speed = RUN_SPEED["lion"]
                 to_prey = target_deer["pos"] - a["pos"]
                 to_prey[1] = 0.0
                 steer += (to_prey / (min_d + 1e-5)) * 2.2
 
                 # Attack/Deal damage over time instead of instant death
                 if min_d < 3.5:
-                    target_deer["health"] -= dt * 45.0  # Deal bite damage
+                    target_deer["health"] -= dt * 45.0
                     if target_deer["health"] <= 0.0:
                         a["hunger"] = 0.0
                         a["hunt_target_id"] = None
@@ -578,7 +753,7 @@ def sim_tick(showm):
                         closest_lion = target
 
             if closest_lion is not None and min_d < 45.0:
-                current_max_speed = RUN_SPEED["deer"]  # Sprint in fear
+                current_max_speed = RUN_SPEED["deer"]
                 to_pred = closest_lion["pos"] - a["pos"]
                 to_pred[1] = 0.0
                 steer -= (to_pred / (min_d + 1e-5)) * 3.8
@@ -588,7 +763,6 @@ def sim_tick(showm):
             is_rage = False
             target_lion = None
             if not a["is_child"]:
-                # Defend nearby calves
                 for calf in animals:
                     if calf["species"] == "elephant" and calf["is_child"]:
                         for lion in animals:
@@ -602,12 +776,11 @@ def sim_tick(showm):
                             break
 
             if is_rage and target_lion is not None:
-                current_max_speed = RUN_SPEED["elephant"]  # Charge speed!
+                current_max_speed = RUN_SPEED["elephant"]
                 to_lion = target_lion["pos"] - a["pos"]
                 to_lion[1] = 0.0
                 dist = np.linalg.norm(to_lion)
                 steer += (to_lion / (dist + 1e-5)) * 4.2
-                # Trample damage
                 if dist < 4.5:
                     target_lion["health"] -= dt * 80.0
 
@@ -647,7 +820,13 @@ def sim_tick(showm):
 
         # Position update
         a["pos"] += a["vel"] * dt
-        # Keep ground level Y height stable
+
+        # Hard Boundary constraint: keep inside boundary radius of 290
+        d_origin = np.linalg.norm(a["pos"])
+        if d_origin > 290.0:
+            a["pos"] = (a["pos"] / (d_origin + 1e-5)) * 290.0
+            a["vel"] = -(a["pos"] / 290.0) * np.linalg.norm(a["vel"])
+
         a["pos"][1] = 0.5
         if a["species"] == "lion":
             a["pos"][1] = 0.6
@@ -671,9 +850,10 @@ def sim_tick(showm):
         f"Lions: {num_lions} | Elephants: {num_elephants} | Deers: {num_deers}"
     )
 
-    selected = state["selected_agent"] = state["selected_animal"]
+    selected = state["selected_animal"]
     camera = showm.screens[0].camera
 
+    # 4. Camera Control (Focus vs Free look Fly mode)
     if selected is not None:
         selected_a = None
         for a in animals:
@@ -689,17 +869,23 @@ def sim_tick(showm):
             elif selected_a["species"] == "lion":
                 type_txt = "Cub" if selected_a["is_child"] else "Adult"
 
+            # Display stats on details card
             lbl_animal_info.message = (
                 f"Species: {selected_a['species'].upper()}\n"
                 f"Class: {type_txt} ({gender_txt})\n"
-                f"Health: {selected_a['health']:.1f}%\n"
+                f"Health: {selected_a['health']:.1f} / "
+                f"{MAX_HEALTH[selected_a['species']]}\n"
                 f"Hunger: {selected_a['hunger']:.1f}%\n"
                 f"Thirst: {selected_a['thirst']:.1f}%"
             )
 
-            # Match sliders to dynamic value
+            # Update sliders value
             slider_hunger.value = selected_a["hunger"]
             slider_thirst.value = selected_a["thirst"]
+            slider_health.value = (
+                selected_a["health"] / MAX_HEALTH[selected_a["species"]]
+            ) * 100.0
+            slider_age.value = selected_a["age"]
 
             # Chase camera positioning
             b_pos = selected_a["pos"]
@@ -712,19 +898,49 @@ def sim_tick(showm):
                 camera.local.position + (target_cam_pos - camera.local.position) * 0.1
             )
             camera.look_at(b_pos + h * 4.0)
+
+            # Update camera look rotation states to match
+            diff = b_pos - camera.local.position
+            state["cam_yaw"] = np.arctan2(diff[0], diff[2])
+            state["cam_pitch"] = np.arcsin(
+                np.clip(diff[1] / (np.linalg.norm(diff) + 1e-5), -0.99, 0.99)
+            )
         else:
             state["selected_animal"] = None
             lbl_animal_info.message = "Click an animal to monitor it."
     else:
         lbl_animal_info.message = "Click an animal to monitor it."
-        # Global overview camera (Framing the whole map)
-        target_cam_pos = np.array([0.0, 240.0, -320.0])
-        camera.local.position = (
-            camera.local.position + (target_cam_pos - camera.local.position) * 0.04
-        )
-        camera.look_at(np.array([0.0, 0.0, -20.0]))
 
-    # 4. Minimap Dynamic Dots rendering
+        # Counterstrike style WASD fly camera mode
+        qy = axis_angle_to_quat(np.array([0, 1, 0]), np.degrees(state["cam_yaw"]))
+        qx = axis_angle_to_quat(np.array([1, 0, 0]), np.degrees(state["cam_pitch"]))
+        camera.local.rotation = quat_mult(qy, qx)
+
+        fwd = rotate_vector(camera.local.rotation, np.array([0.0, 0.0, -1.0]))
+        right = rotate_vector(camera.local.rotation, np.array([1.0, 0.0, 0.0]))
+
+        fly_speed = 70.0
+        keys = state["keys"]
+        move = np.zeros(3)
+
+        if "w" in keys:
+            move += fwd
+        if "s" in keys:
+            move -= fwd
+        if "a" in keys:
+            move -= right
+        if "d" in keys:
+            move += right
+        if "q" in keys:
+            move += np.array([0.0, 1.0, 0.0])
+        if "e" in keys:
+            move -= np.array([0.0, 1.0, 0.0])
+
+        if np.any(move):
+            move_dir = move / np.linalg.norm(move)
+            camera.local.position = camera.local.position + move_dir * fly_speed * dt
+
+    # 5. Minimap Dynamic Dots rendering
     if state["minimap_dots_actor"] is not None:
         minimap_group.remove(state["minimap_dots_actor"])
 
@@ -773,13 +989,27 @@ if __name__ == "__main__":
         scene=scene, size=(1024, 768), title="Jungle Ecosystem Survival Simulator"
     )
 
-    # Bind pointer clicks
-    show_manager.renderer.add_event_handler(on_click, EventType.POINTER_DOWN)
+    # Disable default camera controller to allow our WASD mouse free-look camera
+    show_manager.screens[0].controller.enabled = False
 
-    # Initial overview camera placement
+    # Bind pointer clicks and keyboard fly controls
+    show_manager.renderer.add_event_handler(on_click, EventType.POINTER_DOWN)
+    show_manager.renderer.add_event_handler(on_key_down, EventType.KEY_DOWN)
+    show_manager.renderer.add_event_handler(on_key_up, EventType.KEY_UP)
+    show_manager.renderer.add_event_handler(on_pointer_down, EventType.POINTER_DOWN)
+    show_manager.renderer.add_event_handler(on_pointer_move, EventType.POINTER_MOVE)
+    show_manager.renderer.add_event_handler(on_pointer_up, EventType.POINTER_UP)
+
+    # Initial camera placement
     camera = show_manager.screens[0].camera
-    camera.local.position = (0.0, 240.0, -320.0)
-    camera.look_at((0.0, 0.0, -20.0))
+    camera.local.position = (0.0, 200.0, -250.0)
+
+    # Set initial camera look rotation
+    state["cam_yaw"] = 0.0
+    state["cam_pitch"] = -np.radians(40.0)
+    qy = axis_angle_to_quat(np.array([0, 1, 0]), np.degrees(state["cam_yaw"]))
+    qx = axis_angle_to_quat(np.array([1, 0, 0]), np.degrees(state["cam_pitch"]))
+    camera.local.rotation = quat_mult(qy, qx)
 
     # Start simulation
     show_manager.register_callback(sim_tick, 0.016, True, "JungleLoop", show_manager)
