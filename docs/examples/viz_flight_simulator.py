@@ -1,12 +1,63 @@
+"""
+===============================================================================
+A Flight Through the Clouds: A Story of 3D Simulation in FURY
+===============================================================================
+
+Welcome, traveler of the digital realms! This example is a Work-in-Progress (WIP)
+demonstrating how to construct a fully interactive 3D Flight Simulator using
+FURY. As you read this code, you are embarking on a journey through the mechanics
+of modern graphics programming. Feel free to explore, modify, and improve upon
+this simulation to make it your own!
+
+The Story of FURY Mechanics:
+---------------------------
+Every great virtual world in FURY starts with a Scene. Think of a Scene as the canvas
+of our universe—a collection of visual actors, lights, and cameras that define
+the geometry and atmosphere of our world.
+
+1. Actors: The Inhabitants of the World
+   Actors represent the physical objects in our scene. To populate our flight
+   simulator, we build an aircraft out of primitive actors (cylinder, cone,
+   ellipsoid, box, sphere) using `fury.actor`. These primitives are composite
+   building blocks, similar to how basic shapes are used in `viz_shapes.py`.
+   Each actor can have its own local position, rotation, scaling, and color.
+
+2. Transformations: The Math of Flight
+   Movement in 3D space is all about coordinates and rotations. To simulate a
+   plane pitch, roll, and yaw, we use quaternions (axis-angle representations)
+   and quaternion multiplication (`quat_mult`). This helps us avoid complex
+   issues like gimbal lock, a concept also leveraged in coordinates tracking in
+   demos like `viz_helical_solar_system.py`.
+
+3. Procedural World Generation & Object Pooling:
+   As our aircraft flies forward, generating an infinite world can be extremely
+   demanding. To manage this efficiently, we implement an Object Pool (represented
+   by `WorldManager`). We spawn trees and mountains far ahead of the player
+   and reuse them (re-spawning them at the horizon) once they fall behind.
+
+4. UI Overlay (HUD):
+   To display stats like Altitude, Airspeed, and Score, we attach 2D Text Blocks
+   (`fury.ui.TextBlock2D`) directly to the scene. This creates an overlay layout
+   that scales and stays positioned relative to the screen coordinates.
+
+5. Event Listeners:
+   FURY's Event Handler allows us to capture keyboard inputs, letting us map keys
+   like "W/S/A/D/Q/E" to rates of rotation, and Space/Enter to throttle controls.
+
+Let the journey begin!
+"""
+
 import numpy as np
 from fury import window, actor, ui
 from fury.window import EventType
 
+# --- Setting Up the Cardinal Directions and Vector Constants ---
 V_FWD = np.array([0.0, 0.0, 1.0])
 V_UP = np.array([0.0, 1.0, 0.0])
 V_R = np.array([1.0, 0.0, 0.0])
 V_ZERO = np.array([0.0, 0.0, 0.0])
 
+# --- Our Global State Dictionary: The Mind of the Simulation ---
 state = {
     "is_playing": True,
     "score": 0.0,
@@ -24,6 +75,9 @@ state = {
     "tick_count": 0,
 }
 
+# --- Procedural Generation & Horizon Recycling Parameters ---
+# These constants govern the distance bounds at which trees, clouds,
+# and mountains are recycled (moved ahead) relative to the aircraft.
 SPAWN_DIST = 500.0
 DESPAWN_DIST = 150.0
 SPAWN_DIST_SQ = (SPAWN_DIST * 2.0) ** 2
@@ -32,6 +86,9 @@ TREE_COUNT = 60
 MOUNTAIN_COUNT = 15
 
 
+# --- Mathematical Helper Functions: 3D Coordinate Space Rotation ---
+# To model flight rotation correctly, we define quaternion helper operations.
+# This makes it easy to rotate displacement vectors and combine pitch, roll, and yaw.
 def axis_angle_to_quat(axis, angle_deg):
     angle_rad = np.radians(angle_deg)
     s = np.sin(angle_rad / 2.0)
@@ -62,6 +119,9 @@ def get_surface_height(pos):
     return 0.55 if abs(pos[0]) <= 12.0 else 0.0
 
 
+# --- Building the Virtual Scene and Environment ---
+# Here, we instantiate the scene graph, set up a skybox-like color background,
+# and create simple actors for the ground terrain and a distant sun.
 scene = window.Scene()
 scene.background = (0.45, 0.65, 0.95)
 
@@ -74,6 +134,10 @@ sun = actor.sphere(centers=np.array([V_ZERO]), colors=(1.0, 0.95, 0.85), radii=3
 scene.add(sun)
 
 
+# --- Runway Management: A Self-Looping Road System ---
+# The runway represents a segment of road that moves dynamically under the player.
+# Instead of allocating an infinite runway, we use modulo-like logic to shift
+# runway markings (dashes and lights) ahead of the player as they travel along Z.
 class RunwayManager:
     def __init__(self):
         self.runway = actor.box(
@@ -127,6 +191,11 @@ class RunwayManager:
 runway_mgr = RunwayManager()
 
 
+# --- The Aircraft Model: Creating Hierarchical/Composite Actors ---
+# The plane is built entirely from separate geometry actors (fuselage, wings, wheels).
+# We define relative offset vectors for each part in __init__ and apply these
+# transformations on every update tick based on the plane's current position
+# and rotation.
 class Aircraft:
     def __init__(self):
         c0 = np.array([V_ZERO])
@@ -242,6 +311,9 @@ player = Aircraft()
 player.update_transform(state["player_pos"], state["player_quat"], 0.0)
 
 
+# --- Procedural Nature: Trees and Mountain Actors ---
+# These classes show how to combine cylinders and cones to model trees,
+# or stack multiple cones to render snowy mountains.
 class Tree:
     def __init__(self):
         c0 = np.array([V_ZERO])
@@ -309,6 +381,10 @@ class Mountain:
         )
 
 
+# --- World Spawning: Object Pooling for Dynamic Scenes ---
+# To avoid memory churn, we initialize a fixed pool of clouds, trees, and mountains.
+# The WorldManager constantly checks their distance to the player; if they fall behind
+# the camera, they are respawned further ahead on the horizon.
 class WorldManager:
     def __init__(self):
         self.clouds = []
@@ -397,6 +473,9 @@ class WorldManager:
 
 world = WorldManager()
 
+# --- Interface Overlay: Heads-Up Display (HUD) ---
+# We construct 2D text overlay elements using FURY's ui.TextBlock2D.
+# These are added to the scene's UI layer to display real-time game telemetry.
 hud_score = ui.TextBlock2D(
     text="SCORE: 00000",
     position=(30, 710),
@@ -425,6 +504,10 @@ scene.add(hud_alt)
 scene.add(hud_speed)
 
 
+# --- Simulation Controls & Event Handling ---
+# The restart function brings the player and environment back to original parameters.
+# The keyboard event handlers maintain a active set of keys to
+# permit combination steering.
 def restart_game():
     state["is_playing"] = True
     state["score"] = 0.0
@@ -453,6 +536,9 @@ def on_key_up(event):
         state["keys"].remove(event.key.lower())
 
 
+# --- Collision Checking: Simple Geometric Proximity Checks ---
+# We test the distance between the player center and
+# trees/mountains to detect collisions.
 def check_collisions():
     p_pos = state["player_pos"]
 
@@ -483,6 +569,10 @@ def consume_mouse(event):
     pass
 
 
+# --- The Core Game Engine Loop (game_tick) ---
+# Executed repeatedly on a timer, this function calculates lift, drag, gravity,
+# handles aircraft control dynamics, updates the chase camera position,
+# and calls render.
 def game_tick(showm):
     dt = 0.02
     if not state["is_playing"]:
@@ -601,6 +691,8 @@ def game_tick(showm):
     showm.render()
 
 
+# --- Application Entry Point: Setting Up ShowManager ---
+# Here we bind events, register the timer callback loop, and launch the render window.
 if __name__ == "__main__":
     showm = window.ShowManager(
         scene=scene, size=(1024, 768), title="True 3D Flight Simulator"
