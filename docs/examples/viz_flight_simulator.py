@@ -21,12 +21,12 @@ state = {
     "roll_rate": 0.0,
     "yaw_rate": 0.0,
     "keys": set(),
+    "tick_count": 0,
 }
 
 SPAWN_DIST = 500.0
 DESPAWN_DIST = 150.0
 SPAWN_DIST_SQ = (SPAWN_DIST * 2.0) ** 2
-OBSTACLE_COUNT = 0
 CLOUD_COUNT = 35
 TREE_COUNT = 60
 MOUNTAIN_COUNT = 15
@@ -77,12 +77,14 @@ scene.add(sun)
 class RunwayManager:
     def __init__(self):
         self.runway = actor.box(
-            centers=np.array([V_ZERO]), colors=(0.15, 0.15, 0.15), scales=(24, 1.1, 800)
+            centers=np.array([V_ZERO]),
+            colors=(0.15, 0.15, 0.15),
+            scales=(24, 1.1, 3000),
         )
         scene.add(self.runway)
 
         self.dashes = []
-        for z in range(-200, 600, 40):
+        for z in range(-1000, 2000, 40):
             dash = actor.box(
                 centers=np.array([V_ZERO]),
                 colors=(0.9, 0.9, 0.9),
@@ -94,7 +96,7 @@ class RunwayManager:
 
         self.lights = []
         c = (0.95, 0.8, 0.2)
-        for z in range(-200, 600, 50):
+        for z in range(-1000, 2000, 50):
             l1 = actor.sphere(centers=np.array([V_ZERO]), colors=c, radii=0.25)
             l1.local.position = [-12.0, 0.58, float(z)]
             l2 = actor.sphere(centers=np.array([V_ZERO]), colors=c, radii=0.25)
@@ -109,17 +111,17 @@ class RunwayManager:
 
         for dash in self.dashes:
             dz = dash.local.position[2]
-            if dz < pz - 200:
-                dash.local.position = [0.0, 0.56, dz + 800]
-            elif dz > pz + 600:
-                dash.local.position = [0.0, 0.56, dz - 800]
+            if dz < pz - 1000:
+                dash.local.position = [0.0, 0.56, dz + 3000]
+            elif dz > pz + 2000:
+                dash.local.position = [0.0, 0.56, dz - 3000]
 
         for light in self.lights:
             lz = light.local.position[2]
-            if lz < pz - 200:
-                light.local.position = [light.local.position[0], 0.58, lz + 800]
-            elif lz > pz + 600:
-                light.local.position = [light.local.position[0], 0.58, lz - 800]
+            if lz < pz - 1000:
+                light.local.position = [light.local.position[0], 0.58, lz + 3000]
+            elif lz > pz + 2000:
+                light.local.position = [light.local.position[0], 0.58, lz - 3000]
 
 
 runway_mgr = RunwayManager()
@@ -240,30 +242,6 @@ player = Aircraft()
 player.update_transform(state["player_pos"], state["player_quat"], 0.0)
 
 
-class Obstacle:
-    def __init__(self):
-        c0 = np.array([V_ZERO])
-        self.core = actor.sphere(centers=c0, colors=(1.0, 0.15, 0.15), radii=1.2)
-        self.cage = actor.icosahedron(
-            centers=c0,
-            colors=(0.95, 0.6, 0.2),
-            scales=(2.5, 2.5, 2.5),
-            wireframe=True,
-            wireframe_thickness=1.8,
-        )
-        self.parts = [self.core, self.cage]
-        for p in self.parts:
-            scene.add(p)
-
-    def set_position(self, pos):
-        for p in self.parts:
-            p.local.position = pos
-
-    def set_rotation(self, quat):
-        for p in self.parts:
-            p.local.rotation = quat
-
-
 class Tree:
     def __init__(self):
         c0 = np.array([V_ZERO])
@@ -300,9 +278,10 @@ class Tree:
 
 class Mountain:
     def __init__(self):
-        h = np.random.uniform(65.0, 135.0)
+        h = np.random.uniform(150.0, 250.0)
         r = h * np.random.uniform(0.65, 0.85)
         self.height = h
+        self.radius = r
         cap_h = h * 0.25
         c0 = np.array([V_ZERO])
         self.base = actor.cone(
@@ -332,13 +311,10 @@ class Mountain:
 
 class WorldManager:
     def __init__(self):
-        self.obstacles = [Obstacle() for _ in range(OBSTACLE_COUNT)]
         self.clouds = []
         self.trees = [Tree() for _ in range(TREE_COUNT)]
         self.mountains = [Mountain() for _ in range(MOUNTAIN_COUNT)]
 
-        for obs in self.obstacles:
-            self._spawn_object(obs, initial=True)
         for tree in self.trees:
             self._spawn_object(tree, initial=True)
         for mtn in self.mountains:
@@ -388,23 +364,6 @@ class WorldManager:
                     [sc[0] + x_offset, 0.0, sc[2] + np.random.uniform(-80.0, 80.0)]
                 )
             )
-        elif isinstance(obj, Obstacle):
-            spawn_y = max(15.0, p_pos[1] + np.random.uniform(-80.0, 80.0))
-            obj.set_position(
-                np.array(
-                    [
-                        sc[0] + np.random.uniform(-60.0, 60.0),
-                        spawn_y,
-                        sc[2] + np.random.uniform(-50.0, 50.0),
-                    ]
-                )
-            )
-            obj.set_rotation(
-                quat_mult(
-                    axis_angle_to_quat(V_UP, np.random.uniform(0, 360)),
-                    axis_angle_to_quat(V_R, np.random.uniform(0, 360)),
-                )
-            )
         else:
             spawn_y = max(60.0, p_pos[1] + np.random.uniform(-20.0, 150.0))
             obj.local.position = np.array(
@@ -419,11 +378,9 @@ class WorldManager:
         p_pos = state["player_pos"]
         fwd = rotate_vector(state["player_quat"], V_FWD)
 
-        for pool in [self.obstacles, self.clouds, self.trees, self.mountains]:
+        for pool in [self.clouds, self.trees, self.mountains]:
             for obj in pool:
-                if isinstance(obj, Obstacle):
-                    obj_pos = np.array(obj.core.local.position)
-                elif isinstance(obj, Tree):
+                if isinstance(obj, Tree):
                     obj_pos = np.array(obj.trunk.local.position)
                 elif isinstance(obj, Mountain):
                     obj_pos = np.array(obj.base.local.position)
@@ -463,38 +420,32 @@ hud_speed = ui.TextBlock2D(
     color=(0.0, 0.8, 0.9),
 )
 
-game_over_text = ui.TextBlock2D(
-    text="GAME OVER\nPress [R] to Restart",
-    position=(2000, 2000),
-    size=(500, 120),
-    font_size=36,
-    color=(1.0, 0.2, 0.2),
-    bold=True,
-)
-
 scene.add(hud_score)
 scene.add(hud_alt)
 scene.add(hud_speed)
-scene.add(game_over_text)
+
+
+def restart_game():
+    state["is_playing"] = True
+    state["score"] = 0.0
+    state["speed"] = 0.0
+    state["player_pos"] = np.array([0.0, 2.0, 0.0])
+    state["player_quat"] = np.array([0.0, 0.0, 0.0, 1.0])
+    state["cam_pos"] = np.array([0.0, 50.0, -35.0])
+    state["cam_up"] = np.array([0.0, 1.0, 0.0])
+    state["pitch_rate"] = 0.0
+    state["roll_rate"] = 0.0
+    state["yaw_rate"] = 0.0
+    state["tick_count"] = 0
+    for pool in [world.clouds, world.trees, world.mountains]:
+        for obj in pool:
+            world._spawn_object(obj, initial=True)
 
 
 def on_key_down(event):
     state["keys"].add(event.key.lower())
-    if event.key.lower() == "r" and not state["is_playing"]:
-        state["is_playing"] = True
-        state["score"] = 0.0
-        state["speed"] = 0.0
-        state["player_pos"] = np.array([0.0, 2.0, 0.0])
-        state["player_quat"] = np.array([0.0, 0.0, 0.0, 1.0])
-        state["cam_pos"] = np.array([0.0, 50.0, -35.0])
-        state["cam_up"] = np.array([0.0, 1.0, 0.0])
-        state["pitch_rate"] = 0.0
-        state["roll_rate"] = 0.0
-        state["yaw_rate"] = 0.0
-        game_over_text.position = (2000, 2000)
-        for pool in [world.obstacles, world.clouds, world.trees, world.mountains]:
-            for obj in pool:
-                world._spawn_object(obj, initial=True)
+    if event.key.lower() == "r":
+        restart_game()
 
 
 def on_key_up(event):
@@ -504,9 +455,27 @@ def on_key_up(event):
 
 def check_collisions():
     p_pos = state["player_pos"]
-    for obs in world.obstacles:
-        if np.linalg.norm(p_pos - np.array(obs.core.local.position)) < 3.2:
+
+    # Tree collisions
+    for tree in world.trees:
+        tree_base = np.array(tree.trunk.local.position) - np.array([0.0, 1.75, 0.0])
+        horiz_dist = np.linalg.norm(p_pos[[0, 2]] - tree_base[[0, 2]])
+        if horiz_dist < 3.0 and p_pos[1] < 7.5:
             return True
+
+    # Mountain collisions
+    for mtn in world.mountains:
+        mtn_base = np.array(mtn.base.local.position) - np.array(
+            [0.0, mtn.height / 2.0, 0.0]
+        )
+        h = mtn.height
+        r = mtn.radius
+        if p_pos[1] < h:
+            horiz_dist = np.linalg.norm(p_pos[[0, 2]] - mtn_base[[0, 2]])
+            r_at_y = r * (1.0 - p_pos[1] / h)
+            if horiz_dist < r_at_y + 3.0:
+                return True
+
     return False
 
 
@@ -608,7 +577,7 @@ def game_tick(showm):
 
     if check_collisions():
         state["is_playing"] = False
-        game_over_text.position = (262, 384)
+        restart_game()
 
     fwd_now = rotate_vector(state["player_quat"], V_FWD)
     up_now = rotate_vector(state["player_quat"], V_UP)
