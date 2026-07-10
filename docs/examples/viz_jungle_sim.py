@@ -23,7 +23,7 @@ LAKE_CENTER = np.array([0.0, 0.0, 0.0])
 MAX_HEALTH = {"lion": 150.0, "elephant": 500.0, "deer": 100.0}
 MAX_AGE = {"lion": 90.0, "elephant": 140.0, "deer": 75.0}
 BASE_SPEED = {"lion": 7.0, "elephant": 3.5, "deer": 10.0}
-RUN_SPEED = {"lion": 12.0, "elephant": 8.5, "deer": 14.0}
+RUN_SPEED = {"lion": 15.5, "elephant": 8.5, "deer": 14.0}
 MIN_SPEED = 2.0
 ANIMAL_COLOR = {
     "lion": (0.9, 0.45, 0.1),
@@ -572,6 +572,7 @@ btn_reset = ui.TextButton2D(
 )
 control_panel.add_element(0, btn_reset, (20, 490))
 
+
 # Global callbacks
 def on_g_speed(slider):
     state["global_speed_factor"] = slider.value
@@ -854,25 +855,10 @@ def sim_tick(showm):
                 * state[f"{sp}_thirst_factor"]
             )
 
-        # Graze if deer/elephant on land, otherwise build up hunger
-        if sp in ["deer", "elephant"]:
-            if a["hunger"] > 40.0 and not in_water:
-                a["hunger"] = max(0.0, a["hunger"] - dt * 25.0)
-            else:
-                a["hunger"] += (
-                    dt
-                    * h_rate
-                    * state["global_hunger_factor"]
-                    * state[f"{sp}_hunger_factor"]
-                )
-        else:
-            # Lions only reduce hunger by eating deer (handled in hunting)
-            a["hunger"] += (
-                dt
-                * h_rate
-                * state["global_hunger_factor"]
-                * state[f"{sp}_hunger_factor"]
-            )
+        # Build up hunger for all species (reduced later via grazing or hunting)
+        a["hunger"] += (
+            dt * h_rate * state["global_hunger_factor"] * state[f"{sp}_hunger_factor"]
+        )
 
         # Update mating cooldown
         if a["cooldown"] > 0.0:
