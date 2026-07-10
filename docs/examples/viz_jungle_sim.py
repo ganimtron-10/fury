@@ -552,7 +552,7 @@ slider_global_speed = ui.LineSlider2D(
     position=(20, 440),
     initial_value=1.0,
     min_value=1.0,
-    max_value=20.0,
+    max_value=10.0,
     length=180,
     text_template="Sim Speed: {value:.1f}x",
 )
@@ -823,7 +823,7 @@ def on_pointer_up(event):
 # Main simulation loop callback
 def sim_tick(showm):
     global pos, vel
-    dt = 0.016 * state["sim_speed"]
+    dt = 0.16 * state["sim_speed"]
 
     animals = state["animals"]
     state["screen_size"] = showm.renderer.logical_size
@@ -1253,16 +1253,16 @@ def sim_tick(showm):
 
         # Keyboard Camera Rotation
         if "arrowleft" in keys or "left" in keys:
-            state["cam_yaw"] += 2.0 * dt
+            state["cam_yaw"] += 1.5 * dt
         if "arrowright" in keys or "right" in keys:
-            state["cam_yaw"] -= 2.0 * dt
+            state["cam_yaw"] -= 1.5 * dt
         if "arrowup" in keys or "up" in keys:
             state["cam_pitch"] = np.clip(
-                state["cam_pitch"] + 2.0 * dt, -np.pi / 2.2, np.pi / 2.2
+                state["cam_pitch"] + 1.5 * dt, -np.pi / 2.2, np.pi / 2.2
             )
         if "arrowdown" in keys or "down" in keys:
             state["cam_pitch"] = np.clip(
-                state["cam_pitch"] - 2.0 * dt, -np.pi / 2.2, np.pi / 2.2
+                state["cam_pitch"] - 1.5 * dt, -np.pi / 2.2, np.pi / 2.2
             )
 
         # Counterstrike style WASD fly camera mode
