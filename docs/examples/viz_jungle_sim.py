@@ -439,19 +439,19 @@ scene.add(info_panel)
 # Controls Panel - Now a TabUI container separating factors
 control_panel = ui.TabUI(
     position=(15, 235),
-    size=(320, 480),
+    size=(340, 620),
     tab_titles=["Global", "Lion", "Elephant", "Deer"],
     startup_tab_id=0,
-    font_size=14,
-    active_color=(0.1, 0.2, 0.1),
-    inactive_color=(0.04, 0.06, 0.04),
+    font_size=16,
+    active_color=(0.2, 0.5, 0.8),
+    inactive_color=(0.3, 0.3, 0.3),
 )
 
 # ----------------- TAB 0: GLOBAL FACTORS -----------------
 lbl_g_title = ui.TextBlock2D(
     text="GLOBAL TUNING FACTORS",
     position=(20, 15),
-    font_size=13,
+    font_size=15,
     color=(0.95, 0.8, 0.2),
     bold=True,
     dynamic_bbox=True,
@@ -459,104 +459,104 @@ lbl_g_title = ui.TextBlock2D(
 control_panel.add_element(0, lbl_g_title, (20, 15))
 
 slider_g_speed = ui.LineSlider2D(
-    position=(20, 35),
+    position=(20, 50),
     initial_value=1.0,
     min_value=0.0,
     max_value=3.0,
     length=180,
     text_template="Speed Factor: {value:.1f}x",
 )
-control_panel.add_element(0, slider_g_speed, (20, 35))
+control_panel.add_element(0, slider_g_speed, (20, 50))
 
 slider_g_hunger = ui.LineSlider2D(
-    position=(20, 75),
+    position=(20, 95),
     initial_value=1.0,
     min_value=0.0,
     max_value=3.0,
     length=180,
     text_template="Hunger Factor: {value:.1f}x",
 )
-control_panel.add_element(0, slider_g_hunger, (20, 75))
+control_panel.add_element(0, slider_g_hunger, (20, 95))
 
 slider_g_thirst = ui.LineSlider2D(
-    position=(20, 115),
+    position=(20, 140),
     initial_value=1.0,
     min_value=0.0,
     max_value=3.0,
     length=180,
     text_template="Thirst Factor: {value:.1f}x",
 )
-control_panel.add_element(0, slider_g_thirst, (20, 115))
+control_panel.add_element(0, slider_g_thirst, (20, 140))
 
 slider_g_age = ui.LineSlider2D(
-    position=(20, 155),
+    position=(20, 185),
     initial_value=1.0,
     min_value=0.0,
     max_value=3.0,
     length=180,
     text_template="Age Factor: {value:.1f}x",
 )
-control_panel.add_element(0, slider_g_age, (20, 155))
+control_panel.add_element(0, slider_g_age, (20, 185))
 
 slider_g_mating = ui.LineSlider2D(
-    position=(20, 195),
+    position=(20, 230),
     initial_value=1.0,
     min_value=0.0,
     max_value=3.0,
     length=180,
     text_template="Mating Factor: {value:.1f}x",
 )
-control_panel.add_element(0, slider_g_mating, (20, 195))
+control_panel.add_element(0, slider_g_mating, (20, 230))
 
 slider_g_hunting = ui.LineSlider2D(
-    position=(20, 235),
+    position=(20, 275),
     initial_value=1.0,
     min_value=0.0,
     max_value=3.0,
     length=180,
     text_template="Hunting Factor: {value:.1f}x",
 )
-control_panel.add_element(0, slider_g_hunting, (20, 235))
+control_panel.add_element(0, slider_g_hunting, (20, 275))
 
 lbl_g_sim = ui.TextBlock2D(
     text="SIMULATION RATE CONTROLS",
-    position=(20, 280),
-    font_size=13,
+    position=(20, 320),
+    font_size=15,
     color=(0.95, 0.8, 0.2),
     bold=True,
     dynamic_bbox=True,
 )
-control_panel.add_element(0, lbl_g_sim, (20, 280))
+control_panel.add_element(0, lbl_g_sim, (20, 320))
 
 slider_global_coh = ui.LineSlider2D(
-    position=(20, 300),
+    position=(20, 350),
     initial_value=1.0,
     min_value=0.0,
     max_value=3.0,
     length=180,
     text_template="Cohesion Mult: {value:.1f}",
 )
-control_panel.add_element(0, slider_global_coh, (20, 300))
+control_panel.add_element(0, slider_global_coh, (20, 350))
 
 slider_global_sep = ui.LineSlider2D(
-    position=(20, 340),
+    position=(20, 395),
     initial_value=1.0,
     min_value=0.0,
     max_value=3.0,
     length=180,
     text_template="Separation Mult: {value:.1f}",
 )
-control_panel.add_element(0, slider_global_sep, (20, 340))
+control_panel.add_element(0, slider_global_sep, (20, 395))
 
 slider_global_speed = ui.LineSlider2D(
-    position=(20, 380),
+    position=(20, 440),
     initial_value=1.0,
     min_value=1.0,
     max_value=20.0,
     length=180,
     text_template="Sim Speed: {value:.1f}x",
 )
-control_panel.add_element(0, slider_global_speed, (20, 380))
+control_panel.add_element(0, slider_global_speed, (20, 440))
 
 # Reset button
 btn_states_reset = {
@@ -567,11 +567,10 @@ btn_states_reset = {
 btn_reset = ui.TextButton2D(
     label="RESET ALL FACTORS",
     size=(180, 25),
-    position=(20, 425),
+    position=(20, 490),
     states=btn_states_reset,
 )
-control_panel.add_element(0, btn_reset, (20, 425))
-
+control_panel.add_element(0, btn_reset, (20, 490))
 
 # Global callbacks
 def on_g_speed(slider):
@@ -629,7 +628,7 @@ def build_species_tab(tab_idx, species_name):
     lbl_title = ui.TextBlock2D(
         text=f"{species_name.upper()} FACTOR ADJUSTERS",
         position=(20, 15),
-        font_size=13,
+        font_size=15,
         color=(0.95, 0.8, 0.2),
         bold=True,
         dynamic_bbox=True,
@@ -637,64 +636,64 @@ def build_species_tab(tab_idx, species_name):
     control_panel.add_element(tab_idx, lbl_title, (20, 15))
 
     s_speed = ui.LineSlider2D(
-        position=(20, 35),
+        position=(20, 50),
         initial_value=1.0,
         min_value=0.0,
         max_value=3.0,
         length=180,
         text_template="Speed Factor: {value:.1f}x",
     )
-    control_panel.add_element(tab_idx, s_speed, (20, 35))
+    control_panel.add_element(tab_idx, s_speed, (20, 50))
 
     s_hunger = ui.LineSlider2D(
-        position=(20, 75),
+        position=(20, 95),
         initial_value=1.0,
         min_value=0.0,
         max_value=3.0,
         length=180,
         text_template="Hunger Factor: {value:.1f}x",
     )
-    control_panel.add_element(tab_idx, s_hunger, (20, 75))
+    control_panel.add_element(tab_idx, s_hunger, (20, 95))
 
     s_thirst = ui.LineSlider2D(
-        position=(20, 115),
+        position=(20, 140),
         initial_value=1.0,
         min_value=0.0,
         max_value=3.0,
         length=180,
         text_template="Thirst Factor: {value:.1f}x",
     )
-    control_panel.add_element(tab_idx, s_thirst, (20, 115))
+    control_panel.add_element(tab_idx, s_thirst, (20, 140))
 
     s_age = ui.LineSlider2D(
-        position=(20, 155),
+        position=(20, 185),
         initial_value=1.0,
         min_value=0.0,
         max_value=3.0,
         length=180,
         text_template="Age Factor: {value:.1f}x",
     )
-    control_panel.add_element(tab_idx, s_age, (20, 155))
+    control_panel.add_element(tab_idx, s_age, (20, 185))
 
     s_mating = ui.LineSlider2D(
-        position=(20, 195),
+        position=(20, 230),
         initial_value=1.0,
         min_value=0.0,
         max_value=3.0,
         length=180,
         text_template="Mating Factor: {value:.1f}x",
     )
-    control_panel.add_element(tab_idx, s_mating, (20, 195))
+    control_panel.add_element(tab_idx, s_mating, (20, 230))
 
     s_hunting = ui.LineSlider2D(
-        position=(20, 235),
+        position=(20, 275),
         initial_value=1.0,
         min_value=0.0,
         max_value=3.0,
         length=180,
         text_template="Hunting Factor: {value:.1f}x",
     )
-    control_panel.add_element(tab_idx, s_hunting, (20, 235))
+    control_panel.add_element(tab_idx, s_hunting, (20, 275))
 
     # Event bindings
     s_speed.on_change = lambda sl: state.update(
@@ -846,7 +845,7 @@ def sim_tick(showm):
 
         # Quench thirst if in water, otherwise build up thirst
         if in_water:
-            a["thirst"] = max(0.0, a["thirst"] - dt * 50.0)
+            a["thirst"] = max(0.0, a["thirst"] - dt * 15.0)
         else:
             a["thirst"] += (
                 dt
@@ -1120,8 +1119,12 @@ def sim_tick(showm):
                 if dist < 4.5:
                     target_lion["health"] -= dt * 90.0
 
+        is_satiated = (not is_hungry) and (not is_thirsty)
+        if is_satiated:
+            current_max_speed *= 0.3  # chill out / wander slowly
+
         # Breeding Logic
-        if a["cooldown"] <= 0.0 and not a["is_child"]:
+        if is_satiated and a["cooldown"] <= 0.0 and not a["is_child"]:
             for partner in animals:
                 if (
                     partner["species"] == sp
