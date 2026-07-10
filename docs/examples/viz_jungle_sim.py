@@ -1248,6 +1248,22 @@ def sim_tick(showm):
         lbl_animal_info_left.message = "Click an animal\nto monitor."
         lbl_animal_info_right.message = ""
 
+        keys = state["keys"]
+
+        # Keyboard Camera Rotation
+        if "arrowleft" in keys or "left" in keys:
+            state["cam_yaw"] += 2.0 * dt
+        if "arrowright" in keys or "right" in keys:
+            state["cam_yaw"] -= 2.0 * dt
+        if "arrowup" in keys or "up" in keys:
+            state["cam_pitch"] = np.clip(
+                state["cam_pitch"] + 2.0 * dt, -np.pi / 2.2, np.pi / 2.2
+            )
+        if "arrowdown" in keys or "down" in keys:
+            state["cam_pitch"] = np.clip(
+                state["cam_pitch"] - 2.0 * dt, -np.pi / 2.2, np.pi / 2.2
+            )
+
         # Counterstrike style WASD fly camera mode
         qy = axis_angle_to_quat(np.array([0, 1, 0]), np.degrees(state["cam_yaw"]))
         qx = axis_angle_to_quat(np.array([1, 0, 0]), np.degrees(state["cam_pitch"]))
@@ -1257,7 +1273,6 @@ def sim_tick(showm):
         right = rotate_vector(camera.local.rotation, np.array([1.0, 0.0, 0.0]))
 
         fly_speed = 70.0
-        keys = state["keys"]
         move = np.zeros(3)
 
         if "w" in keys:
