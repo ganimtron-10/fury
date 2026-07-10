@@ -1081,7 +1081,8 @@ def sim_tick(showm):
                 if target["species"] == "elephant":
                     dist = np.linalg.norm(target["pos"] - a["pos"])
                     if dist < 28.0:
-                        steer -= (target["pos"] - a["pos"]) / (dist + 1e-5) * 2.5
+                        current_max_speed = run_speed_val
+                        steer -= (target["pos"] - a["pos"]) / (dist + 1e-5) * 3.8
 
         # Elephant Family Defense & Retaliation against Lions
         if sp == "elephant":
