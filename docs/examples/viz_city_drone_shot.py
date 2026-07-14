@@ -322,7 +322,7 @@ generate_static_city()
 # Animated Traffic (Kenney Car Kit + fury.motion Animation)
 # =========================================================
 
-ANIMATION_DURATION = 30.0
+ANIMATION_DURATION = 45.0
 car_animations = []
 NUM_CARS = 75
 
@@ -396,51 +396,57 @@ logger.info(f"Created {len(car_animations)} animated Kenney cars")
 
 camera_anim = CameraAnimation(loop=True)
 
-# Cinematic 30s action sequence
+# Cinematic 45s action sequence with carefully clamped spline curves
 camera_positions = {
-    # 0-5s: Following the Hero Car down the main avenue
+    # 0-8s: Following the Hero Car down the main avenue
     0.0: np.array([4.0, 15.0, -450.0]),
-    2.5: np.array([4.0, 15.0, -200.0]),
-    5.0: np.array([4.0, 15.0, 50.0]),
+    4.0: np.array([4.0, 15.0, -200.0]),
+    8.0: np.array([4.0, 15.0, 50.0]),
     
-    # 5-10s: Break away and ascend into a beautiful panorama
-    10.0: np.array([-140.0, 150.0, 140.0]),
+    # 8-16s: Break away and ascend into a beautiful panorama
+    12.0: np.array([-70.0, 80.0, 100.0]), # Intermediate step to prevent spline dip
+    16.0: np.array([-140.0, 150.0, 140.0]),
     
-    # 10-15s: Approach the Colossal Skyscraper at Block (1,1)
-    15.0: np.array([105.0, 20.0, 0.0]),
+    # 16-24s: Approach the Colossal Skyscraper at Block (1,1)
+    20.0: np.array([-20.0, 80.0, 70.0]),
+    24.0: np.array([105.0, 20.0, 0.0]),
     
-    # 15-20s: The Climb (fly inches away from the glass looking straight up)
-    17.0: np.array([135.0, 150.0, 105.0]),
-    20.0: np.array([135.0, 240.0, 105.0]),
+    # 24-30s: The Climb (fly alongside the glass looking up, offset by 45 units to avoid FOV clip)
+    27.0: np.array([150.0, 150.0, 105.0]),
+    30.0: np.array([150.0, 240.0, 105.0]),
     
-    # 20-25s: The Stunt (Flip over the roof)
-    25.0: np.array([140.0, 260.0, 140.0]),
+    # 30-36s: The Stunt (Flip over the roof)
+    36.0: np.array([140.0, 280.0, 140.0]),
     
-    # 25-30s: Plummet back down into a street and catch up to the start loop
-    30.0: np.array([4.0, 15.0, -450.0]),
+    # 36-45s: Plummet back down into a street and catch up to the start loop
+    41.0: np.array([70.0, 80.0, -150.0]), # Brake point to prevent ground crash!
+    45.0: np.array([4.0, 15.0, -450.0]),
 }
 
 camera_focals = {
     # Looking at the Hero Car
     0.0: np.array([4.0, 5.0, -380.0]),
-    2.5: np.array([4.0, 5.0, -130.0]),
-    5.0: np.array([4.0, 5.0, 120.0]),
+    4.0: np.array([4.0, 5.0, -130.0]),
+    8.0: np.array([4.0, 5.0, 120.0]),
     
     # Looking down at the city during panorama
-    10.0: np.array([0.0, 50.0, 70.0]),
+    12.0: np.array([-40.0, 50.0, 90.0]),
+    16.0: np.array([0.0, 50.0, 70.0]),
     
     # Looking AT the Colossal Skyscraper's base
-    15.0: np.array([105.0, 50.0, 105.0]),
+    20.0: np.array([40.0, 40.0, 40.0]),
+    24.0: np.array([105.0, 50.0, 105.0]),
     
-    # Looking STRAIGHT UP while climbing the glass
-    17.0: np.array([105.0, 250.0, 105.0]),
-    20.0: np.array([105.0, 300.0, 105.0]),
+    # Looking at the building center while climbing alongside it
+    27.0: np.array([105.0, 250.0, 105.0]),
+    30.0: np.array([105.0, 300.0, 105.0]),
     
     # Looking over the roof during the flip stunt
-    25.0: np.array([70.0, 200.0, 70.0]),
+    36.0: np.array([70.0, 200.0, 70.0]),
     
     # Looking down the street to loop
-    30.0: np.array([4.0, 5.0, -380.0]),
+    41.0: np.array([20.0, 25.0, -250.0]),
+    45.0: np.array([4.0, 5.0, -380.0]),
 }
 
 # The View-Up Vector controls camera tilt and barrel rolls!
@@ -448,21 +454,21 @@ camera_focals = {
 # and avoid passing through (0,0,0) which crashes linear interpolators.
 camera_view_ups = {
     0.0: np.array([0.0, 1.0, 0.0]),
-    15.0: np.array([0.0, 1.0, 0.0]),
+    24.0: np.array([0.0, 1.0, 0.0]),
     
     # Tilt slightly back while climbing
-    17.0: np.array([0.0, 0.707, -0.707]),
-    18.5: np.array([0.0, 0.0, -1.0]),
+    27.0: np.array([0.0, 0.707, -0.707]),
+    28.5: np.array([0.0, 0.0, -1.0]),
     
     # The Pitch-Loop Stunt over the roof!
-    20.0: np.array([0.0, -0.707, -0.707]),
-    21.25: np.array([0.0, -1.0, 0.0]),      # Upside down!
-    22.5: np.array([0.0, -0.707, 0.707]),
-    23.75: np.array([0.0, 0.0, 1.0]),       # Pitching forward
-    24.3: np.array([0.0, 0.707, 0.707]),
-    25.0: np.array([0.0, 1.0, 0.0]),        # Right side up!
+    30.0: np.array([0.0, -0.707, -0.707]),
+    32.0: np.array([0.0, -1.0, 0.0]),      # Upside down!
+    34.0: np.array([0.0, -0.707, 0.707]),
+    35.0: np.array([0.0, 0.0, 1.0]),       # Pitching forward
+    36.0: np.array([0.0, 0.707, 0.707]),
+    38.0: np.array([0.0, 1.0, 0.0]),        # Right side up!
     
-    30.0: np.array([0.0, 1.0, 0.0]),
+    45.0: np.array([0.0, 1.0, 0.0]),
 }
 
 camera_anim.set_position_keyframes(camera_positions)
