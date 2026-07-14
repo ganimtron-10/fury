@@ -305,10 +305,15 @@ def generate_static_city():
 
     logger.info(f"Batching {len(road_instances)} road tiles...")
     roads_actor = create_batched_actor(ROAD_KIT_DIR, road_instances, texture_file="colormap.png")
+    # Enable backface culling so we don't render the inside of models
+    roads_actor.material.side = "front"
     scene.add(roads_actor)
 
     logger.info(f"Batching {len(building_instances)} buildings...")
+    # Use variation-a.png for standard white buildings as requested
     buildings_actor = create_batched_actor(CITY_KIT_DIR, building_instances, texture_file="variation-a.png")
+    # Enable backface culling to ensure hollow interiors are invisible if the camera gets too close
+    buildings_actor.material.side = "front"
     scene.add(buildings_actor)
 
 generate_static_city()
@@ -405,8 +410,8 @@ camera_positions = {
     15.0: np.array([105.0, 20.0, 0.0]),
     
     # 15-20s: The Climb (fly inches away from the glass looking straight up)
-    17.0: np.array([105.0, 150.0, 105.0]),
-    20.0: np.array([105.0, 240.0, 105.0]),
+    17.0: np.array([135.0, 150.0, 105.0]),
+    20.0: np.array([135.0, 240.0, 105.0]),
     
     # 20-25s: The Stunt (Flip over the roof)
     25.0: np.array([140.0, 260.0, 140.0]),
