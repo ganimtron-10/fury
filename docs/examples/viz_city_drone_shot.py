@@ -116,7 +116,7 @@ np.random.seed(42)
 BLOCK_SIZE = 70.0
 ROAD_WIDTH = 14.0
 BUILDING_SCALE = 12.0
-GRID_SIZE = 4  # Grid goes from -GRID_SIZE to GRID_SIZE (9x9 roads)
+GRID_SIZE = 6  # Grid goes from -GRID_SIZE to GRID_SIZE
 
 BUILDING_MODELS = [
     f"building-{c}.obj" for c in ['a','b','c','d','e','f','g','h']
@@ -186,7 +186,7 @@ generate_roads()
 def generate_buildings():
     """Generate tightly packed white buildings inside the city blocks."""
     placed = 0
-    building_tex = "variation-b.png"  # White building texture
+    building_tex = "variation-b.png"  # Default white building texture
     
     # Iterate over blocks (between the roads)
     for ix in range(-GRID_SIZE, GRID_SIZE):
@@ -211,7 +211,12 @@ def generate_buildings():
                 (-16, 16),  (0, 16),  (16, 16)
             ]
             
-            for dx, dz in offsets:
+            # Randomly pick 2 to 4 buildings per block to spread them out and reduce congestion
+            num_buildings = np.random.randint(2, 5)
+            chosen_indices = np.random.choice(len(offsets), num_buildings, replace=False)
+            
+            for idx in chosen_indices:
+                dx, dz = offsets[idx]
                 bx = block_cx + dx
                 bz = block_cz + dz
                 
