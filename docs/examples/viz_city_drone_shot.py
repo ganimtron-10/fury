@@ -398,16 +398,16 @@ camera_anim = CameraAnimation(loop=True)
 
 # Cinematic 45s action sequence mathematically paced for constant speed!
 camera_positions = {
-    0.0: np.array([4.0, 20.0, -430.0]),   # Behind car
-    3.0: np.array([4.0, 20.0, -280.0]),   # Clamp spline to horizontal at loop start
-    6.8: np.array([4.0, 20.0, -130.0]),   # Tracking car
+    0.0: np.array([4.0, 40.0, -430.0]),   # Behind car
+    3.0: np.array([4.0, 40.0, -280.0]),   # Clamp spline to horizontal at loop start
+    6.8: np.array([4.0, 40.0, -130.0]),   # Tracking car
     14.4: np.array([-140.0, 150.0, 140.0]), # Panorama
     23.6: np.array([250.0, 50.0, 105.0]),   # Approach Skyscraper from a majestic distance
     28.0: np.array([250.0, 240.0, 105.0]),  # Climb alongside it
     30.0: np.array([250.0, 280.0, 140.0]),  # Flip over roof
     37.6: np.array([150.0, 80.0, -150.0]),  # Dive back down
-    41.5: np.array([40.0, 20.0, -320.0]),   # Level out of dive before loop ends
-    45.0: np.array([4.0, 20.0, -430.0]),    # Loop back horizontally
+    41.5: np.array([40.0, 40.0, -320.0]),   # Level out of dive before loop ends
+    45.0: np.array([4.0, 40.0, -430.0]),    # Loop back horizontally
 }
 
 camera_focals = {
