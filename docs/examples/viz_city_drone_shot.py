@@ -5,14 +5,15 @@ City Drone Shot: Cinematic Flythrough in FURY
 
 A cinematic drone fly-through of a procedurally generated 3D city using
 FURY's ``fury.motion`` animation system. The camera path is defined via
-``CameraAnimation`` keyframes with cubic spline interpolation, traffic
-is animated via ``Animation`` objects, and the entire show is orchestrated
-by a ``Timeline`` with an interactive playback panel.
+``CameraAnimation`` keyframes with linear interpolation to prevent clipping,
+traffic is animated via ``Animation`` objects, and the entire show is 
+orchestrated by a ``Timeline`` with an interactive playback panel.
 
 3D models are loaded from Kenney's Car Kit and City Kit (low-poly OBJ files).
-Static city geometry (1400+ road tiles and 300+ buildings) is heavily optimized
-using ``vtkAppendPolyData`` batching to combine them into just two massive actors,
-enabling buttery smooth rendering and allowing for high-density animated traffic.
+Static city geometry (thousands of road tiles and buildings) is heavily optimized
+using NumPy concatenation to batch them into just two massive actors,
+enabling buttery smooth rendering and allowing for high-density animated traffic
+without relying on heavy VTK dependencies.
 """
 
 import logging
@@ -21,8 +22,7 @@ import numpy as np
 
 from fury import actor, window
 from fury.motion import Animation, CameraAnimation, Timeline, cubic_spline_interpolator, linear_interpolator
-import vtk
-from vtkmodules.util.numpy_support import vtk_to_numpy
+from fury.io import read_mesh
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -41,95 +41,93 @@ ROAD_KIT_DIR = os.path.join(ASSETS_DIR, "kenney_city-kit-roads/Models/OBJ format
 
 _MODEL_CACHE = {}
 
-def get_base_polydata(directory, filename):
-    """Cache and return the base VTK PolyData for a model to avoid disk I/O."""
+def get_base_mesh(directory, filename):
+    """Cache and return the base NumPy arrays for a model to avoid disk I/O."""
     key = (directory, filename)
     if key not in _MODEL_CACHE:
-        import vtkmodules.vtkCommonCore as vtk_core
-        vtk_core.vtkObject.GlobalWarningDisplayOff()
         path = os.path.join(directory, filename)
-        reader = vtk.vtkOBJReader()
-        reader.SetFileName(path)
-        reader.Update()
-        _MODEL_CACHE[key] = reader.GetOutput()
+        v, f, c = read_mesh(path)
+        _MODEL_CACHE[key] = (v, f, c)
     return _MODEL_CACHE[key]
 
-def create_batched_actor(directory, texture_file, instances):
+def create_batched_actor(directory, instances, default_color=None, extract_colors=True):
     """
-    Batch thousands of static meshes into a single FURY actor for extreme performance.
-    `instances` is a list of tuples: (filename, scale, position, rotation_y)
+    Batch thousands of meshes using NumPy concatenation.
+    Returns a single FURY actor for extreme performance.
     """
-    append_filter = vtk.vtkAppendPolyData()
+    all_verts = []
+    all_faces = []
+    all_colors = []
+    v_offset = 0
     
     for filename, scale, pos, rot_y in instances:
-        base_pd = get_base_polydata(directory, filename)
+        v, f, c = get_base_mesh(directory, filename)
+        v = v.copy()
         
-        transform = vtk.vtkTransform()
-        transform.Translate(*pos)
+        # Apply scale
+        v = v * scale
+        
+        # Apply Y-rotation
         if rot_y != 0.0:
-            transform.RotateY(rot_y)
-        transform.Scale(scale, scale, scale)
+            angle = np.radians(rot_y)
+            c_val, s_val = np.cos(angle), np.sin(angle)
+            v_x = v[:, 0] * c_val + v[:, 2] * s_val
+            v_z = -v[:, 0] * s_val + v[:, 2] * c_val
+            v[:, 0] = v_x
+            v[:, 2] = v_z
+            
+        # Apply translation
+        v = v + pos
         
-        transform_filter = vtk.vtkTransformPolyDataFilter()
-        transform_filter.SetInputData(base_pd)
-        transform_filter.SetTransform(transform)
-        transform_filter.Update()
+        all_verts.append(v)
+        all_faces.append(f + v_offset)
         
-        append_filter.AddInputData(transform_filter.GetOutput())
+        if extract_colors and c is not None and c.shape == v.shape and not (c.max() <= 1.0 and c.min() >= -1.0 and np.allclose(np.linalg.norm(c, axis=1), 1.0, atol=0.1)):
+            # Valid vertex colors found (ignoring normal-mapped colors which lie on unit sphere)
+            all_colors.append(c)
+        else:
+            # Fallback color
+            color = default_color if default_color is not None else (0.8, 0.8, 0.8)
+            all_colors.append(np.full((len(v), 3), color, dtype=np.float32))
+            
+        v_offset += len(v)
         
-    append_filter.Update()
-    polydata = append_filter.GetOutput()
-
-    verts = vtk_to_numpy(polydata.GetPoints().GetData())
-    cells = vtk_to_numpy(polydata.GetPolys().GetData())
-    faces = cells.reshape(-1, 4)[:, 1:4]
+    verts = np.concatenate(all_verts)
+    faces = np.concatenate(all_faces)
+    colors = np.concatenate(all_colors)
     
-    uvs = None
-    tcoords = polydata.GetPointData().GetTCoords()
-    if tcoords is not None:
-        uvs = vtk_to_numpy(tcoords)
-    elif polydata.GetPointData().HasArray('colormap'):
-        uvs = vtk_to_numpy(polydata.GetPointData().GetArray('colormap'))
-
-    # Resolve texture path
-    tex_path = os.path.join(directory, "Textures", texture_file)
-    if not os.path.exists(tex_path):
-        parent_dir = os.path.dirname(directory)
-        tex_path = os.path.join(parent_dir, "Textures", texture_file)
-        
-    surf = actor.surface(verts, faces, texture=tex_path, texture_coords=uvs)
+    # Ensure colors are RGBA float32 for pygfx
+    colors_rgba = np.ones((len(colors), 4), dtype=np.float32)
+    colors_rgba[:, :3] = colors
+    
+    surf = actor.surface(verts, faces, colors=colors_rgba)
     return surf
 
-def load_kenney_model(directory, filename, texture_file, scale=1.0, position=None, rotation_y=0.0):
+def load_kenney_model(directory, filename, scale=1.0, position=None, rotation_y=0.0, color=None):
     """Load a single Kenney model dynamically (used for animated cars)."""
-    base_pd = get_base_polydata(directory, filename)
-    verts = vtk_to_numpy(base_pd.GetPoints().GetData()).copy()
+    v, f, c = get_base_mesh(directory, filename)
+    v = v.copy()
     
     # Pre-rotate vertices for dynamic objects so they drive forward natively
     if rotation_y != 0.0:
         angle = np.radians(rotation_y)
-        c, s = np.cos(angle), np.sin(angle)
-        verts_x = verts[:, 0] * c + verts[:, 2] * s
-        verts_z = -verts[:, 0] * s + verts[:, 2] * c
-        verts[:, 0] = verts_x
-        verts[:, 2] = verts_z
+        c_val, s_val = np.cos(angle), np.sin(angle)
+        v_x = v[:, 0] * c_val + v[:, 2] * s_val
+        v_z = -v[:, 0] * s_val + v[:, 2] * c_val
+        v[:, 0] = v_x
+        v[:, 2] = v_z
 
-    cells = vtk_to_numpy(base_pd.GetPolys().GetData())
-    faces = cells.reshape(-1, 4)[:, 1:4]
-    
-    uvs = None
-    tcoords = base_pd.GetPointData().GetTCoords()
-    if tcoords is not None:
-        uvs = vtk_to_numpy(tcoords)
-    elif base_pd.GetPointData().HasArray('colormap'):
-        uvs = vtk_to_numpy(base_pd.GetPointData().GetArray('colormap'))
-
-    tex_path = os.path.join(directory, "Textures", texture_file)
-    if not os.path.exists(tex_path):
-        parent_dir = os.path.dirname(directory)
-        tex_path = os.path.join(parent_dir, "Textures", texture_file)
+    if c is not None and c.shape == v.shape and not (c.max() <= 1.0 and c.min() >= -1.0 and np.allclose(np.linalg.norm(c, axis=1), 1.0, atol=0.1)):
+        # Valid vertex colors
+        colors = c
+    else:
+        fallback = color if color is not None else (0.5, 0.5, 0.5)
+        colors = np.full((len(v), 3), fallback, dtype=np.float32)
         
-    surf = actor.surface(verts, faces, texture=tex_path, texture_coords=uvs)
+    colors_rgba = np.ones((len(colors), 4), dtype=np.float32)
+    colors_rgba[:, :3] = colors
+
+    surf = actor.surface(v, f, colors=colors_rgba)
     surf.local.scale = [scale, scale, scale]
     if position is not None:
         surf.local.position = list(position)
@@ -148,7 +146,7 @@ scene.background = (0.53, 0.81, 0.92)
 ground = actor.box(
     centers=np.array([[0.0, -0.25, 0.0]]),
     colors=(0.4, 0.45, 0.4),  # Grass color for the ground under the city
-    scales=(2000, 0.5, 2000),
+    scales=(3000, 0.5, 3000),
 )
 scene.add(ground)
 
@@ -156,7 +154,7 @@ scene.add(ground)
 sun = actor.sphere(
     centers=np.array([[0.0, 0.0, 0.0]]),
     colors=(1.0, 1.0, 0.8),
-    radii=40.0,
+    radii=60.0,
 )
 sun.local.position = [400.0, 300.0, 500.0]
 scene.add(sun)
@@ -169,7 +167,7 @@ np.random.seed(42)
 BLOCK_SIZE = 70.0
 ROAD_WIDTH = 14.0
 BUILDING_SCALE = 12.0
-GRID_SIZE = 6  # Grid goes from -GRID_SIZE to GRID_SIZE
+GRID_SIZE = 8  # Expanded grid size (17x17 roads)
 
 BUILDING_MODELS = [
     f"building-{c}.obj" for c in ['a','b','c','d','e','f','g','h']
@@ -260,11 +258,11 @@ def generate_static_city():
                 )
 
     logger.info(f"Batching {len(road_instances)} road tiles...")
-    roads_actor = create_batched_actor(ROAD_KIT_DIR, "colormap.png", road_instances)
+    roads_actor = create_batched_actor(ROAD_KIT_DIR, road_instances, extract_colors=True)
     scene.add(roads_actor)
 
     logger.info(f"Batching {len(building_instances)} buildings...")
-    buildings_actor = create_batched_actor(CITY_KIT_DIR, "variation-b.png", building_instances)
+    buildings_actor = create_batched_actor(CITY_KIT_DIR, building_instances, default_color=(0.85, 0.85, 0.85), extract_colors=False)
     scene.add(buildings_actor)
 
 generate_static_city()
@@ -299,9 +297,13 @@ for mi, start_coord, lane, speed_f, direction, is_x_axis in car_routes:
         rot_y = 0.0 if direction > 0 else 180.0
         start_pos = (lane, 0.0, start_coord)
 
+    # Random vibrant colors for cars
+    random_car_color = (np.random.uniform(0.2, 1.0), np.random.uniform(0.2, 1.0), np.random.uniform(0.2, 1.0))
+    
     car = load_kenney_model(
-        CAR_KIT_DIR, model_name, "colormap.png", scale=3.5, 
-        position=start_pos, rotation_y=rot_y
+        CAR_KIT_DIR, model_name, scale=3.5, 
+        position=start_pos, rotation_y=rot_y,
+        color=random_car_color
     )
     scene.add(car)
 
@@ -338,43 +340,43 @@ camera_anim = CameraAnimation(loop=True)
 
 # Path navigating the dense grid
 camera_positions = {
-    # Start above a road
-    0.0: np.array([-210.0, 15.0, 0.0]),
-    4.0: np.array([-140.0, 15.0, 0.0]),
-    8.0: np.array([-70.0, 15.0, 0.0]),
+    # Start high above a road
+    0.0: np.array([-210.0, 25.0, 0.0]),
+    4.0: np.array([-140.0, 25.0, 0.0]),
+    8.0: np.array([-70.0, 25.0, 0.0]),
     # Ascend
-    10.0: np.array([0.0, 35.0, 0.0]),
-    14.0: np.array([0.0, 120.0, 0.0]),
+    10.0: np.array([0.0, 45.0, 0.0]),
+    14.0: np.array([0.0, 150.0, 0.0]),
     # High altitude panorama
-    18.0: np.array([120.0, 150.0, 120.0]),
-    22.0: np.array([-50.0, 140.0, 180.0]),
-    26.0: np.array([-150.0, 120.0, 80.0]),
+    18.0: np.array([150.0, 180.0, 150.0]),
+    22.0: np.array([-50.0, 170.0, 220.0]),
+    26.0: np.array([-180.0, 150.0, 100.0]),
     # Dive into a cross street
-    28.0: np.array([-70.0, 50.0, 70.0]),
-    30.0: np.array([-70.0, 15.0, 0.0]),
+    28.0: np.array([-70.0, 70.0, 70.0]),
+    30.0: np.array([-70.0, 25.0, 0.0]),
     # Zip down street
-    34.0: np.array([-70.0, 15.0, -140.0]),
+    34.0: np.array([-70.0, 25.0, -140.0]),
     # Ascend and fly back to start
-    38.0: np.array([-140.0, 50.0, -140.0]),
-    42.0: np.array([-210.0, 80.0, -70.0]),
-    45.0: np.array([-210.0, 15.0, 0.0]),
+    38.0: np.array([-140.0, 70.0, -140.0]),
+    42.0: np.array([-210.0, 100.0, -70.0]),
+    45.0: np.array([-210.0, 25.0, 0.0]),
 }
 
 camera_focals = {
-    0.0: np.array([-140.0, 10.0, 0.0]),
-    4.0: np.array([-70.0, 10.0, 0.0]),
-    8.0: np.array([0.0, 10.0, 0.0]),
-    10.0: np.array([0.0, 35.0, 50.0]),
+    0.0: np.array([-140.0, 15.0, 0.0]),
+    4.0: np.array([-70.0, 15.0, 0.0]),
+    8.0: np.array([0.0, 15.0, 0.0]),
+    10.0: np.array([0.0, 45.0, 50.0]),
     14.0: np.array([0.0, 40.0, -50.0]),
     18.0: np.array([0.0, 40.0, 0.0]),
     22.0: np.array([0.0, 40.0, 0.0]),
     26.0: np.array([0.0, 40.0, 0.0]),
-    28.0: np.array([-70.0, 15.0, 0.0]),
-    30.0: np.array([-70.0, 10.0, -70.0]),
-    34.0: np.array([-70.0, 10.0, -210.0]),
-    38.0: np.array([0.0, 10.0, 0.0]),
-    42.0: np.array([0.0, 10.0, 0.0]),
-    45.0: np.array([-140.0, 10.0, 0.0]),
+    28.0: np.array([-70.0, 20.0, 0.0]),
+    30.0: np.array([-70.0, 15.0, -70.0]),
+    34.0: np.array([-70.0, 15.0, -210.0]),
+    38.0: np.array([0.0, 15.0, 0.0]),
+    42.0: np.array([0.0, 15.0, 0.0]),
+    45.0: np.array([-140.0, 15.0, 0.0]),
 }
 
 camera_view_ups = {
@@ -389,11 +391,12 @@ camera_view_ups = {
     45.0: np.array([0.0, 1.0, 0.0]),
 }
 
+# Linear interpolator to strictly follow the path and prevent over-shooting into buildings
 camera_anim.set_position_keyframes(camera_positions)
 camera_anim.set_focal_keyframes(camera_focals)
 camera_anim.set_view_up_keyframes(camera_view_ups)
 
-camera_anim.set_position_interpolator(cubic_spline_interpolator)
+camera_anim.set_position_interpolator(linear_interpolator)
 camera_anim.set_focal_interpolator(linear_interpolator)
 camera_anim.set_view_up_interpolator(linear_interpolator)
 
@@ -406,7 +409,7 @@ if __name__ == "__main__":
     showm = window.ShowManager(
         scene=scene,
         size=(1280, 768),
-        title="FURY City Drone Shot — Optimized Geometry Batching",
+        title="FURY City Drone Shot — Optimized Pure NumPy Backend",
     )
     showm.add_animation(timeline)
     showm.start()
