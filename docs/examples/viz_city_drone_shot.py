@@ -327,15 +327,15 @@ car_animations = []
 NUM_CARS = 75
 
 # Add a "Hero Car" for the drone to follow in the first scene
-# It starts at Z=-400, drives along X=0, lane=4.0
-hero_car = load_kenney_model(CAR_KIT_DIR, "hatchback-sports.obj", "colormap.png", scale=3.5, position=(0.0, 0.0, -400.0), rotation_y=0.0)
+# It starts at Z=-380, drives along X=0, lane=4.0
+hero_car = load_kenney_model(CAR_KIT_DIR, "hatchback-sports.obj", "colormap.png", scale=3.5, position=(0.0, 0.0, -380.0), rotation_y=0.0)
 scene.add(hero_car)
 hero_anim = Animation(actors=hero_car, loop=True)
-hero_speed = 1000.0  # Needs to travel far in 30s
+hero_speed = 1985.0  # Speed mathematically calibrated to exactly pace the camera tracking
 for ki in range(11):
     t = (ki / 10.0) * ANIMATION_DURATION
     progress = ki / 10.0
-    z_pos = -400.0 + (hero_speed * progress)
+    z_pos = -380.0 + (hero_speed * progress)
     hero_anim.set_position(t, np.array([4.0, 0.0, z_pos]))
 hero_anim.set_position_interpolator(cubic_spline_interpolator)
 car_animations.append(hero_anim)
@@ -396,56 +396,30 @@ logger.info(f"Created {len(car_animations)} animated Kenney cars")
 
 camera_anim = CameraAnimation(loop=True)
 
-# Cinematic 45s action sequence with carefully clamped spline curves
+# Cinematic 45s action sequence mathematically paced for constant speed!
 camera_positions = {
-    # 0-8s: Following the Hero Car down the main avenue
-    0.0: np.array([4.0, 15.0, -450.0]),
-    4.0: np.array([4.0, 15.0, -200.0]),
-    8.0: np.array([4.0, 15.0, 50.0]),
-    
-    # 8-16s: Break away and ascend into a beautiful panorama
-    12.0: np.array([-70.0, 80.0, 100.0]), # Intermediate step to prevent spline dip
-    16.0: np.array([-140.0, 150.0, 140.0]),
-    
-    # 16-24s: Approach the Colossal Skyscraper at Block (1,1)
-    20.0: np.array([-20.0, 80.0, 70.0]),
-    24.0: np.array([105.0, 20.0, 0.0]),
-    
-    # 24-30s: The Climb (fly alongside the glass looking up, offset by 45 units to avoid FOV clip)
-    27.0: np.array([150.0, 150.0, 105.0]),
-    30.0: np.array([150.0, 240.0, 105.0]),
-    
-    # 30-36s: The Stunt (Flip over the roof)
-    36.0: np.array([140.0, 280.0, 140.0]),
-    
-    # 36-45s: Plummet back down into a street and catch up to the start loop
-    41.0: np.array([70.0, 80.0, -150.0]), # Brake point to prevent ground crash!
-    45.0: np.array([4.0, 15.0, -450.0]),
+    0.0: np.array([4.0, 20.0, -430.0]),   # Behind car
+    3.0: np.array([4.0, 20.0, -280.0]),   # Clamp spline to horizontal at loop start
+    6.8: np.array([4.0, 20.0, -130.0]),   # Tracking car
+    14.4: np.array([-140.0, 150.0, 140.0]), # Panorama
+    23.6: np.array([250.0, 50.0, 105.0]),   # Approach Skyscraper from a majestic distance
+    28.0: np.array([250.0, 240.0, 105.0]),  # Climb alongside it
+    30.0: np.array([250.0, 280.0, 140.0]),  # Flip over roof
+    37.6: np.array([150.0, 80.0, -150.0]),  # Dive back down
+    41.5: np.array([40.0, 20.0, -320.0]),   # Level out of dive before loop ends
+    45.0: np.array([4.0, 20.0, -430.0]),    # Loop back horizontally
 }
 
 camera_focals = {
-    # Looking at the Hero Car
-    0.0: np.array([4.0, 5.0, -380.0]),
-    4.0: np.array([4.0, 5.0, -130.0]),
-    8.0: np.array([4.0, 5.0, 120.0]),
-    
-    # Looking down at the city during panorama
-    12.0: np.array([-40.0, 50.0, 90.0]),
-    16.0: np.array([0.0, 50.0, 70.0]),
-    
-    # Looking AT the Colossal Skyscraper's base
-    20.0: np.array([40.0, 40.0, 40.0]),
-    24.0: np.array([105.0, 50.0, 105.0]),
-    
-    # Looking at the building center while climbing alongside it
-    27.0: np.array([105.0, 250.0, 105.0]),
-    30.0: np.array([105.0, 300.0, 105.0]),
-    
-    # Looking over the roof during the flip stunt
-    36.0: np.array([70.0, 200.0, 70.0]),
-    
-    # Looking down the street to loop
-    41.0: np.array([20.0, 25.0, -250.0]),
+    0.0: np.array([4.0, 5.0, -380.0]),     # Look directly at Hero Car
+    3.0: np.array([4.0, 5.0, -230.0]),     # Look directly at Hero Car
+    6.8: np.array([4.0, 5.0, -80.0]),      # Track car maintaining 50 units ahead
+    14.4: np.array([0.0, 50.0, 70.0]),     # Look down at city
+    23.6: np.array([105.0, 50.0, 105.0]),  # Look at Colossal Skyscraper base
+    28.0: np.array([105.0, 250.0, 105.0]), # Look at the building center while climbing
+    30.0: np.array([105.0, 300.0, 105.0]), # Look up during flip apex
+    37.6: np.array([4.0, 20.0, -250.0]),   # Look down street
+    41.5: np.array([4.0, 10.0, -320.0]),   # Look down street
     45.0: np.array([4.0, 5.0, -380.0]),
 }
 
@@ -454,19 +428,17 @@ camera_focals = {
 # and avoid passing through (0,0,0) which crashes linear interpolators.
 camera_view_ups = {
     0.0: np.array([0.0, 1.0, 0.0]),
-    24.0: np.array([0.0, 1.0, 0.0]),
-    
-    # Tilt slightly back while climbing
-    27.0: np.array([0.0, 0.707, -0.707]),
-    28.5: np.array([0.0, 0.0, -1.0]),
+    28.0: np.array([0.0, 1.0, 0.0]),
     
     # The Pitch-Loop Stunt over the roof!
-    30.0: np.array([0.0, -0.707, -0.707]),
-    32.0: np.array([0.0, -1.0, 0.0]),      # Upside down!
-    34.0: np.array([0.0, -0.707, 0.707]),
-    35.0: np.array([0.0, 0.0, 1.0]),       # Pitching forward
-    36.0: np.array([0.0, 0.707, 0.707]),
-    38.0: np.array([0.0, 1.0, 0.0]),        # Right side up!
+    28.5: np.array([0.0, 0.707, -0.707]),
+    29.0: np.array([0.0, 0.0, -1.0]),
+    29.5: np.array([0.0, -0.707, -0.707]),
+    30.0: np.array([0.0, -1.0, 0.0]),      # Apex upside down!
+    31.9: np.array([0.0, -0.707, 0.707]),
+    33.8: np.array([0.0, 0.0, 1.0]),       # Pitching forward
+    35.7: np.array([0.0, 0.707, 0.707]),
+    37.6: np.array([0.0, 1.0, 0.0]),       # Right side up!
     
     45.0: np.array([0.0, 1.0, 0.0]),
 }
@@ -475,36 +447,8 @@ camera_anim.set_position_keyframes(camera_positions)
 camera_anim.set_focal_keyframes(camera_focals)
 camera_anim.set_view_up_keyframes(camera_view_ups)
 
-def physics_aware_camera_spline(keyframes, **kwargs):
-    """
-    Custom wrapper to evaluate the spline and apply continuous Raycast 
-    Collision detection, ensuring the camera acts as a physical object.
-    """
-    base_eval = cubic_spline_interpolator(keyframes, **kwargs)
-    
-    def evaluator(t):
-        pos = base_eval(t).copy()
-        
-        # 1. Ground Collision (Altitude clamp to prevent underground dips)
-        if pos[1] < 15.0:
-            pos[1] = 15.0
-            
-        # 2. Skyscraper Raycast Collision
-        # Colossal Skyscraper Center: X=105, Z=105.
-        # Safe collision radius: 35.0 (This also handles Near Clip Adjust by preventing FOV slicing!)
-        dx = pos[0] - 105.0
-        dz = pos[2] - 105.0
-        dist = np.sqrt(dx**2 + dz**2)
-        if dist < 35.0 and pos[1] < 300.0: # Only collide if we aren't above the roof!
-            # Snap the camera safely outside the geometry bounding box
-            pos[0] = 105.0 + (dx/dist) * 35.0
-            pos[2] = 105.0 + (dz/dist) * 35.0
-            
-        return pos
-    return evaluator
-
-# Apply physical collision wrapper for camera position
-camera_anim.set_position_interpolator(physics_aware_camera_spline)
+# Use standard cubic spline for buttery smooth cinematic motion & stunts
+camera_anim.set_position_interpolator(cubic_spline_interpolator)
 camera_anim.set_focal_interpolator(cubic_spline_interpolator)
 # Use linear for view_up to avoid spline duplicate value errors
 camera_anim.set_view_up_interpolator(linear_interpolator)
