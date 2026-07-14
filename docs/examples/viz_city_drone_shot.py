@@ -458,6 +458,20 @@ timeline.add_animation(camera_anim)
 for ca in car_animations:
     timeline.add_animation(ca)
 
+# Force UI elements to render on top of all 3D geometry
+def bring_ui_to_front(element):
+    if hasattr(element, 'actors'):
+        for a in element.actors:
+            if hasattr(a, 'material'):
+                a.material.depth_test = False
+            # a.render_order = 100 is not universally available, but depth_test is sufficient
+    if hasattr(element, '_children'):
+        for c in element._children:
+            bring_ui_to_front(c)
+
+if hasattr(timeline, 'playback_panel'):
+    bring_ui_to_front(timeline.playback_panel)
+
 if __name__ == "__main__":
     showm = window.ShowManager(
         scene=scene,
