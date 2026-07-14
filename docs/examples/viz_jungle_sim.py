@@ -439,7 +439,7 @@ scene.add(info_panel)
 # Controls Panel - Now a TabUI container separating factors
 control_panel = ui.TabUI(
     position=(15, 235),
-    size=(340, 620),
+    size=(340, 700),
     tab_titles=["Global", "Lion", "Elephant", "Deer"],
     startup_tab_id=0,
     font_size=16,
@@ -458,105 +458,119 @@ lbl_g_title = ui.TextBlock2D(
 )
 control_panel.add_element(0, lbl_g_title, (20, 15))
 
+start_y = 70
+y_step = 45
+current_y = start_y
+
 slider_g_speed = ui.LineSlider2D(
-    position=(20, 50),
+    position=(20, current_y),
     initial_value=1.0,
     min_value=0.0,
     max_value=3.0,
     length=180,
     text_template="Speed Factor: {value:.1f}x",
 )
-control_panel.add_element(0, slider_g_speed, (20, 50))
+control_panel.add_element(0, slider_g_speed, (20, current_y))
+current_y += y_step
 
 slider_g_hunger = ui.LineSlider2D(
-    position=(20, 95),
+    position=(20, current_y),
     initial_value=1.0,
     min_value=0.0,
     max_value=3.0,
     length=180,
     text_template="Hunger Factor: {value:.1f}x",
 )
-control_panel.add_element(0, slider_g_hunger, (20, 95))
+control_panel.add_element(0, slider_g_hunger, (20, current_y))
+current_y += y_step
 
 slider_g_thirst = ui.LineSlider2D(
-    position=(20, 140),
+    position=(20, current_y),
     initial_value=1.0,
     min_value=0.0,
     max_value=3.0,
     length=180,
     text_template="Thirst Factor: {value:.1f}x",
 )
-control_panel.add_element(0, slider_g_thirst, (20, 140))
+control_panel.add_element(0, slider_g_thirst, (20, current_y))
+current_y += y_step
 
 slider_g_age = ui.LineSlider2D(
-    position=(20, 185),
+    position=(20, current_y),
     initial_value=1.0,
     min_value=0.0,
     max_value=3.0,
     length=180,
     text_template="Age Factor: {value:.1f}x",
 )
-control_panel.add_element(0, slider_g_age, (20, 185))
+control_panel.add_element(0, slider_g_age, (20, current_y))
+current_y += y_step
 
 slider_g_mating = ui.LineSlider2D(
-    position=(20, 230),
+    position=(20, current_y),
     initial_value=1.0,
     min_value=0.0,
     max_value=3.0,
     length=180,
     text_template="Mating Factor: {value:.1f}x",
 )
-control_panel.add_element(0, slider_g_mating, (20, 230))
+control_panel.add_element(0, slider_g_mating, (20, current_y))
+current_y += y_step
 
 slider_g_hunting = ui.LineSlider2D(
-    position=(20, 275),
+    position=(20, current_y),
     initial_value=1.0,
     min_value=0.0,
     max_value=3.0,
     length=180,
     text_template="Hunting Factor: {value:.1f}x",
 )
-control_panel.add_element(0, slider_g_hunting, (20, 275))
+control_panel.add_element(0, slider_g_hunting, (20, current_y))
+current_y += y_step
 
 lbl_g_sim = ui.TextBlock2D(
     text="SIMULATION RATE CONTROLS",
-    position=(20, 320),
+    position=(20, current_y),
     font_size=15,
     color=(0.95, 0.8, 0.2),
     bold=True,
     dynamic_bbox=True,
 )
-control_panel.add_element(0, lbl_g_sim, (20, 320))
+control_panel.add_element(0, lbl_g_sim, (20, current_y))
+current_y += 70
 
 slider_global_coh = ui.LineSlider2D(
-    position=(20, 350),
+    position=(20, current_y),
     initial_value=1.0,
     min_value=0.0,
     max_value=3.0,
     length=180,
     text_template="Cohesion Mult: {value:.1f}",
 )
-control_panel.add_element(0, slider_global_coh, (20, 350))
+control_panel.add_element(0, slider_global_coh, (20, current_y))
+current_y += y_step
 
 slider_global_sep = ui.LineSlider2D(
-    position=(20, 395),
+    position=(20, current_y),
     initial_value=1.0,
     min_value=0.0,
     max_value=3.0,
     length=180,
     text_template="Separation Mult: {value:.1f}",
 )
-control_panel.add_element(0, slider_global_sep, (20, 395))
+control_panel.add_element(0, slider_global_sep, (20, current_y))
+current_y += y_step
 
 slider_global_speed = ui.LineSlider2D(
-    position=(20, 440),
+    position=(20, current_y),
     initial_value=1.0,
     min_value=1.0,
     max_value=10.0,
     length=180,
     text_template="Sim Speed: {value:.1f}x",
 )
-control_panel.add_element(0, slider_global_speed, (20, 440))
+control_panel.add_element(0, slider_global_speed, (20, current_y))
+current_y += y_step
 
 # Reset button
 btn_states_reset = {
@@ -566,11 +580,11 @@ btn_states_reset = {
 }
 btn_reset = ui.TextButton2D(
     label="RESET ALL FACTORS",
-    size=(180, 25),
-    position=(20, 490),
+    size=(250, 25),
+    position=(20, current_y),
     states=btn_states_reset,
 )
-control_panel.add_element(0, btn_reset, (20, 490))
+control_panel.add_element(0, btn_reset, (20, current_y))
 
 
 # Global callbacks
@@ -636,65 +650,74 @@ def build_species_tab(tab_idx, species_name):
     )
     control_panel.add_element(tab_idx, lbl_title, (20, 15))
 
+    start_y = 70
+    y_step = 45
+    current_y = start_y
+
     s_speed = ui.LineSlider2D(
-        position=(20, 50),
+        position=(20, current_y),
         initial_value=1.0,
         min_value=0.0,
         max_value=3.0,
         length=180,
         text_template="Speed Factor: {value:.1f}x",
     )
-    control_panel.add_element(tab_idx, s_speed, (20, 50))
+    control_panel.add_element(tab_idx, s_speed, (20, current_y))
+    current_y += y_step
 
     s_hunger = ui.LineSlider2D(
-        position=(20, 95),
+        position=(20, current_y),
         initial_value=1.0,
         min_value=0.0,
         max_value=3.0,
         length=180,
         text_template="Hunger Factor: {value:.1f}x",
     )
-    control_panel.add_element(tab_idx, s_hunger, (20, 95))
+    control_panel.add_element(tab_idx, s_hunger, (20, current_y))
+    current_y += y_step
 
     s_thirst = ui.LineSlider2D(
-        position=(20, 140),
+        position=(20, current_y),
         initial_value=1.0,
         min_value=0.0,
         max_value=3.0,
         length=180,
         text_template="Thirst Factor: {value:.1f}x",
     )
-    control_panel.add_element(tab_idx, s_thirst, (20, 140))
+    control_panel.add_element(tab_idx, s_thirst, (20, current_y))
+    current_y += y_step
 
     s_age = ui.LineSlider2D(
-        position=(20, 185),
+        position=(20, current_y),
         initial_value=1.0,
         min_value=0.0,
         max_value=3.0,
         length=180,
         text_template="Age Factor: {value:.1f}x",
     )
-    control_panel.add_element(tab_idx, s_age, (20, 185))
+    control_panel.add_element(tab_idx, s_age, (20, current_y))
+    current_y += y_step
 
     s_mating = ui.LineSlider2D(
-        position=(20, 230),
+        position=(20, current_y),
         initial_value=1.0,
         min_value=0.0,
         max_value=3.0,
         length=180,
         text_template="Mating Factor: {value:.1f}x",
     )
-    control_panel.add_element(tab_idx, s_mating, (20, 230))
+    control_panel.add_element(tab_idx, s_mating, (20, current_y))
+    current_y += y_step
 
     s_hunting = ui.LineSlider2D(
-        position=(20, 275),
+        position=(20, current_y),
         initial_value=1.0,
         min_value=0.0,
         max_value=3.0,
         length=180,
         text_template="Hunting Factor: {value:.1f}x",
     )
-    control_panel.add_element(tab_idx, s_hunting, (20, 275))
+    control_panel.add_element(tab_idx, s_hunting, (20, current_y))
 
     # Event bindings
     s_speed.on_change = lambda sl: state.update(
