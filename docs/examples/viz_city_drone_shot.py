@@ -374,66 +374,62 @@ logger.info(f"Created {len(car_animations)} animated Kenney cars")
 
 camera_anim = CameraAnimation(loop=True)
 
-# Path navigating the dense grid
+# Cinematic, perfectly smooth path that stays strictly on roads to avoid building clipping
 camera_positions = {
-    # Start high above a road
-    0.0: np.array([-210.0, 25.0, 0.0]),
-    4.0: np.array([-140.0, 25.0, 0.0]),
-    8.0: np.array([-70.0, 25.0, 0.0]),
-    # Ascend
-    10.0: np.array([0.0, 45.0, 0.0]),
-    14.0: np.array([0.0, 150.0, 0.0]),
-    # High altitude panorama
-    18.0: np.array([150.0, 180.0, 150.0]),
-    22.0: np.array([-50.0, 170.0, 220.0]),
-    26.0: np.array([-180.0, 150.0, 100.0]),
-    # Dive into a cross street
-    28.0: np.array([-70.0, 70.0, 70.0]),
-    30.0: np.array([-70.0, 25.0, 0.0]),
-    # Zip down street
-    34.0: np.array([-70.0, 25.0, -140.0]),
-    # Ascend and fly back to start
-    38.0: np.array([-140.0, 70.0, -140.0]),
-    42.0: np.array([-210.0, 100.0, -70.0]),
-    45.0: np.array([-210.0, 25.0, 0.0]),
+    # Drive straight down the main center Z-axis road
+    0.0: np.array([0.0, 20.0, 280.0]),
+    5.0: np.array([0.0, 20.0, 70.0]),
+    10.0: np.array([0.0, 20.0, -140.0]),
+    
+    # Ascend smoothly over the end of the road
+    15.0: np.array([0.0, 120.0, -280.0]),
+    
+    # High altitude sweeping curve over the city (well above buildings)
+    22.0: np.array([210.0, 180.0, -140.0]),
+    28.0: np.array([140.0, 160.0, 140.0]),
+    
+    # Dive back down directly into a horizontal X-axis road (Z=140)
+    35.0: np.array([-140.0, 20.0, 140.0]),
+    
+    # Drive straight along the Z=140 road back towards the center
+    40.0: np.array([-70.0, 20.0, 140.0]),
+    45.0: np.array([0.0, 20.0, 280.0]),
 }
 
 camera_focals = {
-    0.0: np.array([-140.0, 15.0, 0.0]),
-    4.0: np.array([-70.0, 15.0, 0.0]),
-    8.0: np.array([0.0, 15.0, 0.0]),
-    10.0: np.array([0.0, 45.0, 50.0]),
-    14.0: np.array([0.0, 40.0, -50.0]),
-    18.0: np.array([0.0, 40.0, 0.0]),
-    22.0: np.array([0.0, 40.0, 0.0]),
-    26.0: np.array([0.0, 40.0, 0.0]),
-    28.0: np.array([-70.0, 20.0, 0.0]),
-    30.0: np.array([-70.0, 15.0, -70.0]),
-    34.0: np.array([-70.0, 15.0, -210.0]),
-    38.0: np.array([0.0, 15.0, 0.0]),
-    42.0: np.array([0.0, 15.0, 0.0]),
-    45.0: np.array([-140.0, 15.0, 0.0]),
+    # Look straight ahead down the road
+    0.0: np.array([0.0, 15.0, 210.0]),
+    5.0: np.array([0.0, 15.0, 0.0]),
+    10.0: np.array([0.0, 15.0, -210.0]),
+    
+    # Look slightly forward while ascending
+    15.0: np.array([0.0, 80.0, -350.0]),
+    
+    # Look gracefully at the city center during the high sweep
+    22.0: np.array([0.0, 50.0, 0.0]),
+    28.0: np.array([10.0, 50.0, 10.0]), # Slight offset to prevent spline distance=0 error
+    
+    # Look down the new road during the dive
+    35.0: np.array([-70.0, 15.0, 140.0]),
+    
+    # Look ahead as we merge back
+    40.0: np.array([0.0, 15.0, 140.0]),
+    45.0: np.array([0.0, 15.0, 210.0]),
 }
 
+# Keep view_up locked to prevent any 180-degree flips or gimbal locks
 camera_view_ups = {
     0.0: np.array([0.0, 1.0, 0.0]),
-    20.0: np.array([0.0, 1.0, 0.0]),
-    # Stunt barrel roll dive
-    27.0: np.array([0.0, 1.0, 0.0]),
-    27.5: np.array([1.0, 0.0, 0.0]),
-    28.0: np.array([0.0, -1.0, 0.0]),
-    28.5: np.array([-1.0, 0.0, 0.0]),
-    29.0: np.array([0.0, 1.0, 0.0]),
     45.0: np.array([0.0, 1.0, 0.0]),
 }
 
-# Linear interpolator to strictly follow the path and prevent over-shooting into buildings
 camera_anim.set_position_keyframes(camera_positions)
 camera_anim.set_focal_keyframes(camera_focals)
 camera_anim.set_view_up_keyframes(camera_view_ups)
 
-camera_anim.set_position_interpolator(linear_interpolator)
-camera_anim.set_focal_interpolator(linear_interpolator)
+# Use cubic spline for buttery smooth cinematic motion
+camera_anim.set_position_interpolator(cubic_spline_interpolator)
+camera_anim.set_focal_interpolator(cubic_spline_interpolator)
 camera_anim.set_view_up_interpolator(linear_interpolator)
 
 timeline = Timeline(playback_panel=True, loop=True)
