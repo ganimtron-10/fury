@@ -5,9 +5,8 @@ City Drone Shot: Cinematic Flythrough in FURY
 
 A cinematic drone fly-through of a procedurally generated 3D city using
 FURY's ``fury.motion`` animation system. The camera path is defined via
-``CameraAnimation`` keyframes with linear interpolation to prevent clipping,
-traffic is animated via ``Animation`` objects, and the entire show is 
-orchestrated by a ``Timeline`` with an interactive playback panel.
+``CameraAnimation`` keyframes with cubic spline interpolation for perfectly 
+smooth, cinematic motion. It tracks cars, climbs skyscrapers, and performs stunts!
 
 3D models are loaded from Kenney's Car Kit and City Kit (low-poly OBJ files).
 Static city geometry (thousands of road tiles and buildings) is heavily optimized
@@ -81,8 +80,6 @@ def load_obj(path):
     
     if uvs is not None and len(uvs) > 0 and np.all(uv_indices != -1):
         flattened_uvs = uvs[uv_indices.flatten()]
-        # FURY images are typically bottom-left origin, some OBJs are top-left
-        # If textures look flipped, this can be inverted: flattened_uvs[:, 1] = 1.0 - flattened_uvs[:, 1]
     else:
         flattened_uvs = None
         
@@ -113,7 +110,10 @@ def create_batched_actor(directory, instances, texture_file=None):
         v = v.copy()
         
         # Apply scale
-        v = v * scale
+        if isinstance(scale, (list, tuple, np.ndarray)):
+            v = v * np.array(scale)
+        else:
+            v = v * scale
         
         # Apply Y-rotation
         if rot_y != 0.0:
@@ -261,12 +261,8 @@ def generate_static_city():
             block_cx = ix * BLOCK_SIZE + BLOCK_SIZE / 2.0
             block_cz = iz * BLOCK_SIZE + BLOCK_SIZE / 2.0
             
-            # Determine if this is a downtown block (skyscrapers)
-            dist_to_center = np.sqrt(block_cx**2 + block_cz**2)
-            is_downtown = dist_to_center < 100.0
-
             # Sometimes leave a block empty for a park
-            if not is_downtown and np.random.random() < 0.15:
+            if np.random.random() < 0.15:
                 continue
 
             offsets = [
@@ -275,7 +271,6 @@ def generate_static_city():
                 (-16, 16),  (0, 16),  (16, 16)
             ]
             
-            # Randomly pick 2 to 4 buildings per block to spread them out and reduce congestion
             num_buildings = np.random.randint(2, 5)
             chosen_indices = np.random.choice(len(offsets), num_buildings, replace=False)
             
@@ -284,7 +279,8 @@ def generate_static_city():
                 bx = block_cx + dx
                 bz = block_cz + dz
                 
-                if is_downtown and np.random.random() < 0.6:
+                # Scatter skyscrapers randomly across the entire city (20% chance)
+                if np.random.random() < 0.20:
                     model_name = SKYSCRAPER_MODELS[np.random.randint(0, len(SKYSCRAPER_MODELS))]
                     scale = np.random.uniform(BUILDING_SCALE * 1.2, BUILDING_SCALE * 1.8)
                 else:
@@ -296,12 +292,22 @@ def generate_static_city():
                     (model_name, scale, (bx, 0.0, bz), rot_angle)
                 )
 
+    # Hardcode a "Colossal Skyscraper" specifically for the drone stunt sequence
+    colossal_x = 70.0
+    colossal_z = 70.0
+    # Remove any existing buildings near the colossal spot to prevent overlap
+    building_instances = [b for b in building_instances if not (abs(b[2][0] - colossal_x) < 40 and abs(b[2][2] - colossal_z) < 40)]
+    
+    # Add the colossal skyscraper right in the middle of block (1, 1)
+    building_instances.append(
+        ("building-skyscraper-c.obj", (BUILDING_SCALE * 3.0, BUILDING_SCALE * 6.0, BUILDING_SCALE * 3.0), (colossal_x + 35.0, 0.0, colossal_z + 35.0), 0.0)
+    )
+
     logger.info(f"Batching {len(road_instances)} road tiles...")
     roads_actor = create_batched_actor(ROAD_KIT_DIR, road_instances, texture_file="colormap.png")
     scene.add(roads_actor)
 
     logger.info(f"Batching {len(building_instances)} buildings...")
-    # Use variation-a.png for standard white buildings as requested
     buildings_actor = create_batched_actor(CITY_KIT_DIR, building_instances, texture_file="variation-a.png")
     scene.add(buildings_actor)
 
@@ -311,20 +317,35 @@ generate_static_city()
 # Animated Traffic (Kenney Car Kit + fury.motion Animation)
 # =========================================================
 
-ANIMATION_DURATION = 45.0
+ANIMATION_DURATION = 30.0
 car_animations = []
-
-# Generate cars on random road segments
 NUM_CARS = 75
+
+# Add a "Hero Car" for the drone to follow in the first scene
+# It starts at Z=-400, drives along X=0, lane=4.0
+hero_car = load_kenney_model(CAR_KIT_DIR, "hatchback-sports.obj", "colormap.png", scale=3.5, position=(0.0, 0.0, -400.0), rotation_y=0.0)
+scene.add(hero_car)
+hero_anim = Animation(actors=hero_car, loop=True)
+hero_speed = 1000.0  # Needs to travel far in 30s
+for ki in range(11):
+    t = (ki / 10.0) * ANIMATION_DURATION
+    progress = ki / 10.0
+    z_pos = -400.0 + (hero_speed * progress)
+    hero_anim.set_position(t, np.array([4.0, 0.0, z_pos]))
+hero_anim.set_position_interpolator(cubic_spline_interpolator)
+car_animations.append(hero_anim)
+
+
 car_routes = []
 for i in range(NUM_CARS):
     is_x_axis = np.random.choice([True, False])
-    # Pick a random road line
     line = np.random.randint(-GRID_SIZE + 1, GRID_SIZE) * BLOCK_SIZE
     lane = line + np.random.choice([-4.0, 4.0])
     direction = 1 if lane < line else -1
     speed_f = np.random.uniform(0.7, 1.3)
-    start_coord = np.random.uniform(-GRID_SIZE * BLOCK_SIZE, GRID_SIZE * BLOCK_SIZE)
+    # Start cars FAR outside the city and drive completely through it 
+    # to avoid wrapping glitches!
+    start_coord = -900.0 * direction
     car_routes.append((i, start_coord, lane, speed_f, direction, is_x_axis))
 
 for mi, start_coord, lane, speed_f, direction, is_x_axis in car_routes:
@@ -344,17 +365,13 @@ for mi, start_coord, lane, speed_f, direction, is_x_axis in car_routes:
     scene.add(car)
 
     car_anim = Animation(actors=car, loop=True)
-    travel_dist = 280.0 * speed_f
+    travel_dist = 1800.0 * speed_f  # Travel all the way across the city grid
     n_kf = 10
     
-    bound = GRID_SIZE * BLOCK_SIZE + 20
-
     for ki in range(n_kf + 1):
         t = (ki / n_kf) * ANIMATION_DURATION
         progress = ki / n_kf
         val = start_coord + direction * travel_dist * progress
-        # Wrap within bounds
-        val = ((val + bound) % (2 * bound)) - bound
         
         if is_x_axis:
             pos = np.array([val, 0.0, lane])
@@ -369,67 +386,88 @@ for mi, start_coord, lane, speed_f, direction, is_x_axis in car_routes:
 logger.info(f"Created {len(car_animations)} animated Kenney cars")
 
 ###############################################################################
-# Camera Animation
-# ================
+# Camera Animation: Action Stunt Sequence
+# =======================================
 
 camera_anim = CameraAnimation(loop=True)
 
-# Cinematic, perfectly smooth path that stays strictly on roads to avoid building clipping
+# Cinematic 30s action sequence
 camera_positions = {
-    # Drive straight down the main center Z-axis road
-    0.0: np.array([0.0, 20.0, 280.0]),
-    5.0: np.array([0.0, 20.0, 70.0]),
-    10.0: np.array([0.0, 20.0, -140.0]),
+    # 0-5s: Following the Hero Car down the main avenue
+    0.0: np.array([4.0, 15.0, -450.0]),
+    2.5: np.array([4.0, 15.0, -200.0]),
+    5.0: np.array([4.0, 15.0, 50.0]),
     
-    # Ascend smoothly over the end of the road
-    15.0: np.array([0.0, 120.0, -280.0]),
+    # 5-10s: Break away and ascend into a beautiful panorama
+    10.0: np.array([-140.0, 150.0, 140.0]),
     
-    # High altitude sweeping curve over the city (well above buildings)
-    22.0: np.array([210.0, 180.0, -140.0]),
-    28.0: np.array([140.0, 160.0, 140.0]),
+    # 10-15s: Approach the Colossal Skyscraper at Block (1,1)
+    15.0: np.array([105.0, 20.0, 0.0]),
     
-    # Dive back down directly into a horizontal X-axis road (Z=140)
-    35.0: np.array([-140.0, 20.0, 140.0]),
+    # 15-20s: The Climb (fly inches away from the glass looking straight up)
+    17.0: np.array([105.0, 150.0, 105.0]),
+    20.0: np.array([105.0, 240.0, 105.0]),
     
-    # Drive straight along the Z=140 road back towards the center
-    40.0: np.array([-70.0, 20.0, 140.0]),
-    45.0: np.array([0.0, 20.0, 280.0]),
+    # 20-25s: The Stunt (Flip over the roof)
+    25.0: np.array([140.0, 260.0, 140.0]),
+    
+    # 25-30s: Plummet back down into a street and catch up to the start loop
+    30.0: np.array([4.0, 15.0, -450.0]),
 }
 
 camera_focals = {
-    # Look straight ahead down the road
-    0.0: np.array([0.0, 15.0, 210.0]),
-    5.0: np.array([0.0, 15.0, 0.0]),
-    10.0: np.array([0.0, 15.0, -210.0]),
+    # Looking at the Hero Car
+    0.0: np.array([4.0, 5.0, -380.0]),
+    2.5: np.array([4.0, 5.0, -130.0]),
+    5.0: np.array([4.0, 5.0, 120.0]),
     
-    # Look slightly forward while ascending
-    15.0: np.array([0.0, 80.0, -350.0]),
+    # Looking down at the city during panorama
+    10.0: np.array([0.0, 50.0, 70.0]),
     
-    # Look gracefully at the city center during the high sweep
-    22.0: np.array([0.0, 50.0, 0.0]),
-    28.0: np.array([10.0, 50.0, 10.0]), # Slight offset to prevent spline distance=0 error
+    # Looking AT the Colossal Skyscraper's base
+    15.0: np.array([105.0, 50.0, 105.0]),
     
-    # Look down the new road during the dive
-    35.0: np.array([-70.0, 15.0, 140.0]),
+    # Looking STRAIGHT UP while climbing the glass
+    17.0: np.array([105.0, 250.0, 105.0]),
+    20.0: np.array([105.0, 300.0, 105.0]),
     
-    # Look ahead as we merge back
-    40.0: np.array([0.0, 15.0, 140.0]),
-    45.0: np.array([0.0, 15.0, 210.0]),
+    # Looking over the roof during the flip stunt
+    25.0: np.array([70.0, 200.0, 70.0]),
+    
+    # Looking down the street to loop
+    30.0: np.array([4.0, 5.0, -380.0]),
 }
 
-# Keep view_up locked to prevent any 180-degree flips or gimbal locks
+# The View-Up Vector controls camera tilt and barrel rolls!
+# We step through 45-degree angles to create a clean pitch-loop 
+# and avoid passing through (0,0,0) which crashes linear interpolators.
 camera_view_ups = {
     0.0: np.array([0.0, 1.0, 0.0]),
-    45.0: np.array([0.0, 1.0, 0.0]),
+    15.0: np.array([0.0, 1.0, 0.0]),
+    
+    # Tilt slightly back while climbing
+    17.0: np.array([0.0, 0.707, -0.707]),
+    18.5: np.array([0.0, 0.0, -1.0]),
+    
+    # The Pitch-Loop Stunt over the roof!
+    20.0: np.array([0.0, -0.707, -0.707]),
+    21.25: np.array([0.0, -1.0, 0.0]),      # Upside down!
+    22.5: np.array([0.0, -0.707, 0.707]),
+    23.75: np.array([0.0, 0.0, 1.0]),       # Pitching forward
+    24.3: np.array([0.0, 0.707, 0.707]),
+    25.0: np.array([0.0, 1.0, 0.0]),        # Right side up!
+    
+    30.0: np.array([0.0, 1.0, 0.0]),
 }
 
 camera_anim.set_position_keyframes(camera_positions)
 camera_anim.set_focal_keyframes(camera_focals)
 camera_anim.set_view_up_keyframes(camera_view_ups)
 
-# Use cubic spline for buttery smooth cinematic motion
+# Use cubic spline for buttery smooth cinematic motion & stunts
 camera_anim.set_position_interpolator(cubic_spline_interpolator)
 camera_anim.set_focal_interpolator(cubic_spline_interpolator)
+# Use linear for view_up to avoid spline duplicate value errors
 camera_anim.set_view_up_interpolator(linear_interpolator)
 
 timeline = Timeline(playback_panel=True, loop=True)
@@ -441,7 +479,7 @@ if __name__ == "__main__":
     showm = window.ShowManager(
         scene=scene,
         size=(1280, 768),
-        title="FURY City Drone Shot — Optimized Pure NumPy Backend + Textures",
+        title="FURY City Drone Shot — Action Stunt Sequence",
     )
     showm.add_animation(timeline)
     showm.start()
