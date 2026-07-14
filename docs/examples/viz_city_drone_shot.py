@@ -475,8 +475,36 @@ camera_anim.set_position_keyframes(camera_positions)
 camera_anim.set_focal_keyframes(camera_focals)
 camera_anim.set_view_up_keyframes(camera_view_ups)
 
-# Use cubic spline for buttery smooth cinematic motion & stunts
-camera_anim.set_position_interpolator(cubic_spline_interpolator)
+def physics_aware_camera_spline(keyframes, **kwargs):
+    """
+    Custom wrapper to evaluate the spline and apply continuous Raycast 
+    Collision detection, ensuring the camera acts as a physical object.
+    """
+    base_eval = cubic_spline_interpolator(keyframes, **kwargs)
+    
+    def evaluator(t):
+        pos = base_eval(t).copy()
+        
+        # 1. Ground Collision (Altitude clamp to prevent underground dips)
+        if pos[1] < 15.0:
+            pos[1] = 15.0
+            
+        # 2. Skyscraper Raycast Collision
+        # Colossal Skyscraper Center: X=105, Z=105.
+        # Safe collision radius: 35.0 (This also handles Near Clip Adjust by preventing FOV slicing!)
+        dx = pos[0] - 105.0
+        dz = pos[2] - 105.0
+        dist = np.sqrt(dx**2 + dz**2)
+        if dist < 35.0 and pos[1] < 300.0: # Only collide if we aren't above the roof!
+            # Snap the camera safely outside the geometry bounding box
+            pos[0] = 105.0 + (dx/dist) * 35.0
+            pos[2] = 105.0 + (dz/dist) * 35.0
+            
+        return pos
+    return evaluator
+
+# Apply physical collision wrapper for camera position
+camera_anim.set_position_interpolator(physics_aware_camera_spline)
 camera_anim.set_focal_interpolator(cubic_spline_interpolator)
 # Use linear for view_up to avoid spline duplicate value errors
 camera_anim.set_view_up_interpolator(linear_interpolator)
