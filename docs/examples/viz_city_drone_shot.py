@@ -3,355 +3,306 @@
 City Drone Shot: Cinematic Flythrough in FURY
 =============================================
 
-A cinematic drone fly-through of a procedurally generated 3D city.
-The camera follows a scripted path that starts at street level, ascends
-to reveal the skyline panorama, performs aerial stunts (barrel roll, dive),
-swoops between buildings through moving traffic, and finishes with a
-sweeping landscape shot. Demonstrates FURY's animation capabilities
-including timer callbacks, manual camera control, quaternion-based rotations,
-and procedural scene construction from primitive actors.
+A cinematic drone fly-through of a procedurally generated 3D city using
+FURY's ``fury.motion`` animation system. The camera path is defined via
+``CameraAnimation`` keyframes with cubic spline interpolation, traffic
+is animated via ``Animation`` objects, and the entire show is orchestrated
+by a ``Timeline`` with an interactive playback panel.
 
-Controls:
-    The demo is fully automated — just sit back and enjoy the flight.
-    Close the window to exit.
+3D models are loaded from Kenney's Car Kit and City Kit (low-poly OBJ files)
+via ``fury.io.read_mesh`` + ``actor.surface``, combined with polyxios
+tree models for vegetation.
+
+Features:
+    - fury.motion Timeline with PlaybackPanel (play/pause/seek/speed)
+    - CameraAnimation with cubic spline keyframes through 6 flight phases
+    - Kenney city-kit buildings and skyscrapers (.obj)
+    - Kenney car-kit vehicles (.obj) animated along roads
+    - Polyxios tree.obj for street vegetation
+    - Organic random city layout with main boulevard and side streets
 """
 
+import logging
+import os
+
 import numpy as np
-from fury import actor, ui, window
+import polyxios as px
+
+from fury import actor, window
+from fury.io import read_mesh
+from fury.motion import (
+    Animation,
+    CameraAnimation,
+    Timeline,
+    cubic_spline_interpolator,
+    linear_interpolator,
+)
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 ###############################################################################
-# Mathematical Helpers
+# Asset Paths
+# ===========
+
+CAR_KIT_DIR = "/mnt/d/FuryWorkspace/fury-data/kenney_car-kit/Models/OBJ format"
+CITY_KIT_DIR = (
+    "/mnt/d/FuryWorkspace/fury-data/kenney_city-kit-commercial_2.1/Models/OBJ format"
+)
+
+###############################################################################
+# Model Loading Helper
 # ====================
-# Quaternion utilities for smooth camera rotation and barrel-roll stunts.
-# Catmull-Rom spline for buttery camera path interpolation between keyframes.
+
+import vtk
+from vtkmodules.util.numpy_support import vtk_to_numpy
 
 
-def axis_angle_to_quat(axis, angle_deg):
-    """Convert axis + angle (degrees) to unit quaternion [x,y,z,w]."""
-    angle_rad = np.radians(angle_deg)
-    s = np.sin(angle_rad / 2.0)
-    c = np.cos(angle_rad / 2.0)
-    return np.array([axis[0] * s, axis[1] * s, axis[2] * s, c])
+def load_kenney_model(
+    directory, filename, texture_file, scale=1.0, position=None, rotation_y=0.0
+):
+    """Load a Kenney .obj model with textures as a FURY surface actor."""
+    import vtkmodules.vtkCommonCore as vtk_core
+
+    vtk_core.vtkObject.GlobalWarningDisplayOff()
+
+    path = os.path.join(directory, filename)
+    reader = vtk.vtkOBJReader()
+    reader.SetFileName(path)
+    reader.Update()
+    polydata = reader.GetOutput()
+
+    verts = vtk_to_numpy(polydata.GetPoints().GetData()).copy()
+
+    # Rotate vertices around Y axis if needed (avoids FURY transform quirks for animations)
+    if rotation_y != 0.0:
+        angle = np.radians(rotation_y)
+        c, s = np.cos(angle), np.sin(angle)
+        verts_x = verts[:, 0] * c + verts[:, 2] * s
+        verts_z = -verts[:, 0] * s + verts[:, 2] * c
+        verts[:, 0] = verts_x
+        verts[:, 2] = verts_z
+
+    # VTK Polys might contain triangles or quads; assume triangles for simplicity
+    cells = vtk_to_numpy(polydata.GetPolys().GetData())
+    faces = cells.reshape(-1, 4)[:, 1:4]
+
+    uvs = None
+    tcoords = polydata.GetPointData().GetTCoords()
+    if tcoords is not None:
+        uvs = vtk_to_numpy(tcoords)
+    elif polydata.GetPointData().HasArray("colormap"):
+        # Some OBJ loaders put texture coords in 'colormap' array
+        uvs = vtk_to_numpy(polydata.GetPointData().GetArray("colormap"))
+
+    # Build FURY surface actor with texture
+    tex_path = os.path.join(directory, "Textures", texture_file)
+    if not os.path.exists(tex_path):
+        # Fallback to Models/Textures
+        parent_dir = os.path.dirname(directory)
+        tex_path = os.path.join(parent_dir, "Textures", texture_file)
+
+    surf = actor.surface(verts, faces, texture=tex_path, texture_coords=uvs)
+
+    surf.local.scale = [scale, scale, scale]
+    if position is not None:
+        surf.local.position = list(position)
+
+    return surf
 
 
-def quat_mult(q1, q2):
-    """Multiply two quaternions q1 * q2, returns unit quaternion."""
-    x1, y1, z1, w1 = q1
-    x2, y2, z2, w2 = q2
-    w = w1 * w2 - x1 * x2 - y1 * y2 - z1 * z2
-    x = w1 * x2 + x1 * w2 + y1 * z2 - z1 * y2
-    y = w1 * y2 - x1 * z2 + y1 * w2 + z1 * x2
-    z = w1 * z2 + x1 * y2 - y1 * x2 + z1 * w2
-    q = np.array([x, y, z, w])
-    n = np.linalg.norm(q)
-    return q / n if n > 1e-8 else np.array([0.0, 0.0, 0.0, 1.0])
+def load_polyxios_model(filename, scale=1.0, position=None, color=None):
+    """Load a polyxios .obj model, normalize to unit size, return actor."""
+    path = px.fetch(filename)
+    vertices, faces, colors = read_mesh(path)
 
+    # Normalize to unit bounding box
+    center = (vertices.max(axis=0) + vertices.min(axis=0)) / 2.0
+    vertices = vertices - center
+    extent = np.max(vertices.max(axis=0) - vertices.min(axis=0))
+    if extent > 1e-6:
+        vertices = vertices / extent
 
-def rotate_vector(quat, vec):
-    """Rotate vec by quaternion quat using the sandwich product."""
-    q_vec = quat[:3]
-    q_w = quat[3]
-    uv = np.cross(q_vec, vec)
-    uuv = np.cross(q_vec, uv)
-    return vec + 2.0 * (q_w * uv + uuv)
+    if color is not None:
+        colors = np.tile(np.array(color, dtype=np.float32), (len(vertices), 1))
+    elif colors is None:
+        colors = np.full((len(vertices), 3), 0.5, dtype=np.float32)
 
+    surf = actor.surface(vertices, faces, colors=colors)
+    surf.local.scale = [scale, scale, scale]
+    if position is not None:
+        surf.local.position = list(position)
 
-def catmull_rom(p0, p1, p2, p3, t):
-    """Catmull-Rom spline interpolation between p1 and p2 at parameter t in [0,1]."""
-    t2 = t * t
-    t3 = t2 * t
-    return 0.5 * (
-        (2.0 * p1)
-        + (-p0 + p2) * t
-        + (2.0 * p0 - 5.0 * p1 + 4.0 * p2 - p3) * t2
-        + (-p0 + 3.0 * p1 - 3.0 * p2 + p3) * t3
-    )
+    return surf
 
-
-def evaluate_spline_path(keyframes, time_val):
-    """
-    Evaluate a catmull-rom path through keyframes at a given time.
-
-    params: keyframes - list of (time, np.array(position)) sorted by time
-    params: time_val - float time to evaluate at
-    returns: np.array interpolated position
-    """
-    if time_val <= keyframes[0][0]:
-        return keyframes[0][1].copy()
-    if time_val >= keyframes[-1][0]:
-        return keyframes[-1][1].copy()
-
-    # Find the segment
-    seg = 0
-    for i in range(len(keyframes) - 1):
-        if keyframes[i][0] <= time_val <= keyframes[i + 1][0]:
-            seg = i
-            break
-
-    t0 = keyframes[seg][0]
-    t1 = keyframes[seg + 1][0]
-    t_local = (time_val - t0) / (t1 - t0) if (t1 - t0) > 1e-8 else 0.0
-
-    # Get surrounding control points (clamped)
-    idx_prev = max(seg - 1, 0)
-    idx_next2 = min(seg + 2, len(keyframes) - 1)
-
-    p0 = keyframes[idx_prev][1]
-    p1 = keyframes[seg][1]
-    p2 = keyframes[seg + 1][1]
-    p3 = keyframes[idx_next2][1]
-
-    return catmull_rom(p0, p1, p2, p3, t_local)
-
-
-def smoothstep(edge0, edge1, x):
-    """Hermite smoothstep for easing transitions."""
-    t = np.clip((x - edge0) / (edge1 - edge0 + 1e-8), 0.0, 1.0)
-    return t * t * (3.0 - 2.0 * t)
-
-
-###############################################################################
-# City Generation Parameters
-# ==========================
-
-CITY_GRID = 8  # NxN blocks
-BLOCK_SIZE = 40.0  # Size of each city block
-ROAD_WIDTH = 10.0  # Width of roads between blocks
-CITY_EXTENT = CITY_GRID * (BLOCK_SIZE + ROAD_WIDTH) / 2.0
-
-# Derived
-CELL_SIZE = BLOCK_SIZE + ROAD_WIDTH
-
-# Animation timing
-TOTAL_DURATION = 42.0  # Total animation duration in seconds
 
 ###############################################################################
 # Scene Setup
 # ===========
 
 scene = window.Scene()
-scene.background = (0.12, 0.10, 0.22)  # Deep twilight purple
+scene.background = (0.08, 0.06, 0.18)  # Deep twilight
 
 ###############################################################################
 # Ground Plane
-# ============
-# A large dark asphalt slab under the entire city.
 
 ground = actor.box(
-    centers=np.array([[0.0, -0.5, 0.0]]),
-    colors=(0.08, 0.08, 0.10),
-    scales=(600, 1.0, 600),
+    centers=np.array([[0.0, -0.25, 0.0]]),
+    colors=(0.07, 0.07, 0.09),
+    scales=(500, 0.5, 500),
 )
 scene.add(ground)
 
 ###############################################################################
-# Sun / Moon
-# ==========
-# A warm glowing sphere in the distance for atmosphere.
+# Sun / Atmosphere
 
 sun = actor.sphere(
     centers=np.array([[0.0, 0.0, 0.0]]),
     colors=(1.0, 0.85, 0.5),
-    radii=25.0,
+    radii=20.0,
 )
-sun.local.position = [200.0, 180.0, 300.0]
+sun.local.position = [180.0, 160.0, 250.0]
 scene.add(sun)
 
 ###############################################################################
-# Road Grid Generation
-# ====================
-# Creates a grid of roads (horizontal and vertical) with lane markings.
+# City Layout Constants
+
+np.random.seed(42)
+
+CITY_RADIUS = 180.0
+BUILDING_SCALE = 12.0  # Kenney models are ~1-4.5 units, scale up
+
+# Available building models from Kenney city kit
+BUILDING_MODELS = [
+    "building-a.obj",
+    "building-b.obj",
+    "building-c.obj",
+    "building-d.obj",
+    "building-e.obj",
+    "building-f.obj",
+    "building-g.obj",
+    "building-h.obj",
+]
+
+SKYSCRAPER_MODELS = [
+    "building-skyscraper-a.obj",
+    "building-skyscraper-b.obj",
+    "building-skyscraper-c.obj",
+    "building-skyscraper-d.obj",
+    "building-skyscraper-e.obj",
+]
+
+# Available car models from Kenney car kit
+CAR_MODELS = [
+    "sedan.obj",
+    "taxi.obj",
+    "suv.obj",
+    "truck.obj",
+    "police.obj",
+    "van.obj",
+    "hatchback-sports.obj",
+    "ambulance.obj",
+]
+
+###############################################################################
+# Roads
+# =====
 
 
 def generate_roads():
-    """Generate road surfaces and lane dashes for the city grid."""
-    half = CITY_EXTENT
-    road_actors = []
+    """Generate road surfaces and lane markings."""
+    # Main boulevard along X axis
+    boulevard = actor.box(
+        centers=np.array([[0.0, 0.0, 0.0]]),
+        colors=(0.14, 0.14, 0.16),
+        scales=(CITY_RADIUS * 2.2, 0.1, 14.0),
+    )
+    boulevard.local.position = [0.0, 0.02, 0.0]
+    scene.add(boulevard)
 
-    for i in range(CITY_GRID + 1):
-        # Road center position along x/z
-        coord = -half + i * CELL_SIZE
-
-        # Horizontal road (along X axis)
-        h_road = actor.box(
+    # Lane markings
+    for dx in np.arange(-CITY_RADIUS, CITY_RADIUS, 7.0):
+        dash = actor.box(
             centers=np.array([[0.0, 0.0, 0.0]]),
-            colors=(0.15, 0.15, 0.17),
-            scales=(CITY_GRID * CELL_SIZE + ROAD_WIDTH, 0.1, ROAD_WIDTH),
+            colors=(0.85, 0.85, 0.55),
+            scales=(3.5, 0.02, 0.35),
         )
-        h_road.local.position = [0.0, 0.02, coord]
-        scene.add(h_road)
-        road_actors.append(h_road)
+        dash.local.position = [dx, 0.12, 0.0]
+        scene.add(dash)
 
-        # Vertical road (along Z axis)
-        v_road = actor.box(
+    # Cross road through center along Z axis
+    cross_road = actor.box(
+        centers=np.array([[0.0, 0.0, 0.0]]),
+        colors=(0.14, 0.14, 0.16),
+        scales=(14.0, 0.1, CITY_RADIUS * 2.0),
+    )
+    cross_road.local.position = [0.0, 0.02, 0.0]
+    scene.add(cross_road)
+
+    # Cross road lane markings
+    for dz in np.arange(-CITY_RADIUS, CITY_RADIUS, 7.0):
+        dash = actor.box(
             centers=np.array([[0.0, 0.0, 0.0]]),
-            colors=(0.15, 0.15, 0.17),
-            scales=(ROAD_WIDTH, 0.1, CITY_GRID * CELL_SIZE + ROAD_WIDTH),
+            colors=(0.85, 0.85, 0.55),
+            scales=(0.35, 0.02, 3.5),
         )
-        v_road.local.position = [coord, 0.02, 0.0]
-        scene.add(v_road)
-        road_actors.append(v_road)
-
-        # Lane dashes on horizontal roads
-        for dx in np.arange(-CITY_GRID * CELL_SIZE / 2, CITY_GRID * CELL_SIZE / 2, 8.0):
-            dash = actor.box(
-                centers=np.array([[0.0, 0.0, 0.0]]),
-                colors=(0.85, 0.85, 0.6),
-                scales=(4.0, 0.02, 0.4),
-            )
-            dash.local.position = [dx, 0.12, coord]
-            scene.add(dash)
-
-        # Lane dashes on vertical roads
-        for dz in np.arange(-CITY_GRID * CELL_SIZE / 2, CITY_GRID * CELL_SIZE / 2, 8.0):
-            dash = actor.box(
-                centers=np.array([[0.0, 0.0, 0.0]]),
-                colors=(0.85, 0.85, 0.6),
-                scales=(0.4, 0.02, 4.0),
-            )
-            dash.local.position = [coord, 0.12, dz]
-            scene.add(dash)
-
-    return road_actors
+        dash.local.position = [0.0, 0.12, dz]
+        scene.add(dash)
 
 
-roads = generate_roads()
+generate_roads()
+logger.info("Roads generated")
 
 ###############################################################################
-# Building Generation
-# ===================
-# Procedural buildings of varying height, width, and color placed in city
-# blocks. Each building gets small window-glow boxes on its faces.
-
-np.random.seed(42)  # Reproducible city layout
-
-# Color palettes for buildings (glass, concrete, modern tones)
-BUILDING_PALETTES = [
-    (0.18, 0.22, 0.35),  # Steel blue
-    (0.25, 0.25, 0.28),  # Concrete gray
-    (0.30, 0.25, 0.18),  # Warm tan
-    (0.15, 0.20, 0.30),  # Dark navy
-    (0.22, 0.18, 0.25),  # Plum
-    (0.20, 0.28, 0.25),  # Teal gray
-    (0.35, 0.30, 0.22),  # Sandstone
-    (0.12, 0.15, 0.22),  # Midnight
-]
-
-WINDOW_COLORS = [
-    (1.0, 0.95, 0.6),  # Warm yellow
-    (0.9, 0.85, 0.5),  # Soft gold
-    (0.7, 0.85, 1.0),  # Cool white
-    (1.0, 0.8, 0.4),  # Amber
-]
-
-buildings = []  # List of dicts with actor and metadata
+# Buildings (Kenney City Kit)
+# ===========================
+# Place buildings on a jittered grid to avoid overlaps and keep roads clear.
 
 
 def generate_buildings():
-    """Generate procedural buildings placed in each city block."""
-    half = CITY_EXTENT
+    """Generate organically placed Kenney buildings on a jittered grid."""
+    placed = 0
+    grid_step = 35.0
 
-    for gx in range(CITY_GRID):
-        for gz in range(CITY_GRID):
-            # Block center
-            bx = -half + ROAD_WIDTH / 2 + gx * CELL_SIZE + BLOCK_SIZE / 2
-            bz = -half + ROAD_WIDTH / 2 + gz * CELL_SIZE + BLOCK_SIZE / 2
+    for gx in np.arange(-CITY_RADIUS + 20, CITY_RADIUS - 20, grid_step):
+        for gz in np.arange(-CITY_RADIUS + 20, CITY_RADIUS - 20, grid_step):
+            # Avoid the main boulevard and cross road corridors
+            if abs(gx) < 22.0 or abs(gz) < 22.0:
+                continue
 
-            # 1-3 buildings per block
-            n_buildings = np.random.randint(1, 4)
-            for _ in range(n_buildings):
-                height = np.random.uniform(12.0, 80.0)
-                width_x = np.random.uniform(6.0, min(18.0, BLOCK_SIZE * 0.4))
-                width_z = np.random.uniform(6.0, min(18.0, BLOCK_SIZE * 0.4))
+            # Random chance to leave a spot empty for a park
+            if np.random.random() < 0.15:
+                continue
 
-                # Random offset within the block
-                ox = np.random.uniform(-BLOCK_SIZE * 0.25, BLOCK_SIZE * 0.25)
-                oz = np.random.uniform(-BLOCK_SIZE * 0.25, BLOCK_SIZE * 0.25)
+            # Add jitter to make it look organic
+            px_pos = gx + np.random.uniform(-6.0, 6.0)
+            pz_pos = gz + np.random.uniform(-6.0, 6.0)
 
-                px = bx + ox
-                pz = bz + oz
+            # Use skyscrapers near center, regular buildings further out
+            dist = np.sqrt(px_pos**2 + pz_pos**2)
+            if dist < CITY_RADIUS * 0.45 and np.random.random() < 0.5:
+                model_name = SKYSCRAPER_MODELS[
+                    np.random.randint(0, len(SKYSCRAPER_MODELS))
+                ]
+                scale = np.random.uniform(BUILDING_SCALE * 1.0, BUILDING_SCALE * 1.5)
+            else:
+                model_name = BUILDING_MODELS[np.random.randint(0, len(BUILDING_MODELS))]
+                scale = np.random.uniform(BUILDING_SCALE * 0.7, BUILDING_SCALE * 1.2)
 
-                color = BUILDING_PALETTES[np.random.randint(0, len(BUILDING_PALETTES))]
+            rot_angle = np.random.choice([0, 90, 180, 270])
 
-                bldg = actor.box(
-                    centers=np.array([[0.0, 0.0, 0.0]]),
-                    colors=color,
-                    scales=(width_x, height, width_z),
-                )
-                bldg.local.position = [px, height / 2.0, pz]
-                scene.add(bldg)
-
-                buildings.append(
-                    {
-                        "actor": bldg,
-                        "pos": np.array([px, 0.0, pz]),
-                        "height": height,
-                        "width_x": width_x,
-                        "width_z": width_z,
-                    }
-                )
-
-                # Windows on two visible faces (X-facing and Z-facing)
-                _add_windows(px, pz, height, width_x, width_z)
-
-
-def _add_windows(px, pz, height, width_x, width_z):
-    """Add small glowing window boxes to building faces."""
-    win_spacing_y = 4.0
-    win_spacing_h = 3.5
-    n_floors = max(1, int(height / win_spacing_y) - 1)
-    n_win_x = max(1, int(width_x / win_spacing_h) - 1)
-    n_win_z = max(1, int(width_z / win_spacing_h) - 1)
-
-    # Limit total windows per building to keep performance reasonable
-    max_windows = 8
-    count = 0
-
-    for floor in range(1, min(n_floors + 1, 6)):
-        wy = floor * win_spacing_y
-        if wy > height - 2.0:
-            break
-
-        # X-facing front
-        for wi in range(min(n_win_x, 3)):
-            if count >= max_windows:
-                return
-            wx = px - width_x * 0.35 + wi * win_spacing_h
-            wz_pos = pz + width_z / 2.0 + 0.05
-
-            win_color = WINDOW_COLORS[np.random.randint(0, len(WINDOW_COLORS))]
-            # Randomly dim some windows
-            if np.random.random() > 0.6:
-                win_color = tuple(c * 0.15 for c in win_color)
-
-            win = actor.box(
-                centers=np.array([[0.0, 0.0, 0.0]]),
-                colors=win_color,
-                scales=(1.2, 1.5, 0.1),
+            bldg = load_kenney_model(
+                CITY_KIT_DIR,
+                model_name,
+                "variation-a.png",
+                scale=scale,
+                position=(px_pos, 0.0, pz_pos),
+                rotation_y=rot_angle,
             )
-            win.local.position = [wx, wy, wz_pos]
-            scene.add(win)
-            count += 1
+            scene.add(bldg)
+            placed += 1
 
-        # Z-facing side
-        for wi in range(min(n_win_z, 3)):
-            if count >= max_windows:
-                return
-            wx_pos = px + width_x / 2.0 + 0.05
-            wz = pz - width_z * 0.35 + wi * win_spacing_h
-
-            win_color = WINDOW_COLORS[np.random.randint(0, len(WINDOW_COLORS))]
-            if np.random.random() > 0.6:
-                win_color = tuple(c * 0.15 for c in win_color)
-
-            win = actor.box(
-                centers=np.array([[0.0, 0.0, 0.0]]),
-                colors=win_color,
-                scales=(0.1, 1.5, 1.2),
-            )
-            win.local.position = [wx_pos, wy, wz]
-            scene.add(win)
-            count += 1
+    logger.info(f"Placed {placed} Kenney buildings")
 
 
 generate_buildings()
@@ -359,353 +310,262 @@ generate_buildings()
 ###############################################################################
 # Street Lights
 # =============
-# Poles with glowing sphere tops along the major roads.
 
 
 def generate_street_lights():
-    """Generate street light poles with glowing sphere tops along roads."""
-    half = CITY_EXTENT
-    lights = []
+    """Generate street lights along the main boulevard and cross road."""
+    positions = []
 
-    for i in range(CITY_GRID + 1):
-        coord = -half + i * CELL_SIZE
+    # Along boulevard
+    for dx in np.arange(-CITY_RADIUS + 10, CITY_RADIUS - 10, 22.0):
+        for side_z in [-8.0, 8.0]:
+            positions.append((dx, side_z))
 
-        # Lights along horizontal roads
-        for dx in np.arange(-half, half, 25.0):
-            for side in [-1, 1]:
-                pole = actor.cylinder(
-                    centers=np.array([[0.0, 0.0, 0.0]]),
-                    directions=np.array([[0.0, 1.0, 0.0]]),
-                    colors=(0.3, 0.3, 0.32),
-                    height=6.0,
-                    radii=0.15,
-                )
-                pole.local.position = [
-                    dx,
-                    3.0,
-                    coord + side * (ROAD_WIDTH / 2.0 - 0.5),
-                ]
-                scene.add(pole)
+    # Along cross road
+    for dz in np.arange(-CITY_RADIUS + 20, CITY_RADIUS - 20, 30.0):
+        if abs(dz) > 10:  # Skip intersection area
+            for side_x in [-7.5, 7.5]:
+                positions.append((side_x, dz))
 
-                bulb = actor.sphere(
-                    centers=np.array([[0.0, 0.0, 0.0]]),
-                    colors=(1.0, 0.9, 0.5),
-                    radii=0.5,
-                )
-                bulb.local.position = [
-                    dx,
-                    6.2,
-                    coord + side * (ROAD_WIDTH / 2.0 - 0.5),
-                ]
-                scene.add(bulb)
-                lights.append((pole, bulb))
-
-    return lights
-
-
-street_lights = generate_street_lights()
-
-###############################################################################
-# Traffic (Animated Cars)
-# =======================
-# Small colored boxes that move along road segments to create a living city.
-
-CAR_COLORS = [
-    (0.85, 0.15, 0.15),  # Red
-    (0.15, 0.15, 0.85),  # Blue
-    (0.9, 0.9, 0.2),  # Yellow
-    (0.9, 0.9, 0.9),  # White
-    (0.1, 0.1, 0.1),  # Black
-    (0.2, 0.7, 0.2),  # Green
-    (0.9, 0.5, 0.1),  # Orange
-]
-
-
-def generate_traffic(n_cars=30):
-    """Generate animated car actors on the road grid."""
-    half = CITY_EXTENT
-    cars = []
-
-    road_coords = [-half + i * CELL_SIZE for i in range(CITY_GRID + 1)]
-
-    for _ in range(n_cars):
-        color = CAR_COLORS[np.random.randint(0, len(CAR_COLORS))]
-
-        # Randomly choose horizontal or vertical road
-        is_horizontal = np.random.random() > 0.5
-        road_idx = np.random.randint(0, len(road_coords))
-        road_coord = road_coords[road_idx]
-
-        if is_horizontal:
-            # Car moves along X
-            start_x = np.random.uniform(-half, half)
-            offset_z = np.random.uniform(-2.0, 2.0)
-            pos = np.array([start_x, 0.7, road_coord + offset_z])
-            speed = np.random.uniform(8.0, 20.0)
-            direction = 1.0 if np.random.random() > 0.5 else -1.0
-            vel = np.array([speed * direction, 0.0, 0.0])
-            car_scale = (3.0, 1.2, 1.5)
-        else:
-            # Car moves along Z
-            start_z = np.random.uniform(-half, half)
-            offset_x = np.random.uniform(-2.0, 2.0)
-            pos = np.array([road_coord + offset_x, 0.7, start_z])
-            speed = np.random.uniform(8.0, 20.0)
-            direction = 1.0 if np.random.random() > 0.5 else -1.0
-            vel = np.array([0.0, 0.0, speed * direction])
-            car_scale = (1.5, 1.2, 3.0)
-
-        car_actor = actor.box(
+    for lx, lz in positions:
+        pole = actor.cylinder(
             centers=np.array([[0.0, 0.0, 0.0]]),
-            colors=color,
-            scales=car_scale,
+            directions=np.array([[0.0, 1.0, 0.0]]),
+            colors=(0.3, 0.3, 0.32),
+            height=5.5,
+            radii=0.12,
         )
-        car_actor.local.position = pos.tolist()
-        scene.add(car_actor)
+        pole.local.position = [lx, 2.75, lz]
+        scene.add(pole)
 
-        cars.append(
-            {
-                "actor": car_actor,
-                "pos": pos,
-                "vel": vel,
-                "is_horizontal": is_horizontal,
-            }
+        bulb = actor.sphere(
+            centers=np.array([[0.0, 0.0, 0.0]]),
+            colors=(1.0, 0.9, 0.45),
+            radii=0.4,
         )
+        bulb.local.position = [lx, 5.7, lz]
+        scene.add(bulb)
 
-    return cars
 
-
-traffic = generate_traffic(30)
-
-###############################################################################
-# HUD Overlay
-# ===========
-# Title and phase indicator text.
-
-hud_title = ui.TextBlock2D(
-    text="FURY City Drone Shot",
-    position=(30, 720),
-    size=(400, 30),
-    font_size=22,
-    color=(1.0, 0.9, 0.4),
-    bold=True,
-)
-scene.add(hud_title)
-
-hud_phase = ui.TextBlock2D(
-    text="Phase: Street Level",
-    position=(30, 690),
-    size=(400, 30),
-    font_size=16,
-    color=(0.8, 0.8, 0.9),
-)
-scene.add(hud_phase)
+generate_street_lights()
+logger.info("Street lights placed")
 
 ###############################################################################
-# Drone Camera Path Definition
-# =============================
-# Keyframe positions and focal targets for each phase of the cinematic flight.
-# The camera smoothly interpolates through these using Catmull-Rom splines.
+# Trees (Polyxios tree.obj)
+# =========================
 
-# We pick a prominent road for the street-level start
-half = CITY_EXTENT
-main_road_z = -half + 2 * CELL_SIZE  # 3rd horizontal road
-
-# Camera position keyframes: (time, np.array([x, y, z]))
-camera_position_keyframes = [
-    # Phase 1: Street Level (0-6s) - moving along a road
-    (0.0, np.array([-half + 20.0, 3.0, main_road_z])),
-    (3.0, np.array([-half + 80.0, 3.5, main_road_z])),
-    (6.0, np.array([-half + 130.0, 4.0, main_road_z + 2.0])),
-    # Phase 2: Ascent (6-12s) - rising upward
-    (8.0, np.array([-half + 140.0, 30.0, main_road_z + 10.0])),
-    (10.0, np.array([-half + 120.0, 70.0, main_road_z + 30.0])),
-    (12.0, np.array([0.0, 120.0, main_road_z + 60.0])),
-    # Phase 3: Landscape Panorama (12-18s) - orbiting high
-    (14.0, np.array([60.0, 130.0, 30.0])),
-    (16.0, np.array([80.0, 120.0, -60.0])),
-    (18.0, np.array([40.0, 110.0, -100.0])),
-    # Phase 4: Drone Stunts (18-26s) - dive and weave
-    (20.0, np.array([0.0, 90.0, -80.0])),
-    (22.0, np.array([-30.0, 25.0, -40.0])),  # Sharp dive
-    (24.0, np.array([-60.0, 40.0, 0.0])),  # Pull up + weave
-    (26.0, np.array([-30.0, 35.0, 40.0])),  # S-curve
-    # Phase 5: Building Flyby (26-34s) - sideways past buildings
-    (28.0, np.array([0.0, 25.0, 60.0])),
-    (30.0, np.array([40.0, 20.0, 30.0])),
-    (32.0, np.array([70.0, 18.0, -10.0])),
-    (34.0, np.array([50.0, 22.0, -50.0])),
-    # Phase 6: Final Sweep (34-42s) - pull back up, wide shot
-    (36.0, np.array([20.0, 60.0, -80.0])),
-    (38.0, np.array([-30.0, 100.0, -60.0])),
-    (40.0, np.array([-60.0, 140.0, 20.0])),
-    (42.0, np.array([-half + 20.0, 3.0, main_road_z])),  # Loop back to start
+tree_positions = [
+    (-80, 16),
+    (-50, 16),
+    (-20, -16),
+    (15, -16),
+    (45, 16),
+    (75, -16),
+    (105, 16),
+    (-105, -16),
+    (125, -16),
+    (-125, 16),
+    (-60, -22),
+    (30, 22),
+    (80, -22),
+    (-40, 26),
+    (60, -26),
 ]
 
-# Camera focal point keyframes (what the camera looks at)
-camera_focal_keyframes = [
-    # Phase 1: Looking down the road
-    (0.0, np.array([-half + 100.0, 3.0, main_road_z])),
-    (3.0, np.array([-half + 140.0, 5.0, main_road_z])),
-    (6.0, np.array([-half + 160.0, 10.0, main_road_z])),
-    # Phase 2: Looking at the city center as we rise
-    (8.0, np.array([0.0, 20.0, 0.0])),
-    (10.0, np.array([0.0, 10.0, 0.0])),
-    (12.0, np.array([0.0, 0.0, 0.0])),
-    # Phase 3: Panning across the city
-    (14.0, np.array([0.0, 0.0, 0.0])),
-    (16.0, np.array([-20.0, 0.0, 20.0])),
-    (18.0, np.array([0.0, 10.0, 0.0])),
-    # Phase 4: Fast targets during stunts
-    (20.0, np.array([0.0, 0.0, -40.0])),
-    (22.0, np.array([-30.0, 0.0, -10.0])),
-    (24.0, np.array([-40.0, 10.0, 20.0])),
-    (26.0, np.array([0.0, 15.0, 60.0])),
-    # Phase 5: Looking sideways at buildings
-    (28.0, np.array([30.0, 15.0, 50.0])),
-    (30.0, np.array([60.0, 10.0, 10.0])),
-    (32.0, np.array([50.0, 8.0, -30.0])),
-    (34.0, np.array([20.0, 10.0, -40.0])),
-    # Phase 6: Looking down at the whole city
-    (36.0, np.array([0.0, 0.0, 0.0])),
-    (38.0, np.array([0.0, 0.0, 0.0])),
-    (40.0, np.array([0.0, 0.0, 0.0])),
-    (42.0, np.array([-half + 100.0, 3.0, main_road_z])),
-]
+for tx, tz in tree_positions:
+    tree_color = (
+        0.12 + np.random.uniform(-0.02, 0.02),
+        0.40 + np.random.uniform(-0.08, 0.08),
+        0.15 + np.random.uniform(-0.02, 0.02),
+    )
+    scale = np.random.uniform(6.0, 10.0)
+    # Unit box trees need to be moved up by scale/2 to rest on the ground
+    tree = load_polyxios_model(
+        "tree.obj",
+        color=tree_color,
+        scale=scale,
+        position=(tx, scale / 2.0, tz),
+    )
+    scene.add(tree)
+
+logger.info(f"Placed {len(tree_positions)} trees")
 
 ###############################################################################
-# Phase Labels
+# Animated Traffic (Kenney Car Kit + fury.motion Animation)
+# =========================================================
 
-PHASE_LABELS = [
-    (0.0, "Street Level"),
-    (6.0, "Ascent"),
-    (12.0, "Landscape Panorama"),
-    (18.0, "Drone Stunts"),
-    (26.0, "Building Flyby"),
-    (34.0, "Final Sweep"),
+ANIMATION_DURATION = 45.0
+car_animations = []
+
+# Car routes: (model_index, start_coord, lane_offset, speed_factor, direction, is_x_axis)
+car_routes = [
+    (0, -150, 4.0, 1.0, 1, True),  # sedan going right on X
+    (1, -120, -4.0, 0.85, 1, True),  # taxi going right on X
+    (2, 150, 4.0, 0.9, -1, True),  # suv going left on X
+    (3, 130, -4.0, 1.1, -1, True),  # truck going left on X
+    (4, -100, 3.0, 0.75, 1, True),  # police going right on X
+    (5, 80, -3.0, 1.2, -1, True),  # van going left on X
+    (6, -120, 4.0, 0.95, 1, False),  # hatchback going up on Z
+    (7, 100, -4.0, 1.1, -1, False),  # ambulance going down on Z
+    (0, -80, 3.5, 1.05, 1, False),  # sedan 2 up on Z
+    (1, 60, -3.5, 0.78, -1, False),  # taxi 2 down on Z
+    (2, -40, 4.0, 0.92, 1, False),  # suv 2 up on Z
 ]
 
-###############################################################################
-# Animation State
-# ===============
+for mi, start_coord, lane, speed_f, direction, is_x_axis in car_routes:
+    model_name = CAR_MODELS[mi % len(CAR_MODELS)]
 
-state = {
-    "time": 0.0,
-    "dt": 0.016,
+    # Calculate initial rotation so the model's front (+Z natively) aligns with motion
+    if is_x_axis:
+        rot_y = 90.0 if direction > 0 else -90.0
+        start_pos = (start_coord, 0.0, lane)
+    else:
+        rot_y = 0.0 if direction > 0 else 180.0
+        start_pos = (lane, 0.0, start_coord)
+
+    car = load_kenney_model(
+        CAR_KIT_DIR,
+        model_name,
+        "colormap.png",
+        scale=3.5,
+        position=start_pos,
+        rotation_y=rot_y,
+    )
+    scene.add(car)
+
+    # Create position keyframes for driving animation
+    car_anim = Animation(actors=car, loop=True)
+    travel_dist = 280.0 * speed_f
+    n_kf = 10
+
+    for ki in range(n_kf + 1):
+        t = (ki / n_kf) * ANIMATION_DURATION
+        progress = ki / n_kf
+        val = start_coord + direction * travel_dist * progress
+        # Wrap within bounds
+        val = ((val + CITY_RADIUS + 20) % (2 * CITY_RADIUS + 40)) - CITY_RADIUS - 20
+
+        if is_x_axis:
+            pos = np.array([val, 0.0, lane])
+        else:
+            pos = np.array([lane, 0.0, val])
+
+        car_anim.set_position(t, pos)
+
+    car_anim.set_position_interpolator(cubic_spline_interpolator)
+    car_animations.append(car_anim)
+
+logger.info(f"Created {len(car_animations)} animated Kenney cars")
+
+###############################################################################
+# Camera Animation (CameraAnimation with cubic spline keyframes)
+# ==============================================================
+
+camera_anim = CameraAnimation(loop=True)
+
+# Camera path explicitly designed to stay above the roads (X=0 and Z=0 corridors)
+camera_positions = {
+    # Phase 1: Drive down Boulevard (+X direction)
+    0.0: np.array([-140.0, 3.5, 0.0]),
+    3.5: np.array([-80.0, 3.5, 0.0]),
+    7.0: np.array([-20.0, 4.0, 0.0]),
+    # Phase 2: Ascend at intersection
+    9.0: np.array([0.0, 25.0, 0.0]),
+    11.0: np.array([0.0, 60.0, 0.0]),
+    13.0: np.array([0.0, 90.0, 0.0]),
+    # Phase 3: Panorama Orbit
+    15.0: np.array([30.0, 95.0, 30.0]),
+    17.0: np.array([65.0, 95.0, 65.0]),
+    20.0: np.array([0.0, 85.0, 90.0]),
+    # Phase 4: Dive into Cross Road (-Z direction)
+    22.0: np.array([0.0, 65.0, 60.0]),
+    24.0: np.array([0.0, 15.0, 30.0]),
+    26.0: np.array([0.0, 20.0, 10.0]),
+    28.0: np.array([0.0, 25.0, -5.0]),
+    # Phase 5: Fly down Cross Road (-Z direction)
+    30.0: np.array([0.0, 12.0, -20.0]),
+    32.0: np.array([0.0, 12.0, -40.0]),
+    34.0: np.array([0.0, 14.0, -60.0]),
+    36.0: np.array([0.0, 25.0, -80.0]),
+    # Phase 6: Sweep back to start
+    38.0: np.array([-60.0, 50.0, -80.0]),
+    40.0: np.array([-90.0, 70.0, -60.0]),
+    43.0: np.array([-120.0, 80.0, -40.0]),
+    45.0: np.array([-140.0, 3.5, 0.0]),  # Loop back to start
 }
 
+# Focal targets (what the camera looks at)
+camera_focals = {
+    0.0: np.array([-80.0, 3.0, 0.0]),
+    3.5: np.array([-20.0, 3.0, 0.0]),
+    7.0: np.array([0.0, 8.0, 0.0]),
+    9.0: np.array([0.0, 25.0, -20.0]),
+    11.0: np.array([0.0, 40.0, -30.0]),
+    13.0: np.array([0.0, 40.0, -30.0]),
+    15.0: np.array([0.0, 40.0, 0.0]),
+    17.0: np.array([0.0, 40.0, 0.0]),
+    20.0: np.array([0.0, 40.0, 0.0]),
+    22.0: np.array([0.0, 10.0, 20.0]),
+    24.0: np.array([0.0, 10.0, -20.0]),
+    26.0: np.array([0.0, 10.0, -30.0]),
+    28.0: np.array([0.0, 10.0, -40.0]),
+    30.0: np.array([0.0, 10.0, -60.0]),
+    32.0: np.array([0.0, 10.0, -80.0]),
+    34.0: np.array([0.0, 10.0, -100.0]),
+    36.0: np.array([0.0, 10.0, -120.0]),
+    38.0: np.array([0.0, 0.0, 0.0]),
+    40.0: np.array([0.0, 0.0, 0.0]),
+    43.0: np.array([0.0, 0.0, 0.0]),
+    45.0: np.array([-80.0, 3.0, 0.0]),
+}
+
+camera_view_ups = {
+    0.0: np.array([0.0, 1.0, 0.0]),
+    20.0: np.array([0.0, 1.0, 0.0]),
+    # Barrel roll during stunt dive
+    21.5: np.array([0.0, 1.0, 0.0]),
+    22.0: np.array([0.5, 0.87, 0.0]),
+    22.5: np.array([1.0, 0.0, 0.0]),
+    23.0: np.array([0.0, -1.0, 0.0]),
+    23.5: np.array([-1.0, 0.0, 0.0]),
+    24.0: np.array([0.0, 1.0, 0.0]),
+    45.0: np.array([0.0, 1.0, 0.0]),
+}
+
+camera_anim.set_position_keyframes(camera_positions)
+camera_anim.set_focal_keyframes(camera_focals)
+camera_anim.set_view_up_keyframes(camera_view_ups)
+
+camera_anim.set_position_interpolator(cubic_spline_interpolator)
+camera_anim.set_focal_interpolator(linear_interpolator)
+camera_anim.set_view_up_interpolator(linear_interpolator)
+
+logger.info("Camera animation keyframes set")
+
 ###############################################################################
-# Core Animation Loop
-# ====================
-# Called every ~16ms. Updates traffic, evaluates camera spline, applies
-# barrel-roll rotation during stunts, and renders the frame.
+# Timeline Assembly
+# =================
 
+timeline = Timeline(playback_panel=True, loop=True)
+timeline.add_animation(camera_anim)
 
-def get_current_phase(t):
-    """Get the label of the current camera phase."""
-    label = PHASE_LABELS[0][1]
-    for pt, pl in PHASE_LABELS:
-        if t >= pt:
-            label = pl
-    return label
+for ca in car_animations:
+    timeline.add_animation(ca)
 
-
-def animation_tick(showm):
-    """Main animation callback driving traffic and camera each frame."""
-    dt = state["dt"]
-    state["time"] += dt
-
-    # Loop the animation
-    t = state["time"] % TOTAL_DURATION
-
-    # --- Update Traffic ---
-    for car in traffic:
-        car["pos"] += car["vel"] * dt
-
-        # Wrap cars around when they leave the city bounds
-        for axis in [0, 2]:
-            if car["pos"][axis] > CITY_EXTENT + 20.0:
-                car["pos"][axis] = -CITY_EXTENT - 20.0
-            elif car["pos"][axis] < -CITY_EXTENT - 20.0:
-                car["pos"][axis] = CITY_EXTENT + 20.0
-
-        car["actor"].local.position = car["pos"].tolist()
-
-    # --- Evaluate Camera Path ---
-    cam_pos = evaluate_spline_path(camera_position_keyframes, t)
-    cam_focal = evaluate_spline_path(camera_focal_keyframes, t)
-
-    # --- Camera Setup ---
-    camera = showm.screens[0].camera
-    camera.local.position = cam_pos.tolist()
-
-    # Compute the look direction for reference_up calculation
-    look_dir = cam_focal - cam_pos
-    look_dist = np.linalg.norm(look_dir)
-    if look_dist > 1e-5:
-        look_dir = look_dir / look_dist
-
-    # Default up vector
-    up = np.array([0.0, 1.0, 0.0])
-
-    # --- Barrel Roll during Stunt Phase (t ~ 20-22s) ---
-    barrel_roll_start = 19.5
-    barrel_roll_end = 22.5
-    if barrel_roll_start < t < barrel_roll_end:
-        roll_progress = (t - barrel_roll_start) / (barrel_roll_end - barrel_roll_start)
-        roll_angle = roll_progress * 360.0  # Full 360 barrel roll
-        roll_quat = axis_angle_to_quat(look_dir, roll_angle)
-        up = rotate_vector(roll_quat, up)
-
-    # --- Gentle banking during S-weave (t ~ 24-26s) ---
-    weave_start = 23.5
-    weave_end = 26.5
-    if weave_start < t < weave_end:
-        weave_progress = (t - weave_start) / (weave_end - weave_start)
-        bank_angle = 30.0 * np.sin(weave_progress * 2.0 * np.pi)
-        bank_quat = axis_angle_to_quat(look_dir, bank_angle)
-        up = rotate_vector(bank_quat, up)
-
-    # --- Gentle banking during building flyby (t ~ 28-34s) ---
-    flyby_start = 27.0
-    flyby_end = 34.0
-    if flyby_start < t < flyby_end:
-        flyby_progress = (t - flyby_start) / (flyby_end - flyby_start)
-        tilt_angle = 15.0 * np.sin(flyby_progress * 3.0 * np.pi)
-        tilt_quat = axis_angle_to_quat(look_dir, tilt_angle)
-        up = rotate_vector(tilt_quat, up)
-
-    camera.look_at(cam_focal.tolist())
-    camera.reference_up = up.tolist()
-
-    # --- Update HUD ---
-    phase_label = get_current_phase(t)
-    hud_phase.message = f"Phase: {phase_label}"
-
-    showm.render()
-
+logger.info(
+    f"Timeline assembled: camera + {len(car_animations)} car animations, "
+    f"duration={ANIMATION_DURATION}s"
+)
 
 ###############################################################################
 # Application Entry Point
 # =======================
-# Set up ShowManager, disable orbit controller, register animation callback.
 
 if __name__ == "__main__":
     showm = window.ShowManager(
         scene=scene,
         size=(1280, 768),
-        title="FURY City Drone Shot",
+        title="FURY City Drone Shot — Kenney Assets + fury.motion",
     )
-
-    # Disable default orbit controller — we drive the camera manually
-    showm.screens[0].controller.enabled = False
-
-    # Set initial camera
-    camera = showm.screens[0].camera
-    camera.local.position = camera_position_keyframes[0][1].tolist()
-    camera.look_at(camera_focal_keyframes[0][1].tolist())
-
-    # Register the animation loop at ~60fps
-    showm.register_callback(animation_tick, 0.016, True, "DroneShotLoop", showm)
-
+    showm.add_animation(timeline)
     showm.start()

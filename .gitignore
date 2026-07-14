@@ -71,6 +71,7 @@ docs/tutorials/*.png
 docs/tutorials/*.vtk
 docs/tutorials/*.gif
 docs/temp/
+docs/examples/kenny_assets/
 
 # pytest
 .pytest_cache/
