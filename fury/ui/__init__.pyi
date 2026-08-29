@@ -5,6 +5,7 @@ __all__ = [
     "ImageContainer2D",
     #     "GridUI",
     "Rectangle2D",
+    "RoundedRectangle2D",
     "Disk2D",
     "TextBlock2D",
     # "Slider2D",
@@ -15,9 +16,9 @@ __all__ = [
     "LineDoubleSlider2D",
     "RingSlider2D",
     "RangeSlider",
-    #     "Checkbox",
+    "Checkbox",
     #     "Option",
-    #     "RadioButton",
+    "RadioButton",
     "ComboBox2D",
     "ListBox2D",
     "ListBoxItem2D",
@@ -35,6 +36,8 @@ __all__ = [
     #     "wrap_overflow",
     "UIContext",
     "Anchor",
+    "UIWorkbench",
+    "UIPlayground",
 ]
 
 # from . import (
@@ -48,21 +51,24 @@ __all__ = [
 
 from .containers import ImageContainer2D, Panel2D, TabPanel2D, TabUI
 from .context import UIContext
-from .core import UI, Anchor, Disk2D, Rectangle2D, TextBlock2D
+from .core import UI, Anchor, Disk2D, Rectangle2D, RoundedRectangle2D, TextBlock2D
 from .elements import (
     Card2D,
+    Checkbox,
     ComboBox2D,
     LineDoubleSlider2D,
     LineSlider2D,
     ListBox2D,
     ListBoxItem2D,
     PlaybackPanel,
+    RadioButton,
     RangeSlider,
     RingSlider2D,
     TextBox2D,
     TextButton2D,
     TexturedButton2D,
 )
+from .workbench import UIPlayground, UIWorkbench
 
 # from .elements import (
 #     Checkbox,
