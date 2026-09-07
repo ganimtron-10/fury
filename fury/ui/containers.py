@@ -345,6 +345,30 @@ class Panel2D(UI):
         self.remove_element(element)
         self.add_element(element, coords, anchor=anchor)
 
+    def update_element_offset(self, element, offset):
+        """
+        Update the relative offset of a UI component in the panel.
+
+        Parameters
+        ----------
+        element : UI
+            The UI item whose offset to update.
+        offset : (float, float)
+            New relative pixel offset from the top-left corner of the panel.
+
+        Raises
+        ------
+        ValueError
+            If the element is not found in the panel's element offsets list.
+        """
+        offset_arr = np.array(offset, dtype=float)
+        for i, (elem, _) in enumerate(self.element_offsets):
+            if elem == element:
+                self.element_offsets[i] = (element, offset_arr)
+                element.set_position(self.get_position() + offset_arr)
+                return
+        raise ValueError("Element not found in panel.")
+
     def left_button_pressed(self, event):
         """
         Handle left mouse button press event for panel.

@@ -36,6 +36,8 @@ __all__ = [
     #     "wrap_overflow",
     "UIContext",
     "Anchor",
+    "UIWorkbench",
+    "UIPlayground",
 ]
 
 # from . import (
@@ -66,6 +68,7 @@ from .elements import (
     TextButton2D,
     TexturedButton2D,
 )
+from .workbench import UIPlayground, UIWorkbench
 
 # from .elements import (
 #     Checkbox,
