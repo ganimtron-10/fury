@@ -936,3 +936,25 @@ def test_ui_tabui_visual(recording=False):
         title="TabUI Visual Test",
         recording=recording,
     )
+
+
+def test_panel2d_update_element_keeps_internals_internal():
+    """Test internal elements stay out of the public children list."""
+    panel = ui.Panel2D(size=(200, 150), has_border=True, border_width=2)
+
+    npt.assert_equal(panel._children, [])
+    npt.assert_equal(len(panel._elements), 5)
+
+    text = ui.TextBlock2D(text="content", size=(80, 20))
+    panel.add_element(text, (10, 10))
+    npt.assert_equal(panel._children, [text])
+
+    # ``resize`` re-adds every border through ``update_element``.
+    panel.resize((260, 180))
+    npt.assert_equal(panel._children, [text])
+    npt.assert_equal(len(panel._elements), 6)
+
+    # A user element keeps its place in the children list as well.
+    panel.update_element(text, (20, 20))
+    npt.assert_equal(panel._children, [text])
+    npt.assert_array_almost_equal(text.get_position(), panel.get_position() + (20, 20))

@@ -720,3 +720,14 @@ def test_textblock2d_solid_text_over_background_snapshot():
 
     assert white_box > 0
     assert dark_text > 0
+
+
+def test_button2d_children_are_registered_once():
+    """Test reading the actors of a button does not duplicate its child."""
+    button = ui.TextButton2D(label="Press", size=(80, 30))
+
+    npt.assert_equal(button._children, [])
+    for _ in range(5):
+        assert button.actors == []
+
+    npt.assert_equal(button._children, [button.child])

@@ -342,8 +342,12 @@ class Panel2D(UI):
             If coordinates are normalized but outside the [0,1] range, or if
             an unknown anchor is provided.
         """
+        # Internal elements (the background and the borders) are tracked in
+        # ``_elements`` only. Re-adding them as regular elements would leak
+        # them into ``_children`` and make them look like user content.
+        is_internal = element not in self._children
         self.remove_element(element)
-        self.add_element(element, coords, anchor=anchor)
+        self.add_element(element, coords, anchor=anchor, _is_internal=is_internal)
 
     def update_element_offset(self, element, offset):
         """

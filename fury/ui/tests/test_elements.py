@@ -2943,3 +2943,11 @@ def test_radio_button_visual_snapshot():
     arr = window.snapshot(scene=scene, fname=None, return_array=True)
     report = window.analyze_snapshot(arr, find_objects=True)
     assert report.objects >= 1
+
+
+def test_line_slider_2d_children_are_unique():
+    """Test the slider registers each of its parts exactly once."""
+    slider = ui.LineSlider2D(length=200)
+
+    npt.assert_equal(slider._children, [slider.track, slider.handle, slider.text])
+    npt.assert_equal(len(slider._children), len(set(map(id, slider._children))))

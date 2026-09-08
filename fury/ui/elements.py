@@ -300,7 +300,10 @@ class LineSlider2D(Slider2D):
         self.handle.on_left_mouse_button_dragged = self.handle_move_callback
         self.handle.on_left_mouse_button_released = self.handle_release_callback
 
-        self._children.extend([self.track, self.handle, self.text])
+        # ``Slider2D._setup`` already registered the handle and the text, so
+        # only the track is new here. Assigning the full list keeps the
+        # children in draw order without duplicating any of them.
+        self._children[:] = [self.track, self.handle, self.text]
 
     def _get_actors(self):
         """
