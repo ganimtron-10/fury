@@ -576,7 +576,7 @@ def update_viewports(screens, screen_bbs):
         update_camera(screen.camera, screen.size, screen.scene)
 
 
-def render_screens(renderer, screens, stats=None, is_dirty=False):
+def render_screens(renderer, screens, stats=None):
     """
     Render multiple screens within a single renderer update cycle.
 
@@ -588,8 +588,6 @@ def render_screens(renderer, screens, stats=None, is_dirty=False):
         The list of Screen objects to render.
     stats : Stats, optional
         Stats helper to display FPS overlay.
-    is_dirty : bool, optional
-        If True, triggers layout recalculations for UI elements.
     """
     if stats is not None:
         stats.start()
@@ -598,10 +596,7 @@ def render_screens(renderer, screens, stats=None, is_dirty=False):
         scene_root = screen.scene
 
         for ui_element in scene_root.ui_elements:
-            if hasattr(ui_element, "update_layout") and (
-                is_dirty or hasattr(ui_element, "dynamic_bbox")
-            ):
-                ui_element.update_layout()
+            ui_element.update_layout()
 
         screen.viewport.render(scene_root.main_scene, screen.camera, flush=False)
         screen.viewport.render(scene_root.ui_scene, scene_root.ui_camera, flush=False)
@@ -625,6 +620,7 @@ def reposition_ui(screens):
     for screen in screens:
         scene_root = screen.scene
         for child in scene_root.ui_elements:
+            child.mark_layout_dirty()
             child._update_actors_position()
 
 
@@ -770,7 +766,6 @@ class ShowManager:
         self._is_initial_resize = None
         self._show_fps = show_fps
         self._max_fps = max_fps
-        self._frame_count = 0
         self._window_type = self._setup_window(window_type)
         self._is_dragging = False
         self._drag_target = None
@@ -1923,11 +1918,7 @@ class ShowManager:
             self._stats = Stats(self.renderer)
             self._stats_initialized = True
 
-        self._frame_count += 1
-        update_layout = True if self._frame_count == 2 else False
-        render_screens(
-            self.renderer, self.screens, stats=self._stats, is_dirty=update_layout
-        )
+        render_screens(self.renderer, self.screens, stats=self._stats)
         self._imgui and self._imgui.render()
         self.window.request_draw()
 

@@ -4845,18 +4845,6 @@ class Card2D(UI):
         """Update the internal position of the UI element."""
         self.panel.set_position(self.get_position())
 
-    def update_layout(self):
-        """
-        Propagate layout updates to child text elements.
-
-        The render loop calls this method on top-level UI elements so
-        that :class:`TextBlock2D` children can re-align their text
-        actors once the actual bounding box is known after the first
-        render pass.
-        """
-        self.title_box.update_layout()
-        self.body_box.update_layout()
-
     @property
     def color(self):
         """
@@ -5177,10 +5165,6 @@ class SpinBox(UI):
     def _update_actors_position(self):
         """Update the internal position of the UI element."""
         self.panel.set_position(self.get_position())
-
-    def update_layout(self):
-        """Propagate layout updates to the textbox's text block."""
-        self.textbox.text.update_layout()
 
     def increment_callback(self, button):
         """
