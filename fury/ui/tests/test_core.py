@@ -868,3 +868,64 @@ def test_font_size_change_realigns_immediately(dynamic_bbox):
     npt.assert_allclose(block.actor.local.y, expected_y)
     if dynamic_bbox:
         npt.assert_allclose(block.background.size, block.size)
+
+
+def test_text_padding_grows_dynamic_box_and_insets_text():
+    """Padding belongs to the box and moves the text inside it (#838)."""
+    block = ui.TextBlock2D(
+        text="Padded", font_size=20, dynamic_bbox=True, bg_color=(1, 0, 0)
+    )
+    text_w, text_h = block.get_text_actor_size()
+    block.set_position((50, 50))
+    block.set_layout(padding=(6, 10))
+    npt.assert_array_equal(block.size, (int(text_w) + 20, int(text_h) + 12))
+    npt.assert_array_equal(block.background.size, block.size)
+    npt.assert_allclose(block.actor.local.x, 50 + 10 + text_w // 2)
+    npt.assert_allclose(
+        block.actor.local.y, UIContext.canvas_size[1] - (50 + 6 + text_h // 2)
+    )
+
+
+def test_text_fit_in_layout_measures_without_a_frame():
+    block = ui.TextBlock2D(text="Measure me", font_size=18, dynamic_bbox=True)
+    parent = LayoutNode(padding=4)
+    parent.add(block._layout_node)
+    rect = solve(parent)
+    text_w, text_h = block.get_text_actor_size()
+    assert rect.size == (int(np.ceil(text_w)) + 8, int(np.ceil(text_h)) + 8)
+
+
+def test_text_grows_its_box_in_layout_and_keeps_it_when_moved():
+    block = ui.TextBlock2D(
+        text="Hi", dynamic_bbox=True, bg_color=(1, 0, 0), justification="center"
+    )
+    block.set_layout(width=grow())
+    parent = LayoutNode(width=200)
+    parent.add(block._layout_node)
+    solve(parent)
+    npt.assert_array_equal(block.background.size[0], 200)
+    block.set_position((5, 5))
+    npt.assert_array_equal(block.background.size[0], 200)
+    npt.assert_allclose(block.actor.local.x, 105)
+
+
+def test_text_wraps_to_narrow_layout_width():
+    text = "several words that need to wrap in a narrow column"
+    block = ui.TextBlock2D(text=text, dynamic_bbox=True)
+    single_line = block.get_text_actor_size()[1]
+    parent = LayoutNode(width=100, direction="column", align_cross="stretch")
+    parent.add(block._layout_node)
+    rect = solve(parent)
+    assert rect.width == 100
+    assert rect.height > 2 * single_line
+    npt.assert_allclose(block.get_text_actor_size()[1], rect.height, atol=1)
+
+
+def test_text_change_marks_layout_dirty():
+    block = ui.TextBlock2D(text="a", dynamic_bbox=True)
+    parent = LayoutNode()
+    parent.add(block._layout_node)
+    first = solve(parent).width
+    block.message = "a much longer message"
+    assert parent.dirty
+    assert solve(parent).width > first
