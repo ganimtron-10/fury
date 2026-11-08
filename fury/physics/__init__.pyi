@@ -5,10 +5,13 @@ __all__ = [
     "Body",
     "BodySet",
     "Box",
+    "Container",
+    "KinematicBodySet",
     "Sphere",
     "World",
 ]
 
 from .bodies import Body, BodySet
+from .kinematics import Container, KinematicBodySet
 from .shapes import Box, Sphere
 from .world import World

@@ -77,7 +77,10 @@ def quat_to_matrix(q):
 
 def integrate_quaternions(q, angle):
     """
-    Rotate quaternions in place by small world-space rotation vectors.
+    Rotate quaternions in place by world-space rotation vectors.
+
+    The rotation is applied exactly, so repeated small turns about one axis add
+    up to the same total angle.
 
     Parameters
     ----------
@@ -86,12 +89,16 @@ def integrate_quaternions(q, angle):
     angle : ndarray, shape (N, 3)
         Rotation vectors, in radians.
     """
-    wx, wy, wz = angle[:, 0], angle[:, 1], angle[:, 2]
+    theta = np.linalg.norm(angle, axis=1)
+    half = 0.5 * theta
+    scale = np.where(theta > 1e-12, np.sin(half) / np.maximum(theta, 1e-300), 0.5)
+    wx, wy, wz = (angle * scale[:, None]).T
+    ww = np.cos(half)
     qx, qy, qz, qw = q[:, 0].copy(), q[:, 1].copy(), q[:, 2].copy(), q[:, 3].copy()
-    q[:, 0] = qx + 0.5 * (wx * qw + wy * qz - wz * qy)
-    q[:, 1] = qy + 0.5 * (wy * qw + wz * qx - wx * qz)
-    q[:, 2] = qz + 0.5 * (wz * qw + wx * qy - wy * qx)
-    q[:, 3] = qw + 0.5 * (-wx * qx - wy * qy - wz * qz)
+    q[:, 0] = ww * qx + wx * qw + wy * qz - wz * qy
+    q[:, 1] = ww * qy + wy * qw + wz * qx - wx * qz
+    q[:, 2] = ww * qz + wz * qw + wx * qy - wy * qx
+    q[:, 3] = ww * qw - wx * qx - wy * qy - wz * qz
     q /= np.linalg.norm(q, axis=1, keepdims=True)
 
 
