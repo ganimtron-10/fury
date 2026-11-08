@@ -1095,3 +1095,37 @@ def test_window_resize_refills_growing_root():
     show_m._draw_function()
     npt.assert_array_equal(child.size[0], 500)
     show_m.close()
+
+
+def test_layout_inside_a_widget_is_solved_by_the_render_loop():
+    """Layouts not directly added to the scene are solved too."""
+    child = _block()
+    inner = ui.Row(child, padding=3)
+    holder = ui.Panel2D((100, 100))
+    holder.add_element(inner, (0, 0))
+    scene = window.Scene()
+    scene.add(holder)
+    show_m = window.ShowManager(scene=scene, size=(200, 200), window_type="offscreen")
+    show_m._draw_function()
+    child.resize((70, 20))
+    child.mark_layout_dirty()
+    assert inner._layout_node.dirty
+    show_m._draw_function()
+    assert not inner._layout_node.dirty
+    npt.assert_array_equal(inner.size, (76, 26))
+    show_m.close()
+
+
+def test_clean_frames_do_no_layout_work():
+    """After a layout has been solved a frame must not solve it again."""
+    row = ui.Row(_block(), padding=3)
+    scene = window.Scene()
+    scene.add(row)
+    show_m = window.ShowManager(scene=scene, size=(200, 200), window_type="offscreen")
+    show_m._draw_function()
+    solved = []
+    row._layout_node.apply = lambda rect: solved.append(rect)
+    show_m._draw_function()
+    assert solved == []
+    assert len(ui.UIContext._dirty_layouts) == 0
+    show_m.close()
