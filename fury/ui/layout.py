@@ -549,6 +549,9 @@ class LayoutNode:
     resizable : bool, optional
         If False the node keeps its fit size: grow, shrink, percent and
         stretch are ignored.
+    on_dirty : callable, optional
+        Called with no arguments when this node is the root of a tree that
+        became dirty.
     **properties : dict
         Layout properties applied on top of ``style``.
     """
@@ -561,6 +564,7 @@ class LayoutNode:
         measure=None,
         apply=None,
         resizable=True,
+        on_dirty=None,
         **properties,
     ):
         """Initialize the node."""
@@ -571,6 +575,7 @@ class LayoutNode:
         self.measure = measure
         self.apply = apply
         self.resizable = resizable
+        self.on_dirty = on_dirty
         self.rect = LayoutRect()
         self.dirty = True
         self._solving = False
@@ -640,6 +645,8 @@ class LayoutNode:
         root = self.root
         if not root._solving:
             root.dirty = True
+            if root.on_dirty is not None:
+                root.on_dirty()
 
 
 def _is_flexible(node, axis):
