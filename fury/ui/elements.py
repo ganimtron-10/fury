@@ -31,6 +31,7 @@ import numpy as np
 
 from fury.colormap import normalize_colors
 from fury.data import read_viz_icons
+from fury.deprecator import deprecated_params
 from fury.io import get_extension, load_image, load_image_texture
 from fury.lib import EventType
 from fury.ui.containers import ImageContainer2D, Panel2D
@@ -2309,7 +2310,7 @@ class ButtonGroup(UI):
         :meth:`_make_button_states` are used (checkbox icons by default).
     orientation : str, optional
         Layout direction of the options: ``"vertical"`` or ``"horizontal"``.
-    padding : float, optional
+    gap : float, optional
         Spacing in pixels between two adjacent options.
     font_size : int, optional
         Font size of the labels in pixels.
@@ -2331,6 +2332,7 @@ class ButtonGroup(UI):
         Mapping of label to its ``(button, text)`` pair.
     """
 
+    @deprecated_params("padding", "gap", since="2.2.0", until="3.0.0")
     def __init__(
         self,
         labels,
@@ -2338,7 +2340,7 @@ class ButtonGroup(UI):
         checked_labels=(),
         button_states=None,
         orientation="vertical",
-        padding=10,
+        gap=10,
         font_size=18,
         font_family="Arial",
         text_color=(1, 1, 1),
@@ -2355,7 +2357,7 @@ class ButtonGroup(UI):
         self.labels = list(labels)
         self._checked_labels = list(checked_labels)
         self.orientation = orientation
-        self._padding = padding
+        self._gap = gap
         self._font_size = font_size
         self.font_family = font_family
         self.text_color = text_color
@@ -2480,10 +2482,10 @@ class ButtonGroup(UI):
             row_h = max(button.size[1], text.size[1])
 
             if self.orientation == "horizontal":
-                along += row_w + (self.padding if index else 0)
+                along += row_w + (self.gap if index else 0)
                 cross = max(cross, row_h)
             else:
-                along += row_h + (self.padding if index else 0)
+                along += row_h + (self.gap if index else 0)
                 cross = max(cross, row_w)
 
         if self.orientation == "horizontal":
@@ -2517,9 +2519,9 @@ class ButtonGroup(UI):
             )
 
             if self.orientation == "horizontal":
-                cursor[0] += b_w + self.button_label_gap + t_w + self.padding
+                cursor[0] += b_w + self.button_label_gap + t_w + self.gap
             else:
-                cursor[1] += row_h + self.padding
+                cursor[1] += row_h + self.gap
 
     def _handle_button_clicked(self, button):
         """
@@ -2608,16 +2610,33 @@ class ButtonGroup(UI):
         return self._font_size
 
     @property
-    def padding(self):
+    def gap(self):
         """
-        Get the padding between options.
+        Get the gap between options.
 
         Returns
         -------
         float
             Spacing in pixels between two adjacent options.
         """
-        return self._padding
+        return self._gap
+
+    @property
+    def padding(self):
+        """
+        Get the gap between options under its deprecated name.
+
+        Returns
+        -------
+        float
+            Spacing in pixels between two adjacent options.
+        """
+        warnings.warn(
+            "ButtonGroup.padding is deprecated, use ButtonGroup.gap instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self._gap
 
 
 class Checkbox(ButtonGroup):
@@ -2637,7 +2656,7 @@ class Checkbox(ButtonGroup):
         Labels that should be checked initially.
     orientation : str, optional
         Layout direction of the options: ``"vertical"`` or ``"horizontal"``.
-    padding : float, optional
+    gap : float, optional
         Spacing in pixels between two adjacent options.
     font_size : int, optional
         Font size of the labels in pixels.
@@ -2652,13 +2671,14 @@ class Checkbox(ButtonGroup):
         Z-order of the UI component.
     """
 
+    @deprecated_params("padding", "gap", since="2.2.0", until="3.0.0")
     def __init__(
         self,
         labels,
         *,
         checked_labels=(),
         orientation="vertical",
-        padding=10,
+        gap=10,
         font_size=18,
         font_family="Arial",
         text_color=(1, 1, 1),
@@ -2670,7 +2690,7 @@ class Checkbox(ButtonGroup):
             labels,
             checked_labels=checked_labels,
             orientation=orientation,
-            padding=padding,
+            gap=gap,
             font_size=font_size,
             font_family=font_family,
             text_color=text_color,
@@ -2696,7 +2716,7 @@ class RadioButton(ButtonGroup):
         Label that should be selected initially. At most one is allowed.
     orientation : str, optional
         Layout direction of the options: ``"vertical"`` or ``"horizontal"``.
-    padding : float, optional
+    gap : float, optional
         Spacing in pixels between two adjacent options.
     font_size : int, optional
         Font size of the labels in pixels.
@@ -2716,13 +2736,14 @@ class RadioButton(ButtonGroup):
         If more than one label is passed in ``checked_labels``.
     """
 
+    @deprecated_params("padding", "gap", since="2.2.0", until="3.0.0")
     def __init__(
         self,
         labels,
         *,
         checked_labels=(),
         orientation="vertical",
-        padding=10,
+        gap=10,
         font_size=18,
         font_family="Arial",
         text_color=(1, 1, 1),
@@ -2738,7 +2759,7 @@ class RadioButton(ButtonGroup):
             labels,
             checked_labels=checked_labels,
             orientation=orientation,
-            padding=padding,
+            gap=gap,
             font_size=font_size,
             font_family=font_family,
             text_color=text_color,
@@ -3319,34 +3340,34 @@ class ListBox2D(UI):
 
         Create the ListBox (Panel2D) filled with empty slots (ListBoxItem2D).
         """
-        self.margin = 10
+        self.padding = 10
         size = self.panel_size
         font_size = self.font_size
         # Calculating the number of slots.
-        self.nb_slots = int((size[1] - 2 * self.margin) // max(1, self.slot_height))
+        self.nb_slots = int((size[1] - 2 * self.padding) // max(1, self.slot_height))
 
         # This panel facilitates adding slots at the right position.
         self.panel = Panel2D(size=size, color=(1, 1, 1))
 
         # Add a scroll bar
         denom = len(self.values) if len(self.values) > 0 else 1
-        scroll_bar_height = int(self.nb_slots * (size[1] - 2 * self.margin) / denom)
+        scroll_bar_height = int(self.nb_slots * (size[1] - 2 * self.padding) / denom)
         scroll_bar_width = int(size[0] / 20)
         self.scroll_bar = Rectangle2D(size=(scroll_bar_width, scroll_bar_height))
         if len(self.values) <= self.nb_slots:
             self.scroll_bar.set_visibility(False)
             self.scroll_bar.height = 0
 
-        scroll_bar_x = int(size[0] - scroll_bar_width - self.margin)
-        scroll_bar_y = self.margin
+        scroll_bar_x = int(size[0] - scroll_bar_width - self.padding)
+        scroll_bar_y = self.padding
         self._scroll_bar_top_y = scroll_bar_y
         self._scroll_bar_x = scroll_bar_x
         self.panel.add_element(self.scroll_bar, (scroll_bar_x, scroll_bar_y))
 
         # Initialisation of empty text actors
-        self.slot_width = int(size[0] - scroll_bar_width - 3 * self.margin)
-        x = self.margin
-        y = self.margin
+        self.slot_width = int(size[0] - scroll_bar_width - 3 * self.padding)
+        x = self.padding
+        y = self.padding
         for _ in range(self.nb_slots):
             item = ListBoxItem2D(
                 on_select=self.select,
@@ -3392,13 +3413,13 @@ class ListBox2D(UI):
         self.panel_size = np.array(size, dtype=int)
         self.panel.resize(size)
 
-        self.nb_slots = int((size[1] - 2 * self.margin) // max(1, self.slot_height))
+        self.nb_slots = int((size[1] - 2 * self.padding) // max(1, self.slot_height))
 
         new_scrollbar_width = int(size[0] / 20)
-        self._scroll_bar_x = int(size[0] - new_scrollbar_width - self.margin)
+        self._scroll_bar_x = int(size[0] - new_scrollbar_width - self.padding)
 
-        self.slot_width = int(size[0] - new_scrollbar_width - 3 * self.margin)
-        x = self.margin
+        self.slot_width = int(size[0] - new_scrollbar_width - 3 * self.padding)
+        x = self.padding
 
         if self.nb_slots > len(self.slots):
             font_size = self.font_size
@@ -3426,7 +3447,7 @@ class ListBox2D(UI):
             item = self.slots.pop()
             self.panel.remove_element(item)
 
-        y = self.margin
+        y = self.padding
         for slot in self.slots:
             self.panel.update_element(slot, (int(x), int(y)))
             slot.textblock.font_size = self.font_size
@@ -3439,6 +3460,23 @@ class ListBox2D(UI):
         self.scroll_bar.width = new_scrollbar_width
         self.update()
         self.update_scrollbar()
+
+    @property
+    def margin(self):
+        """
+        Get the list padding under its deprecated name.
+
+        Returns
+        -------
+        int
+            Space in pixels between the list edges and its content.
+        """
+        warnings.warn(
+            "ListBox2D.margin is deprecated, use ListBox2D.padding instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.padding
 
     def _get_actors(self):
         """
@@ -3588,7 +3626,7 @@ class ListBox2D(UI):
 
         denom = len(self.values) if len(self.values) > 0 else 1
         new_scrollbar_height = int(
-            self.nb_slots * (self.panel_size[1] - 2 * self.margin) / denom
+            self.nb_slots * (self.panel_size[1] - 2 * self.padding) / denom
         )
         self.scroll_bar.height = new_scrollbar_height
 
@@ -3601,7 +3639,7 @@ class ListBox2D(UI):
             (self.slot_height * self.nb_slots - new_scrollbar_height) / step_denom,
         )
 
-        self._scroll_bar_top_y = self.margin
+        self._scroll_bar_top_y = self.padding
         self._update_scroll_bar_position()
 
         if len(self.values) <= self.nb_slots:
