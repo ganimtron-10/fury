@@ -66,7 +66,7 @@ class Sizing:
     Use :func:`fixed`, :func:`fit`, :func:`grow` or :func:`percent` to create
     instances rather than calling this class directly.
 
-    Parameters
+    Attributes
     ----------
     kind : _Kind
         The sizing strategy.
@@ -82,6 +82,18 @@ class Sizing:
     value: float = 0.0
     min: float = 0.0
     max: float = _INF
+
+    @property
+    def is_fixed(self):
+        """
+        Check whether this rule is an exact size.
+
+        Returns
+        -------
+        bool
+            True for sizes created with :func:`fixed`.
+        """
+        return self.kind is _Kind.FIXED
 
     def clamp(self, size):
         """
@@ -230,7 +242,7 @@ class Edges:
     """
     Spacing on the four sides of a box, in pixels.
 
-    Parameters
+    Attributes
     ----------
     top : float, optional
         Space above the box.
@@ -349,7 +361,7 @@ class LayoutStyle:
     """
     Layout properties of one node.
 
-    Parameters
+    Attributes
     ----------
     width : Sizing, optional
         Horizontal sizing rule.
@@ -477,7 +489,7 @@ class LayoutRect:
     """
     Final position and size of a node, in whole pixels.
 
-    Parameters
+    Attributes
     ----------
     x : int, optional
         Left edge.

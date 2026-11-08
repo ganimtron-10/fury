@@ -936,3 +936,162 @@ def test_ui_tabui_visual(recording=False):
         title="TabUI Visual Test",
         recording=recording,
     )
+
+
+def _block(size=(40, 20)):
+    """Create a plain rectangle to place in a layout."""
+    return ui.Rectangle2D(size=size)
+
+
+def test_column_places_children_and_fits():
+    a, b = _block(), _block((60, 30))
+    column = ui.Column(a, b, position=(10, 20), padding=5, gap=4)
+    column.update_layout()
+    npt.assert_array_equal(column.size, (70, 64))
+    npt.assert_array_equal(a.get_position(), (15, 25))
+    npt.assert_array_equal(b.get_position(), (15, 49))
+
+
+def test_row_moves_children_without_a_new_layout():
+    a, b = _block(), _block()
+    row = ui.Row(a, b, gap=10)
+    row.update_layout()
+    row.set_position((100, 50))
+    npt.assert_array_equal(a.get_position(), (100, 50))
+    npt.assert_array_equal(b.get_position(), (150, 50))
+
+
+def test_nested_boxes_keep_relative_offsets_when_moved():
+    leaf = _block()
+    inner = ui.Column(leaf, padding=3)
+    outer = ui.Row(_block(), inner, gap=2)
+    outer.update_layout()
+    npt.assert_array_equal(leaf.get_position(), (45, 3))
+    outer.set_position((10, 10))
+    npt.assert_array_equal(leaf.get_position(), (55, 13))
+
+
+def test_root_can_be_positioned_by_center_anchor():
+    row = ui.Row(_block((100, 20)))
+    row.set_position((400, 400), ui.Anchor.CENTER, ui.Anchor.CENTER)
+    row.update_layout()
+    npt.assert_array_equal(row.layout_rect.position, (350, 390))
+
+
+def test_growing_children_resize_and_shrink_back():
+    a, b = _block(), _block()
+    a.set_layout(width=ui.grow())
+    row = ui.Row(a, b, width=200)
+    row.update_layout()
+    npt.assert_array_equal(a.size, (160, 20))
+    row.set_layout(width=120)
+    row.update_layout()
+    npt.assert_array_equal(a.size, (80, 20))
+
+
+def test_panel_add_uses_layout_and_keeps_fixed_size():
+    panel = ui.Panel2D((200, 100), position=(10, 10))
+    panel.set_layout(direction=ui.Direction.COLUMN, padding=8, gap=2)
+    a = panel.add(_block())
+    b = panel.add(_block(), width=ui.grow(), height=ui.grow())
+    panel.update_layout()
+    npt.assert_array_equal(panel.size, (200, 100))
+    npt.assert_array_equal(a.get_position(), (18, 18))
+    npt.assert_array_equal(b.size, (184, 62))
+
+
+def test_panel_resize_reflows_children():
+    panel = ui.Panel2D((200, 100))
+    child = panel.add(_block(), width=ui.grow())
+    panel.update_layout()
+    npt.assert_array_equal(child.size[0], 200)
+    panel.resize((300, 100))
+    panel.update_layout()
+    npt.assert_array_equal(child.size[0], 300)
+
+
+def test_panel_drag_keeps_flow_children_attached():
+    panel = ui.Panel2D((200, 100), position=(0, 0))
+    panel.set_layout(padding=10)
+    child = panel.add(_block())
+    panel.update_layout()
+    panel.set_position((50, 60))
+    npt.assert_array_equal(child.get_position(), (60, 70))
+
+
+def test_panel_fit_height_resizes_background():
+    panel = ui.Panel2D((200, 10))
+    panel.set_layout(height=ui.fit(), direction=ui.Direction.COLUMN, padding=5)
+    panel.add(_block((10, 40)))
+    panel.update_layout()
+    npt.assert_array_equal(panel.size, (200, 50))
+    npt.assert_array_equal(panel.background.size, (200, 50))
+
+
+def test_panel_add_element_stays_manual():
+    panel = ui.Panel2D((200, 100))
+    panel.set_layout(padding=10)
+    manual = _block()
+    panel.add_element(manual, (5, 5))
+    flow = panel.add(_block())
+    panel.update_layout()
+    npt.assert_array_equal(manual.get_position(), (5, 5))
+    npt.assert_array_equal(flow.get_position(), (10, 10))
+
+
+def test_panel_remove_element_leaves_the_layout():
+    panel = ui.Panel2D((200, 100))
+    a, b = panel.add(_block()), panel.add(_block())
+    panel.update_layout()
+    panel.remove_element(a)
+    panel.update_layout()
+    npt.assert_array_equal(b.get_position(), (0, 0))
+
+
+def test_panel_border_insets_content():
+    panel = ui.Panel2D((100, 100), has_border=True, border_width=4)
+    child = panel.add(_block())
+    panel.update_layout()
+    npt.assert_array_equal(child.get_position(), (4, 4))
+
+
+def test_non_resizable_widget_keeps_its_size_when_asked_to_grow():
+    slider = ui.LineSlider2D(length=100)
+    natural = tuple(slider.size)
+    row = ui.Row(slider, width=500)
+    slider.set_layout(width=ui.grow())
+    row.update_layout()
+    npt.assert_array_equal(slider.size, natural)
+
+
+def test_layout_is_solved_by_the_render_loop():
+    child = _block()
+    row = ui.Row(child, position=(30, 40), padding=5)
+    scene = window.Scene()
+    scene.add(row)
+    show_m = window.ShowManager(scene=scene, size=(200, 200), window_type="offscreen")
+    show_m._draw_function()
+    assert not row._layout_node.dirty
+    npt.assert_array_equal(child.get_position(), (35, 45))
+
+    child.resize((50, 25))
+    child.mark_layout_dirty()
+    assert row._layout_node.dirty
+    show_m._draw_function()
+    npt.assert_array_equal(row.size, (60, 35))
+    show_m.close()
+
+
+def test_window_resize_refills_growing_root():
+    child = _block()
+    row = ui.Row(child, width=ui.grow())
+    child.set_layout(width=ui.grow())
+    scene = window.Scene()
+    scene.add(row)
+    show_m = window.ShowManager(scene=scene, size=(300, 200), window_type="offscreen")
+    show_m._draw_function()
+    npt.assert_array_equal(child.size[0], 300)
+    show_m._resize((500, 200))
+    show_m._draw_function()
+    npt.assert_array_equal(child.size[0], 500)
+    show_m.close()
