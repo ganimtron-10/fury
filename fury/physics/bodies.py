@@ -271,7 +271,7 @@ class BodySet:
         """
         self._require_movable()
         self.world._velocities[self._range, :3] = _finite_rows(value, self.count, 3)
-        self.world._state_changed(self)
+        self.world._state_changed(self, pose=False)
 
     @property
     def angular_velocities(self):
@@ -297,7 +297,7 @@ class BodySet:
         """
         self._require_movable()
         self.world._velocities[self._range, 3:] = _finite_rows(value, self.count, 3)
-        self.world._state_changed(self)
+        self.world._state_changed(self, pose=False)
 
     @property
     def masses(self):
@@ -441,7 +441,7 @@ class Body:
         """
         return self.bodies.start + self.index
 
-    def _write(self, array, value):
+    def _write(self, array, value, *, pose=True):
         """
         Write one body's state.
 
@@ -451,9 +451,11 @@ class Body:
             Engine state selected to this body's columns.
         value : array_like
             New value.
+        pose : bool, optional
+            Whether the position or rotation changed, rather than a velocity.
         """
         array[:] = _finite_rows(value, 1, array.shape[-1])[0]
-        self.bodies.world._state_changed(self.bodies, row=self._id)
+        self.bodies.world._state_changed(self.bodies, row=self._id, pose=pose)
 
     @property
     def position(self):
@@ -530,7 +532,7 @@ class Body:
             The new value, broadcastable to the bodies.
         """
         self.bodies._require_movable()
-        self._write(self.bodies.world._velocities[self._id, :3], value)
+        self._write(self.bodies.world._velocities[self._id, :3], value, pose=False)
 
     @property
     def angular_velocity(self):
@@ -555,7 +557,7 @@ class Body:
             The new value, broadcastable to the bodies.
         """
         self.bodies._require_movable()
-        self._write(self.bodies.world._velocities[self._id, 3:], value)
+        self._write(self.bodies.world._velocities[self._id, 3:], value, pose=False)
 
     def apply_impulse(self, impulse, *, at=None):
         """

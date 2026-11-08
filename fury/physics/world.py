@@ -122,6 +122,12 @@ class World:
         Largest speed at which overlapping bodies are pushed apart.
     restitution_threshold : float, optional
         Approach speed below which contacts do not bounce.
+    interpolate : bool, optional
+        Blend the last two states when displaying, so motion stays smooth when
+        the frame rate and physics rate differ.
+    max_steps_per_frame : int, optional
+        Most steps :meth:`advance` runs per call. A machine that cannot keep up
+        gets slow motion instead of an ever-growing backlog.
     """
 
     def __init__(
@@ -136,6 +142,8 @@ class World:
         contact_damping=10.0,
         max_push_speed=3.0,
         restitution_threshold=1.0,
+        interpolate=True,
+        max_steps_per_frame=2,
     ):
         if not dt > 0:
             raise ValueError("dt must be positive.")
@@ -163,6 +171,11 @@ class World:
         self.contact_damping = float(contact_damping)
         self.max_push_speed = float(max_push_speed)
         self.max_follow_speed = 100.0
+        if max_steps_per_frame < 1:
+            raise ValueError("max_steps_per_frame must be at least 1.")
+        self.interpolate = bool(interpolate)
+        self.max_steps_per_frame = int(max_steps_per_frame)
+        self.paused = False
         self.restitution_threshold = float(restitution_threshold)
         self._user_margin = contact_margin
         self.margin = 0.04 if contact_margin is None else float(contact_margin)
@@ -173,6 +186,12 @@ class World:
         self._containers = []
         self._container_serials = 0
         self._bindings = []
+        self._step_callbacks = []
+        self._accumulator = 0.0
+        self._alpha = 1.0
+        self._previous = None
+        self._render_positions = None
+        self._render_rotations = None
         self.contacts = empty_contacts()
         self._solver = Solver()
         self._allocate(0)
@@ -257,6 +276,7 @@ class World:
             rows = columns.get(name, default)
             setattr(self, name, np.concatenate([getattr(self, name), rows]))
         self._solver.clear_cache()
+        self._previous = None
         return start
 
     def _update_margin(self):
@@ -585,9 +605,10 @@ class World:
         bodies._world = None
         self.contacts = empty_contacts()
         self._solver.clear_cache()
+        self._previous = None
         self._update_margin()
 
-    def _state_changed(self, bodies, *, row=None):
+    def _state_changed(self, bodies, *, row=None, pose=True):
         """
         Note that user code changed a set's state.
 
@@ -597,11 +618,18 @@ class World:
             The set that changed.
         row : int, optional
             The one body that changed, when not the whole set.
+        pose : bool, optional
+            Whether positions or rotations changed, so the drawn pose should
+            jump there instead of blending from the previous step.
         """
+        rows = bodies._range if row is None else row
         if bodies in self._containers:
             self._holder[self._holder == bodies._serial] = -1
         else:
-            self._holder[bodies._range if row is None else row] = -1
+            self._holder[rows] = -1
+        if pose and self._previous is not None:
+            self._previous[0][rows] = self._positions[rows]
+            self._previous[1][rows] = self._rotations[rows]
 
     def _spin_about(self, body, vectors, at):
         """
@@ -862,8 +890,100 @@ class World:
         )
         return merge_contacts(parts)
 
+    def on_step(self, callback):
+        """
+        Register a function to run at the start of every step.
+
+        Use this to script forces or kinematic motion. It can be used as a
+        decorator.
+
+        Parameters
+        ----------
+        callback : callable
+            Called with the world as its only argument.
+
+        Returns
+        -------
+        callable
+            The same function.
+        """
+        self._step_callbacks.append(callback)
+        return callback
+
+    def remove_on_step(self, callback):
+        """
+        Stop calling a function registered with :meth:`on_step`.
+
+        Parameters
+        ----------
+        callback : callable
+            The function to remove.
+        """
+        self._step_callbacks.remove(callback)
+
+    def pause(self):
+        """Stop :meth:`advance` from moving time forward."""
+        self.paused = True
+
+    def resume(self):
+        """Let :meth:`advance` move time forward again."""
+        self.paused = False
+
+    def advance(self, *, elapsed=None):
+        """
+        Move the simulation forward with the clock.
+
+        Time is consumed in fixed steps, so results do not depend on the frame
+        rate. Leftover time carries over to the next call.
+
+        Parameters
+        ----------
+        elapsed : float, optional
+            Seconds since the previous call. None runs exactly one step, which
+            makes offscreen rendering reproducible.
+
+        Returns
+        -------
+        int
+            The number of steps run.
+        """
+        if self.paused:
+            return 0
+        if elapsed is None:
+            self.step(1)
+            self._alpha = 1.0
+            return 1
+        if not 0 <= elapsed < np.inf:
+            raise ValueError("elapsed must be finite and not negative.")
+        self._accumulator += elapsed
+        steps = min(int(self._accumulator / self.dt), self.max_steps_per_frame)
+        self.step(steps)
+        self._accumulator -= steps * self.dt
+        if self._accumulator >= self.dt:
+            self._accumulator = 0.0
+        self._alpha = self._accumulator / self.dt
+        return steps
+
     def sync(self):
         """Write the current state into every bound actor."""
+        if self.interpolate and self._alpha < 1.0 and self._previous is not None:
+            old_positions, old_rotations = self._previous
+            alpha = self._alpha
+            self._render_positions = (
+                old_positions + (self._positions - old_positions) * alpha
+            )
+            sign = np.where(
+                (old_rotations * self._rotations).sum(1, keepdims=True) < 0, -1.0, 1.0
+            )
+            blended = old_rotations + (self._rotations * sign - old_rotations) * alpha
+            self._render_rotations = blended / np.linalg.norm(
+                blended, axis=1, keepdims=True
+            )
+        else:
+            self._render_positions, self._render_rotations = (
+                self._positions,
+                self._rotations,
+            )
         for binding in self._bindings:
             binding.sync()
 
@@ -878,14 +998,19 @@ class World:
         """
         for _ in range(count):
             self._step_once()
+        self._alpha = 1.0
 
     def _step_once(self):
         """Advance the simulation by one step."""
+        for callback in list(self._step_callbacks):
+            callback(self)
         for bodies in self._sets:
             if isinstance(bodies, KinematicBodySet):
                 bodies._update(self.time, self.dt)
         for binding in self._bindings:
             binding.before_step(self.dt)
+        if self.interpolate:
+            self._previous = (self._positions.copy(), self._rotations.copy())
         rotation = quat_to_matrix(self._rotations)
         self.contacts = self._find_contacts(rotation)
         self._solver.solve(self, self.contacts, rotation, self._acceleration(rotation))
