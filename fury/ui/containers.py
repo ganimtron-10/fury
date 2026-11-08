@@ -7,7 +7,7 @@ import numpy as np
 from fury.io import load_image
 from fury.lib import Texture
 from fury.ui.core import UI, Anchor, Rectangle2D, TextBlock2D
-from fury.ui.layout import Direction, place
+from fury.ui.layout import Align, Direction, Position, place
 
 
 class Panel2D(UI):
@@ -780,7 +780,8 @@ class TabPanel2D(UI):
             justification="center",
             vertical_justification="middle",
         )
-        self.panel.add_element(self.text_block, (0.5, 0.5), anchor="center")
+        self.panel.set_layout(align_main=Align.CENTER, align_cross=Align.CENTER)
+        self.panel.add(self.text_block)
         self._children.extend([self.panel, self.content_panel])
 
     def _get_actors(self):
@@ -822,7 +823,7 @@ class TabPanel2D(UI):
         self._text_size = size
         self.panel.resize(size)
         self.text_block.resize(size)
-        self.panel.update_element(self.text_block, (0.5, 0.5), anchor="center")
+        self.panel.update_layout()
 
     @property
     def color(self):
@@ -1234,45 +1235,45 @@ class TabUI(UI):
         if self.tab_bar_pos != previous_tab_bar_pos:
             self._update_sizes()
 
-        vertical_offset = 0
+        bar = self.tab_bar_pos
+        tab_width, tab_height = self.tab_panel_size
+        content_offset = {"top": (0, tab_height), "left": (tab_width, 0)}.get(
+            bar, (0, 0)
+        )
+        panel = self.parent_panel
+        panel.set_layout(
+            direction=(
+                Direction.COLUMN
+                if bar in ("left", "right", "accordion")
+                else Direction.ROW
+            ),
+            align_cross=Align.END if bar in ("bottom", "right") else Align.START,
+        )
+
         for idx, tab_panel in enumerate(self.tabs):
             tab_panel.resize(self.tab_panel_size)
             tab_panel.content_panel.resize(self.content_size)
+            tab_panel.set_layout(width=tab_width, height=tab_height)
 
-            if self.tab_bar_pos == "top":
-                tab_x = idx * self.tab_panel_size[0]
-                tab_pos = (tab_x, 0)
-                content_pos = (0, self.tab_panel_size[1])
-            elif self.tab_bar_pos == "bottom":
-                tab_x = idx * self.tab_panel_size[0]
-                tab_pos = (tab_x, self.content_size[1])
-                content_pos = (0, 0)
-            elif self.tab_bar_pos == "left":
-                tab_y = idx * self.tab_panel_size[1]
-                tab_pos = (0, tab_y)
-                content_pos = (self.tab_panel_size[0], 0)
-            elif self.tab_bar_pos == "right":
-                tab_y = idx * self.tab_panel_size[1]
-                tab_pos = (self.content_size[0], tab_y)
-                content_pos = (0, 0)
+            # In an accordion only the open tab pushes the next header down.
+            content = tab_panel.content_panel
+            in_flow = (
+                bar == "accordion"
+                and self.active_tab_idx == idx
+                and self._is_content_visible(tab_panel)
+            )
+            if in_flow:
+                content.set_layout(position=Position.FLOW)
             else:
-                tab_pos = (0, vertical_offset)
-                vertical_offset += self.tab_panel_size[1]
-                content_pos = (0, vertical_offset)
-                if self.active_tab_idx == idx and self._is_content_visible(tab_panel):
-                    vertical_offset += self.content_size[1]
+                content.set_layout(position=Position.ABSOLUTE, offset=content_offset)
 
-            if tab_panel not in self.parent_panel._elements:
-                self.parent_panel.add_element(tab_panel, tab_pos)
-            else:
-                self.parent_panel.update_element(tab_panel, tab_pos)
-
-            if tab_panel.content_panel not in self.parent_panel._elements:
-                self.parent_panel.add_element(tab_panel.content_panel, content_pos)
-            else:
-                self.parent_panel.update_element(tab_panel.content_panel, content_pos)
+            if tab_panel not in panel._elements:
+                panel.add(tab_panel)
+                panel.add(content)
 
             self._setup_tab_callbacks(idx, tab_panel)
+
+        panel.update_layout()
 
     def _setup_tab_callbacks(self, idx, tab_panel):
         """
