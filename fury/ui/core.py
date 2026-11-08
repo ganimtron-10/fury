@@ -1518,8 +1518,7 @@ class TextBlock2D(UI):
             The computed position and size.
         """
         self._layout_managed_size = rect.size
-        if self.dynamic_bbox:
-            self.actor.max_width = max(rect.width - self.layout_style.inset(0), 1)
+        self.actor.max_width = max(rect.width - self.layout_style.inset(0), 1)
         super()._apply_layout(rect)
 
     def _content_inset(self):
