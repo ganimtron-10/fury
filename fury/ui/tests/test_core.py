@@ -811,6 +811,16 @@ def test_textblock2d_solid_text_over_background_snapshot():
     assert dark_text > 0
 
 
+def _text_top_left(block):
+    """Return the on-screen top-left corner of a text block's glyphs."""
+    block.actor._update_object()
+    aabb = block.actor._aabb
+    return (
+        float(block.actor.local.x + aabb[0][0]),
+        float(UIContext.canvas_size[1] - (block.actor.local.y + aabb[1][1])),
+    )
+
+
 def test_layout_natural_size_survives_layout_resizes():
     """A size applied by the layout must not become the natural size."""
     parent = LayoutNode(width=200, height=20)
@@ -863,9 +873,7 @@ def test_font_size_change_realigns_immediately(dynamic_bbox):
         vertical_justification="top",
     )
     block.font_size = 40
-    text_h = block.get_text_actor_size()[1]
-    expected_y = UIContext.canvas_size[1] - (10 + text_h // 2)
-    npt.assert_allclose(block.actor.local.y, expected_y)
+    npt.assert_allclose(_text_top_left(block)[1], 10, atol=1)
     if dynamic_bbox:
         npt.assert_allclose(block.background.size, block.size)
 
@@ -880,10 +888,7 @@ def test_text_padding_grows_dynamic_box_and_insets_text():
     block.set_layout(padding=(6, 10))
     npt.assert_array_equal(block.size, (int(text_w) + 20, int(text_h) + 12))
     npt.assert_array_equal(block.background.size, block.size)
-    npt.assert_allclose(block.actor.local.x, 50 + 10 + text_w // 2)
-    npt.assert_allclose(
-        block.actor.local.y, UIContext.canvas_size[1] - (50 + 6 + text_h // 2)
-    )
+    npt.assert_allclose(_text_top_left(block), (60, 56), atol=1)
 
 
 def test_text_fit_in_layout_measures_without_a_frame():

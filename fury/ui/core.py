@@ -856,6 +856,7 @@ class Rectangle2D(UI):
         """
         w = max(size[0], 1)
         h = max(size[1], 1)
+        size = (w, h)
         self.actor.geometry = plane_geometry(width=w, height=h)
         self._update_actors_position()
 
@@ -1424,6 +1425,9 @@ class TextBlock2D(UI):
         self.background.on_left_mouse_button_pressed = lambda event: (
             self.on_left_mouse_button_pressed(event)
         )
+        self.background.on_left_mouse_button_dragged = lambda event: (
+            self.on_left_mouse_button_dragged(event)
+        )
         self.background.on_key_press = lambda event: self.on_key_press(event)
         self.background.on_key_release = lambda event: self.on_key_release(event)
 
@@ -1928,35 +1932,48 @@ class TextBlock2D(UI):
     def update_alignment(self):
         """Update the text actor alignment within the bounding box."""
         updated_text_position = [0, 0]
-        text_actor_size = self.get_text_actor_size()
         inset = self._content_inset()
         left = self.boundingbox[0] + inset[0]
         top = self.boundingbox[1] + inset[1]
         right = self.boundingbox[2] - inset[2]
         bottom = self.boundingbox[3] - inset[3]
 
+        horiz_anchor = ""
         if self.justification.lower() == "left":
             self.actor.text_align = "left"
-            updated_text_position[0] = left + text_actor_size[0] // 2
+            horiz_anchor = "left"
+            updated_text_position[0] = left
         elif self.justification.lower() == "center":
             self.actor.text_align = "center"
-            updated_text_position[0] = left + (right - left) // 2
+            horiz_anchor = "center"
+            updated_text_position[0] = (
+                left + (right - left) // 2
+            )
         elif self.justification.lower() == "right":
             self.actor.text_align = "right"
-            updated_text_position[0] = right - text_actor_size[0] // 2
+            horiz_anchor = "right"
+            updated_text_position[0] = right
         else:
             msg = "Text can only be justified left, center and right."
             raise ValueError(msg)
 
+        vert_anchor = ""
         if self.vertical_justification.lower() == "top":
-            updated_text_position[1] = top + text_actor_size[1] // 2
+            vert_anchor = "top"
+            updated_text_position[1] = top
         elif self.vertical_justification.lower() == "middle":
-            updated_text_position[1] = top + (bottom - top) // 2
+            vert_anchor = "middle"
+            updated_text_position[1] = (
+                top + (bottom - top) // 2
+            )
         elif self.vertical_justification.lower() == "bottom":
-            updated_text_position[1] = bottom - text_actor_size[1] // 2
+            vert_anchor = "bottom"
+            updated_text_position[1] = bottom
         else:
             msg = "Vertical justification must be: top, middle or bottom."
             raise ValueError(msg)
+
+        self.actor.anchor = f"{vert_anchor}-{horiz_anchor}"
 
         self.set_actor_position(
             self.actor, updated_text_position, self.z_order, sub_order=1
