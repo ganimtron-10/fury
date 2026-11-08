@@ -934,3 +934,35 @@ def test_text_change_marks_layout_dirty():
     block.message = "a much longer message"
     assert parent.dirty
     assert solve(parent).width > first
+
+
+@pytest.mark.parametrize(
+    "text,font_size",
+    [
+        ("Quality: 50", 26),
+        ("Two words", 18),
+        ("a b c d e f", 31),
+        ("Render settings", 22),
+    ],
+)
+def test_text_at_its_natural_width_stays_on_one_line(text, font_size):
+    """Text sized to fit exactly must not wrap on its own width."""
+    block = ui.TextBlock2D(text=text, font_size=font_size, dynamic_bbox=True)
+    one_line = block.get_text_actor_size()[1]
+    parent = LayoutNode()
+    parent.add(block._layout_node)
+    assert solve(parent).height == int(np.ceil(one_line))
+    npt.assert_allclose(block.get_text_actor_size()[1], one_line)
+
+
+def test_text_survives_half_pixel_centering():
+    """Rounding a centered box must not make its text wrap."""
+    block = ui.TextBlock2D(text="Quality: 50", font_size=26, dynamic_bbox=True)
+    one_line = block.get_text_actor_size()[1]
+    natural = int(np.ceil(block.get_text_actor_size()[0]))
+    parent = LayoutNode(
+        width=natural + 101, height=100, align_main="center", align_cross="center"
+    )
+    parent.add(block._layout_node)
+    solve(parent)
+    npt.assert_allclose(block.get_text_actor_size()[1], one_line)

@@ -25,6 +25,8 @@ from fury.ui.helpers import (
 )
 from fury.ui.layout import LayoutNode, compute_sizes, place
 
+_TEXT_FIT_TOLERANCE = 1
+
 
 class UI(object, metaclass=abc.ABCMeta):
     """
@@ -1533,6 +1535,25 @@ class TextBlock2D(UI):
         if not self.dynamic_bbox:
             return super()._measure_layout(max_width)
 
+        natural = self._measure_text(None)
+        if max_width is None or max_width + _TEXT_FIT_TOLERANCE >= natural[0]:
+            return natural
+        return self._measure_text(max_width)
+
+    def _measure_text(self, max_width):
+        """
+        Measure the text at a given wrapping width, using a cache.
+
+        Parameters
+        ----------
+        max_width : float or None
+            Width the text may wrap to, or None for no limit.
+
+        Returns
+        -------
+        (int, int)
+            Size of the text, rounded up to whole pixels.
+        """
         key = (
             self._message,
             float(self.actor.font_size),
@@ -1559,7 +1580,15 @@ class TextBlock2D(UI):
             The computed position and size.
         """
         self._layout_managed_size = rect.size
-        self.actor.max_width = max(rect.width - self.layout_style.inset(0), 1)
+        content_width = max(rect.width - self.layout_style.inset(0), 1)
+        # Glyph bounds are slightly narrower than the width the text wraps at,
+        # and rounding a box to whole pixels can take one pixel from it. Text
+        # given its natural width must not be limited to that width.
+        natural_width = self._measure_text(None)[0]
+        fits = (
+            self.dynamic_bbox and content_width + _TEXT_FIT_TOLERANCE >= natural_width
+        )
+        self.actor.max_width = 0 if fits else content_width
         super()._apply_layout(rect)
 
     def _content_inset(self):
