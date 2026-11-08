@@ -1,6 +1,7 @@
 """UI core module that describe UI abstract class."""
 
 import abc
+import math
 
 import numpy as np
 
@@ -1389,6 +1390,8 @@ class TextBlock2D(UI):
         self._dynamic_bbox = dynamic_bbox
         self._bg_size = size
         self._shadow = False
+        self._layout_managed_size = None
+        self._measure_cache = {}
 
         if self._bg_size is None and not self.dynamic_bbox:
             raise ValueError("TextBlock size is required as it is not dynamic.")
@@ -1452,6 +1455,90 @@ class TextBlock2D(UI):
         self.background.on_dishover = _bg_dishover
         self.background.on_wheel = lambda event: self.on_wheel(event)
 
+    def set_layout(self, **properties):
+        """
+        Change the layout properties of this text block.
+
+        Parameters
+        ----------
+        **properties : dict
+            Properties of :class:`fury.ui.layout.LayoutStyle`, such as
+            ``width`` or ``padding``.
+
+        Returns
+        -------
+        TextBlock2D
+            This component, so calls can be chained.
+        """
+        super().set_layout(**properties)
+        self._text_changed()
+        return self
+
+    def _measure_layout(self, max_width):
+        """
+        Report the size of the text for the layout engine.
+
+        Parameters
+        ----------
+        max_width : float or None
+            Width the text may wrap to, or None for no limit.
+
+        Returns
+        -------
+        (float, float)
+            Size of the text, excluding padding and border.
+        """
+        if not self.dynamic_bbox:
+            return super()._measure_layout(max_width)
+
+        key = (
+            self._message,
+            float(self.actor.font_size),
+            self.actor.family,
+            self.bold,
+            self.italic,
+            max_width,
+        )
+        if key not in self._measure_cache:
+            previous = self.actor.max_width
+            self.actor.max_width = 0 if max_width is None else max(max_width, 1)
+            width, height = self.get_text_actor_size()
+            self.actor.max_width = previous
+            self._measure_cache[key] = (math.ceil(width), math.ceil(height))
+        return self._measure_cache[key]
+
+    def _apply_layout(self, rect):
+        """
+        Remember the size given by the layout, then apply it.
+
+        Parameters
+        ----------
+        rect : LayoutRect
+            The computed position and size.
+        """
+        self._layout_managed_size = rect.size
+        if self.dynamic_bbox:
+            self.actor.max_width = max(rect.width - self.layout_style.inset(0), 1)
+        super()._apply_layout(rect)
+
+    def _content_inset(self):
+        """
+        Get the space between the box edges and the text.
+
+        Returns
+        -------
+        (float, float, float, float)
+            The left, top, right and bottom inset in pixels.
+        """
+        style = self.layout_style
+        padding = style.padding
+        return (
+            padding.left + style.border,
+            padding.top + style.border,
+            padding.right + style.border,
+            padding.bottom + style.border,
+        )
+
     def resize(self, size):
         """
         Resize the TextBlock2D bounding box.
@@ -1461,7 +1548,7 @@ class TextBlock2D(UI):
         size : (int, int)
             The new (width, height) in pixels.
         """
-        self.actor.max_width = size[0]
+        self.actor.max_width = max(size[0] - self.layout_style.inset(0), 1)
         self.update_bounding_box(size=size)
 
     def _text_changed(self):
@@ -1842,30 +1929,31 @@ class TextBlock2D(UI):
         """Update the text actor alignment within the bounding box."""
         updated_text_position = [0, 0]
         text_actor_size = self.get_text_actor_size()
+        inset = self._content_inset()
+        left = self.boundingbox[0] + inset[0]
+        top = self.boundingbox[1] + inset[1]
+        right = self.boundingbox[2] - inset[2]
+        bottom = self.boundingbox[3] - inset[3]
 
         if self.justification.lower() == "left":
             self.actor.text_align = "left"
-            updated_text_position[0] = self.boundingbox[0] + text_actor_size[0] // 2
+            updated_text_position[0] = left + text_actor_size[0] // 2
         elif self.justification.lower() == "center":
             self.actor.text_align = "center"
-            updated_text_position[0] = (
-                self.boundingbox[0] + (self.boundingbox[2] - self.boundingbox[0]) // 2
-            )
+            updated_text_position[0] = left + (right - left) // 2
         elif self.justification.lower() == "right":
             self.actor.text_align = "right"
-            updated_text_position[0] = self.boundingbox[2] - text_actor_size[0] // 2
+            updated_text_position[0] = right - text_actor_size[0] // 2
         else:
             msg = "Text can only be justified left, center and right."
             raise ValueError(msg)
 
         if self.vertical_justification.lower() == "top":
-            updated_text_position[1] = self.boundingbox[1] + text_actor_size[1] // 2
+            updated_text_position[1] = top + text_actor_size[1] // 2
         elif self.vertical_justification.lower() == "middle":
-            updated_text_position[1] = (
-                self.boundingbox[1] + (self.boundingbox[3] - self.boundingbox[1]) // 2
-            )
+            updated_text_position[1] = top + (bottom - top) // 2
         elif self.vertical_justification.lower() == "bottom":
-            updated_text_position[1] = self.boundingbox[3] - text_actor_size[1] // 2
+            updated_text_position[1] = bottom - text_actor_size[1] // 2
         else:
             msg = "Vertical justification must be: top, middle or bottom."
             raise ValueError(msg)
@@ -1928,7 +2016,11 @@ class TextBlock2D(UI):
             The current size of the text block.
         """
         if self.dynamic_bbox:
-            return self.get_text_actor_size()
+            if self._layout_node.parent is not None and self._layout_managed_size:
+                return self._layout_managed_size
+            width, height = self.get_text_actor_size()
+            style = self.layout_style
+            return (width + style.inset(0), height + style.inset(1))
         else:
             return self._bg_size
 
