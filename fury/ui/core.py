@@ -22,6 +22,7 @@ from fury.ui.helpers import (
     Anchor,
     get_anchor_to_multiplier,
 )
+from fury.ui.layout import LayoutNode, compute_sizes, place
 
 
 class UI(object, metaclass=abc.ABCMeta):
@@ -101,6 +102,13 @@ class UI(object, metaclass=abc.ABCMeta):
         self._children = []
         self._anchors = [x_anchor, y_anchor]
         self.z_order = z_order
+        self._layout_node = LayoutNode(
+            measure=self._measure_layout,
+            apply=self._apply_layout,
+            resizable=callable(getattr(self, "resize", None)),
+        )
+        self._layout_natural_size = None
+        self._layout_applied_size = None
 
         self._setup()  # Setup needed actors and sub UI components.
         self.set_position(position, x_anchor, y_anchor)
@@ -148,6 +156,111 @@ class UI(object, metaclass=abc.ABCMeta):
         """Get the actors composing this UI component."""
         msg = "Subclasses of UI must implement `_get_actors(self)`."
         raise NotImplementedError(msg)
+
+    @property
+    def layout_style(self):
+        """
+        Get the layout properties of this UI component.
+
+        Returns
+        -------
+        LayoutStyle
+            The layout properties. Use :meth:`set_layout` to change them.
+        """
+        return self._layout_node.style
+
+    @property
+    def layout_rect(self):
+        """
+        Get the rectangle computed by the most recent layout.
+
+        Returns
+        -------
+        LayoutRect
+            The position and size in screen pixels.
+        """
+        return self._layout_node.rect
+
+    def set_layout(self, **properties):
+        """
+        Change the layout properties of this UI component.
+
+        Parameters
+        ----------
+        **properties : dict
+            Properties of :class:`fury.ui.layout.LayoutStyle`, such as
+            ``width``, ``padding`` or ``gap``.
+
+        Returns
+        -------
+        UI
+            This component, so calls can be chained.
+        """
+        self._layout_node.style.update(**properties)
+        self.mark_layout_dirty()
+        return self
+
+    def mark_layout_dirty(self):
+        """Request a new layout of the tree containing this component."""
+        self._layout_node.mark_dirty()
+
+    def update_layout(self):
+        """
+        Solve the layout rooted at this component if it is out of date.
+
+        The render loop calls this before drawing. Call it directly to read
+        up-to-date sizes and positions before the next frame.
+        """
+        node = self._layout_node
+        if not node.dirty or not node.children or node.parent is not None:
+            return
+
+        compute_sizes(node, available=UIContext.canvas_size)
+        if node.resizable and tuple(self.size) != node.rect.size:
+            self.resize(node.rect.size)
+        place(node, self.get_position())
+
+    def _measure_layout(self, max_width):
+        """
+        Report the natural size of this component for the layout engine.
+
+        A size set by the layout is not natural: if it were reported back,
+        a component that had grown could never shrink again. Only a size
+        changed from outside the layout replaces the natural size.
+
+        Parameters
+        ----------
+        max_width : float or None
+            Width available to the content, or None when unconstrained.
+
+        Returns
+        -------
+        (float, float)
+            The size of the content, excluding padding and border.
+        """
+        current = tuple(int(value) for value in self.size)
+        if self._layout_natural_size is None or current != self._layout_applied_size:
+            self._layout_natural_size = current
+        style = self._layout_node.style
+        return (
+            max(self._layout_natural_size[0] - style.inset(0), 0),
+            max(self._layout_natural_size[1] - style.inset(1), 0),
+        )
+
+    def _apply_layout(self, rect):
+        """
+        Move and resize this component to its computed rectangle.
+
+        Parameters
+        ----------
+        rect : LayoutRect
+            The computed position and size.
+        """
+        if self._layout_node.resizable and tuple(self.size) != rect.size:
+            self.resize(rect.size)
+        if self._layout_node.parent is not None:
+            self.set_position(rect.position)
+        self._layout_applied_size = tuple(int(value) for value in self.size)
 
     @property
     def actors(self):
@@ -1276,8 +1389,6 @@ class TextBlock2D(UI):
         self._bg_size = size
         self._shadow = False
 
-        self._last_rendered_size = (0, 0)
-
         if self._bg_size is None and not self.dynamic_bbox:
             raise ValueError("TextBlock size is required as it is not dynamic.")
 
@@ -1352,18 +1463,13 @@ class TextBlock2D(UI):
         self.actor.max_width = size[0]
         self.update_bounding_box(size=size)
 
-    def update_layout(self):
-        """Update the component layout based on current text dimensions."""
-        current_w, current_h = self.get_text_actor_size()
-        last_w, last_h = self._last_rendered_size
-
-        if abs(current_w - last_w) > 0.1 or abs(current_h - last_h) > 0.1:
-            self._last_rendered_size = (current_w, current_h)
-
-            if self.dynamic_bbox:
-                self.update_bounding_box()
-            else:
-                self.update_alignment()
+    def _text_changed(self):
+        """Refresh the box and the layout after the text content changed."""
+        if self.dynamic_bbox:
+            self.update_bounding_box()
+        else:
+            self.update_alignment()
+        self.mark_layout_dirty()
 
     def _get_actors(self):
         """
@@ -1466,8 +1572,7 @@ class TextBlock2D(UI):
         """
         self._message = text
         self.actor.set_markdown(self.get_formatted_text(text))
-        if self.dynamic_bbox:
-            self.update_bounding_box()
+        self._text_changed()
 
     @property
     def font_size(self):
@@ -1492,8 +1597,7 @@ class TextBlock2D(UI):
             Text font size.
         """
         self.actor.font_size = size
-        if self.dynamic_bbox:
-            self.update_bounding_box()
+        self._text_changed()
 
     @property
     def font_family(self):
@@ -1518,8 +1622,7 @@ class TextBlock2D(UI):
             The font family.
         """
         self.actor.family = family
-        if self.dynamic_bbox:
-            self.update_bounding_box()
+        self._text_changed()
 
     @property
     def justification(self):
