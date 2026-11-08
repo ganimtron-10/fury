@@ -5,6 +5,7 @@ import logging
 import numpy as np
 
 from fury.physics._math import cross, quat_to_matrix, world_inverse_inertia
+from fury.physics.bindings import FollowBinding, describe_actor
 from fury.physics.bodies import BodySet
 from fury.physics.broadphase import find_pairs
 from fury.physics.kinematics import Container, KinematicBodySet
@@ -161,6 +162,7 @@ class World:
         self.contact_hertz = float(contact_hertz)
         self.contact_damping = float(contact_damping)
         self.max_push_speed = float(max_push_speed)
+        self.max_follow_speed = 100.0
         self.restitution_threshold = float(restitution_threshold)
         self._user_margin = contact_margin
         self.margin = 0.04 if contact_margin is None else float(contact_margin)
@@ -170,6 +172,7 @@ class World:
         self._sets = []
         self._containers = []
         self._container_serials = 0
+        self._bindings = []
         self.contacts = empty_contacts()
         self._solver = Solver()
         self._allocate(0)
@@ -209,6 +212,18 @@ class World:
             Every container in the world.
         """
         return tuple(self._containers)
+
+    @property
+    def bindings(self):
+        """
+        Return the objects that connect bodies to actors.
+
+        Returns
+        -------
+        tuple
+            Every actor binding in the world.
+        """
+        return tuple(self._bindings)
 
     @property
     def count(self):
@@ -402,36 +417,122 @@ class World:
         self._update_margin()
         return bodies
 
+    def add(self, actor, *, shape=None, follow_actor=False, **body_options):
+        """
+        Add a FURY actor to the simulation.
+
+        Sizes come from the actor. An actor holding many primitives, such as
+        ``actor.box(centers=...)``, becomes one body per primitive.
+
+        Parameters
+        ----------
+        actor : WorldObject
+            The actor to simulate.
+        shape : Shape, optional
+            Collision shape, overriding what would be inferred. Required for
+            actors whose form cannot be inferred.
+        follow_actor : bool, optional
+            Make a kinematic body copy the actor's pose every step, so that
+            ``fury.motion`` animations can drive it. An actor holding one
+            primitive is recentred on that primitive when added, so its
+            position then gives the primitive's centre; set animation
+            keyframes after adding it.
+        **body_options
+            Passed to :meth:`add_bodies`.
+
+        Returns
+        -------
+        BodySet
+            A handle to the new bodies.
+        """
+        if follow_actor and body_options.get("kind", "dynamic") != "kinematic":
+            raise ValueError('follow_actor requires kind="kinematic".')
+        description = describe_actor(actor, shape, single=follow_actor)
+        bodies = self.add_bodies(
+            description.positions, description.shape, **body_options
+        )
+        self._rotations[bodies._range] = description.rotations
+        self._finish_binding(bodies, description, follow_actor)
+        return bodies
+
+    def _finish_binding(self, bodies, description, follow_actor):
+        """
+        Attach the actor described by ``description`` to ``bodies``.
+
+        Parameters
+        ----------
+        bodies : BodySet
+            The bodies driving or driven by the actor.
+        description : ActorDescription
+            What was learned from the actor.
+        follow_actor : bool
+            Whether the actor drives the body.
+        """
+        binding = description.attach()
+        binding.bodies = bodies
+        if follow_actor:
+            binding = FollowBinding(binding, bodies)
+        self._bindings.append(binding)
+
     def add_container(
         self,
         *,
-        half_extents,
-        center=(0.0, 0.0, 0.0),
+        actor=None,
+        half_extents=None,
+        center=None,
         open_top=False,
         friction=0.5,
         restitution=0.2,
+        follow_actor=False,
     ):
         """
         Add a hollow box that keeps dynamic bodies inside it.
 
         Parameters
         ----------
-        half_extents : float or array_like, shape (3,)
-            Half widths of the interior.
+        actor : WorldObject, optional
+            A box actor giving the container's size and position, which then
+            moves with it.
+        half_extents : float or array_like, shape (3,), optional
+            Half widths of the interior. Required without ``actor``.
         center : array_like, shape (3,), optional
-            Centre of the container.
+            Centre of the container; the origin when not given. Taken from
+            ``actor`` when one is given.
         open_top : bool, optional
             Whether to leave out the wall on the local +Y side.
         friction : float, optional
             Friction of the walls.
         restitution : float, optional
             Bounciness of the walls, from 0 to 1.
+        follow_actor : bool, optional
+            Copy the actor's pose every step, so that ``fury.motion``
+            animations can drive the container.
 
         Returns
         -------
         Container
             A handle that can shake, tilt, spin or move the container.
         """
+        description = None
+        if actor is not None:
+            if half_extents is not None or center is not None:
+                raise ValueError(
+                    "Give either an actor or half_extents and center, not both."
+                )
+            info = getattr(actor, "primitive_info", None)
+            if info is not None and info.kind not in (None, "box"):
+                raise TypeError("A container actor must be a single box.")
+            description = describe_actor(actor, None, single=True)
+            if description.shape_kind != "box":
+                raise TypeError("A container actor must be a single box.")
+            half_extents = description.shape.half_extents
+            center = description.positions[0]
+        elif half_extents is None:
+            raise ValueError("Give an actor or half_extents.")
+        elif follow_actor:
+            raise ValueError("follow_actor requires an actor.")
+        if center is None:
+            center = np.zeros(3)
         size = np.broadcast_to(np.asarray(half_extents, dtype=float), (1, 3)).copy()
         if np.any(size <= 0) or not np.all(np.isfinite(size)):
             raise ValueError("half_extents must be positive and finite.")
@@ -453,6 +554,9 @@ class World:
         container = Container(self, start, open_top=open_top)
         self._sets.append(container)
         self._containers.append(container)
+        if description is not None:
+            self._rotations[container._range] = description.rotations
+            self._finish_binding(container, description, follow_actor)
         return container
 
     def remove(self, bodies):
@@ -474,6 +578,7 @@ class World:
         if bodies in self._containers:
             self._containers.remove(bodies)
             self._holder[self._holder == bodies._serial] = -1
+        self._bindings = [b for b in self._bindings if b.bodies is not bodies]
         for other in self._sets:
             if other._start > bodies._start:
                 other._start -= bodies._count
@@ -757,6 +862,11 @@ class World:
         )
         return merge_contacts(parts)
 
+    def sync(self):
+        """Write the current state into every bound actor."""
+        for binding in self._bindings:
+            binding.sync()
+
     def step(self, count):
         """
         Advance the simulation by whole steps.
@@ -774,6 +884,8 @@ class World:
         for bodies in self._sets:
             if isinstance(bodies, KinematicBodySet):
                 bodies._update(self.time, self.dt)
+        for binding in self._bindings:
+            binding.before_step(self.dt)
         rotation = quat_to_matrix(self._rotations)
         self.contacts = self._find_contacts(rotation)
         self._solver.solve(self, self.contacts, rotation, self._acceleration(rotation))

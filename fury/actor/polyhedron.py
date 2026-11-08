@@ -75,7 +75,7 @@ def box(
     >>> show_manager.start()
     """
     vertices, faces = fp.prim_box(detailed=detailed)
-    return actor_from_primitive(
+    obj = actor_from_primitive(
         vertices,
         faces,
         centers=centers,
@@ -89,6 +89,8 @@ def box(
         wireframe=wireframe,
         wireframe_thickness=wireframe_thickness,
     )
+    obj.primitive_info.kind = "box"
+    return obj
 
 
 def frustum(
