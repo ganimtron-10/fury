@@ -5,6 +5,7 @@ import warnings
 
 import numpy as np
 import numpy.testing as npt
+import pytest
 
 from fury import ui, window
 from fury.data import DATA_DIR, fetch_viz_icons, fetch_viz_new_icons, read_viz_icons
@@ -2563,10 +2564,10 @@ def test_listbox_2d_resize():
     npt.assert_equal(listbox.panel.size, new_size)
 
     new_scrollbar_width = int(new_size[0] / 20)
-    expected_scroll_bar_x = int(new_size[0] - new_scrollbar_width - listbox.margin)
+    expected_scroll_bar_x = int(new_size[0] - new_scrollbar_width - listbox.padding)
     npt.assert_equal(listbox._scroll_bar_x, expected_scroll_bar_x)
 
-    expected_slot_width = int(new_size[0] - new_scrollbar_width - 3 * listbox.margin)
+    expected_slot_width = int(new_size[0] - new_scrollbar_width - 3 * listbox.padding)
     npt.assert_equal(listbox.slot_width, expected_slot_width)
 
     npt.assert_equal(len(listbox.slots), listbox.nb_slots)
@@ -3172,3 +3173,20 @@ def test_radio_button_visual_snapshot():
     arr = window.snapshot(scene=scene, fname=None, return_array=True)
     report = window.analyze_snapshot(arr, find_objects=True)
     assert report.objects >= 1
+
+
+@pytest.mark.parametrize("widget", [ui.Checkbox, ui.RadioButton])
+def test_button_group_padding_keyword_is_deprecated(widget):
+    """The old name for the gap between options keeps working with a warning."""
+    with pytest.warns(DeprecationWarning):
+        group = widget(labels=["a", "b"], padding=7)
+    npt.assert_equal(group.gap, 7)
+    with pytest.warns(DeprecationWarning):
+        npt.assert_equal(group.padding, 7)
+
+
+def test_list_box_margin_is_deprecated():
+    """ListBox2D.margin stays readable under its old name."""
+    listbox = ui.ListBox2D(values=["a"], size=(100, 100))
+    with pytest.warns(DeprecationWarning):
+        npt.assert_equal(listbox.margin, listbox.padding)
