@@ -9,9 +9,16 @@ __all__ = [
     "KinematicBodySet",
     "Sphere",
     "World",
+    "attractor",
+    "drag",
+    "mutual_gravity",
+    "uniform",
+    "vortex",
+    "wind",
 ]
 
 from .bodies import Body, BodySet
+from .forces import attractor, drag, mutual_gravity, uniform, vortex, wind
 from .kinematics import Container, KinematicBodySet
 from .shapes import Box, Sphere
 from .world import World
