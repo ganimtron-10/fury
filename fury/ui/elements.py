@@ -34,7 +34,7 @@ from fury.data import read_viz_icons
 from fury.deprecator import deprecated_params
 from fury.io import get_extension, load_image, load_image_texture
 from fury.lib import EventType
-from fury.ui.containers import ImageContainer2D, Panel2D
+from fury.ui.containers import ImageContainer2D, LayoutBox, Panel2D, Row
 from fury.ui.context import UIContext
 from fury.ui.core import (
     UI,
@@ -46,6 +46,7 @@ from fury.ui.core import (
     TextBlock2D,
 )
 from fury.ui.helpers import clip_overflow
+from fury.ui.layout import Align, Direction
 
 TWO_PI = 2.0 * np.pi
 
@@ -2393,6 +2394,7 @@ class ButtonGroup(UI):
         self.options = {}
         self._label_by_button = {}
 
+        rows = []
         for label in self.labels:
             button = TexturedButton2D(
                 states=self.button_states,
@@ -2406,9 +2408,6 @@ class ButtonGroup(UI):
                 color=self.text_color,
                 dynamic_bbox=True,
             )
-            # A dynamic_bbox text only knows its true width after the first
-            # render; force the layout now so options don't overlap.
-            self._measure_text(text)
 
             if label in self._checked_labels:
                 button.toggled = True
@@ -2419,40 +2418,18 @@ class ButtonGroup(UI):
 
             self.options[label] = (button, text)
             self._label_by_button[id(button)] = label
-            self._children.extend([button, text])
-
-    @staticmethod
-    def _measure_text(text):
-        """
-        Force a text block to compute its glyph layout.
-
-        A :class:`TextBlock2D` created with ``dynamic_bbox=True`` reports a
-        stale, undersized width until the text actor is laid out during the
-        first render. Calling the actor's ``_update_object`` hook performs
-        that layout eagerly, so the reported size is accurate at positioning
-        time and options do not overlap.
-
-        ``_update_object`` is a pygfx internal with no public equivalent that
-        produces the correct size. If a future pygfx version removes it, its
-        absence is reported as a warning (rather than silently ignored) so the
-        overlap can be diagnosed; layout then falls back to the stale size.
-
-        Parameters
-        ----------
-        text : TextBlock2D
-            The text block whose layout should be computed.
-        """
-        update = getattr(text.actor, "_update_object", None)
-        if callable(update):
-            update()
-        else:
-            warnings.warn(
-                "TextBlock2D actor has no callable '_update_object'; option "
-                "labels are sized from a stale layout and may overlap. This "
-                "likely means the installed pygfx version is incompatible.",
-                stacklevel=2,
+            rows.append(
+                Row(button, text, gap=self.button_label_gap, align_cross=Align.CENTER)
             )
-        text.update_bounding_box()
+
+        vertical = self.orientation == "vertical"
+        self._box = LayoutBox(
+            children=rows,
+            direction=Direction.COLUMN if vertical else Direction.ROW,
+            gap=self.gap,
+        )
+        self._box.z_order = self.z_order
+        self._children.append(self._box)
 
     def _get_actors(self):
         """
@@ -2474,54 +2451,11 @@ class ButtonGroup(UI):
         (int, int)
             Width and height of the UI component in pixels.
         """
-        along = 0
-        cross = 0
-        for index, label in enumerate(self.labels):
-            button, text = self.options[label]
-            row_w = button.size[0] + self.button_label_gap + text.size[0]
-            row_h = max(button.size[1], text.size[1])
-
-            if self.orientation == "horizontal":
-                along += row_w + (self.gap if index else 0)
-                cross = max(cross, row_h)
-            else:
-                along += row_h + (self.gap if index else 0)
-                cross = max(cross, row_w)
-
-        if self.orientation == "horizontal":
-            return (along, cross)
-        return (cross, along)
+        return self._box.size
 
     def _update_actors_position(self):
         """Update the position of the internal actors."""
-        origin = self.get_position(x_anchor=Anchor.LEFT, y_anchor=Anchor.TOP)
-        cursor = np.array(origin, dtype=float)
-
-        for label in self.labels:
-            button, text = self.options[label]
-            b_w, b_h = button.size
-            t_w, t_h = text.size
-            row_h = max(b_h, t_h)
-
-            # Vertically center the button and label within the row.
-            button.set_position(
-                (cursor[0], cursor[1] + (row_h - b_h) / 2),
-                x_anchor=Anchor.LEFT,
-                y_anchor=Anchor.TOP,
-            )
-            text.set_position(
-                (
-                    cursor[0] + b_w + self.button_label_gap,
-                    cursor[1] + (row_h - t_h) / 2,
-                ),
-                x_anchor=Anchor.LEFT,
-                y_anchor=Anchor.TOP,
-            )
-
-            if self.orientation == "horizontal":
-                cursor[0] += b_w + self.button_label_gap + t_w + self.gap
-            else:
-                cursor[1] += row_h + self.gap
+        self._box.set_position(self.get_position())
 
     def _handle_button_clicked(self, button):
         """
