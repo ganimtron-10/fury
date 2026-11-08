@@ -46,7 +46,7 @@ from fury.ui.core import (
     TextBlock2D,
 )
 from fury.ui.helpers import clip_overflow
-from fury.ui.layout import Align, Direction
+from fury.ui.layout import Align, Direction, grow
 
 TWO_PI = 2.0 * np.pi
 
@@ -1003,6 +1003,17 @@ class TextBox2D(UI):
         for child in self._children:
             actors.extend(child.actors)
         return actors
+
+    def resize(self, size):
+        """
+        Resize the box around the text.
+
+        Parameters
+        ----------
+        size : (int, int)
+            New width and height in pixels.
+        """
+        self.text.resize(size)
 
     def _get_size(self):
         """
@@ -5067,9 +5078,10 @@ class SpinBox(UI):
             states={"default": read_viz_icons(fname="circle-down.png")}
         )
 
-        self.panel.add_element(self.textbox, (0, 0))
-        self.panel.add_element(self.increment_button, (0, 0))
-        self.panel.add_element(self.decrement_button, (0, 0))
+        self.panel.set_layout(padding=self.padding, gap=self.padding)
+        self.panel.add(self.textbox, width=grow(), height=grow())
+        self.panel.add(self.decrement_button)
+        self.panel.add(self.increment_button)
 
         self.increment_button.on_clicked = self.increment_callback
         self.decrement_button.on_clicked = self.decrement_callback
@@ -5090,8 +5102,7 @@ class SpinBox(UI):
         width, height = size
         pad = self.padding
 
-        # Square buttons as tall as the textbox, side by side on the right:
-        # [pad] textbox [pad] decrement [pad] increment [pad]
+        # Square buttons as tall as the textbox, side by side on the right.
         inner_height = max(int(height - 2 * pad), 0)
         self.button_size = (inner_height, inner_height)
         self.textbox_size = (
@@ -5099,17 +5110,10 @@ class SpinBox(UI):
             inner_height,
         )
 
+        self.increment_button.set_layout(width=inner_height, height=inner_height)
+        self.decrement_button.set_layout(width=inner_height, height=inner_height)
         self.panel.resize(size)
-        self.textbox.text.resize(self.textbox_size)
-        self.increment_button.resize(self.button_size)
-        self.decrement_button.resize(self.button_size)
-
-        # Panel coordinates are offsets from its top-left corner.
-        dec_x = pad + self.textbox_size[0] + pad
-        inc_x = dec_x + inner_height + pad
-        self.panel.update_element(self.textbox, (pad, pad))
-        self.panel.update_element(self.decrement_button, (dec_x, pad))
-        self.panel.update_element(self.increment_button, (inc_x, pad))
+        self.panel.update_layout()
 
     def _get_actors(self):
         """
