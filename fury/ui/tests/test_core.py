@@ -8,7 +8,9 @@ import pytest
 from fury import ui, window
 from fury.actor import Mesh
 from fury.testing import assert_visibility
+from fury.ui import UIContext
 from fury.ui.helpers import Anchor
+from fury.ui.layout import LayoutNode, fit, grow, solve
 
 
 def test_rectangle2d_initialization_default():
@@ -612,7 +614,7 @@ def test_textblock2d_first_frame_layout(
     )
 
     def capture_masks():
-        window.render_screens(show_m.renderer, show_m.screens, is_dirty=False)
+        window.render_screens(show_m.renderer, show_m.screens)
         pixels = show_m.snapshot(fname=None)[:, :, :3]
         foreground = np.all(pixels > 180, axis=2)
         background = (
@@ -807,3 +809,62 @@ def test_textblock2d_solid_text_over_background_snapshot():
 
     assert white_box > 0
     assert dark_text > 0
+
+
+def test_layout_natural_size_survives_layout_resizes():
+    """A size applied by the layout must not become the natural size."""
+    parent = LayoutNode(width=200, height=20)
+    rect = ui.Rectangle2D(size=(50, 20))
+    rect.set_layout(width=grow())
+    parent.add(rect._layout_node)
+    solve(parent)
+    npt.assert_array_equal(rect.size, (200, 20))
+
+    parent.style.update(width=fit())
+    solve(parent)
+    npt.assert_array_equal(rect.size, (50, 20))
+
+
+def test_layout_outside_resize_replaces_natural_size():
+    """A resize from user code changes what the layout starts from."""
+    parent = LayoutNode()
+    rect = ui.Rectangle2D(size=(50, 20))
+    parent.add(rect._layout_node)
+    solve(parent)
+    rect.resize((80, 30))
+    rect.mark_layout_dirty()
+    assert parent.dirty
+    assert solve(parent).size == (80, 30)
+
+
+def test_text_measured_before_first_frame_matches_rendered_size():
+    """Text can be sized without waiting for a rendered frame."""
+    block = ui.TextBlock2D(text="Measured", font_size=24, dynamic_bbox=True)
+    before = block.get_text_actor_size()
+    scene = window.Scene()
+    scene.add(block)
+    show_m = window.ShowManager(scene=scene, size=(200, 100), window_type="offscreen")
+    show_m.render()
+    show_m.window.draw()
+    npt.assert_allclose(before, block.get_text_actor_size())
+    show_m.close()
+
+
+@pytest.mark.parametrize("dynamic_bbox", [True, False])
+def test_font_size_change_realigns_immediately(dynamic_bbox):
+    """Changing the font size must not wait for a later frame (#1194)."""
+    block = ui.TextBlock2D(
+        text="Hello",
+        font_size=12,
+        size=None if dynamic_bbox else (200, 100),
+        dynamic_bbox=dynamic_bbox,
+        bg_color=(1, 0, 0),
+        position=(10, 10),
+        vertical_justification="top",
+    )
+    block.font_size = 40
+    text_h = block.get_text_actor_size()[1]
+    expected_y = UIContext.canvas_size[1] - (10 + text_h // 2)
+    npt.assert_allclose(block.actor.local.y, expected_y)
+    if dynamic_bbox:
+        npt.assert_allclose(block.background.size, block.size)
