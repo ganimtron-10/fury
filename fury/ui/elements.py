@@ -3311,8 +3311,7 @@ class ListBox2D(UI):
 
         # Initialisation of empty text actors
         self.slot_width = int(size[0] - scroll_bar_width - 3 * self.padding)
-        x = self.padding
-        y = self.padding
+        self._set_slots_layout(scroll_bar_width)
         for _ in range(self.nb_slots):
             item = ListBoxItem2D(
                 on_select=self.select,
@@ -3324,8 +3323,8 @@ class ListBox2D(UI):
             )
             item.textblock.font_size = font_size
             self.slots.append(item)
-            self.panel.add_element(item, (int(x), int(y)))
-            y += self.slot_height
+            self.panel.add(item, height=self.slot_height)
+        self.panel.update_layout()
 
         # Add default events listener for this UI component.
         self.scroll_bar.on_left_mouse_button_pressed = self.scroll_click_callback
@@ -3364,7 +3363,7 @@ class ListBox2D(UI):
         self._scroll_bar_x = int(size[0] - new_scrollbar_width - self.padding)
 
         self.slot_width = int(size[0] - new_scrollbar_width - 3 * self.padding)
-        x = self.padding
+        self._set_slots_layout(new_scrollbar_width)
 
         if self.nb_slots > len(self.slots):
             font_size = self.font_size
@@ -3386,18 +3385,16 @@ class ListBox2D(UI):
                     text_actor.add_event_handler(self.wheel_callback, EventType.WHEEL)
 
                 self.slots.append(item)
-                self.panel.add_element(item, (0, 0))
+                self.panel.add(item)
 
         while len(self.slots) > self.nb_slots:
             item = self.slots.pop()
             self.panel.remove_element(item)
 
-        y = self.padding
         for slot in self.slots:
-            self.panel.update_element(slot, (int(x), int(y)))
             slot.textblock.font_size = self.font_size
-            slot.resize((self.slot_width, self.slot_height))
-            y += self.slot_height
+            slot.set_layout(height=self.slot_height)
+        self.panel.update_layout()
 
         if self.view_offset + self.nb_slots > len(self.values):
             self.view_offset = max(0, len(self.values) - self.nb_slots)
@@ -3405,6 +3402,22 @@ class ListBox2D(UI):
         self.scroll_bar.width = new_scrollbar_width
         self.update()
         self.update_scrollbar()
+
+    def _set_slots_layout(self, scroll_bar_width):
+        """
+        Stack the slots in a column that leaves room for the scroll bar.
+
+        Parameters
+        ----------
+        scroll_bar_width : int
+            Width of the scroll bar in pixels.
+        """
+        pad = self.padding
+        self.panel.set_layout(
+            direction=Direction.COLUMN,
+            padding=(pad, 2 * pad + scroll_bar_width, pad, pad),
+            align_cross=Align.STRETCH,
+        )
 
     @property
     def margin(self):
