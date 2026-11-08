@@ -107,6 +107,7 @@ class UI(object, metaclass=abc.ABCMeta):
             measure=self._measure_layout,
             apply=self._apply_layout,
             resizable=callable(getattr(self, "resize", None)),
+            on_dirty=lambda: UIContext.request_layout(self),
         )
         self._layout_natural_size = None
         self._layout_applied_size = None

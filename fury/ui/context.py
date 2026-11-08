@@ -1,5 +1,7 @@
 """UI context module."""
 
+from weakref import WeakSet
+
 import numpy as np
 
 
@@ -31,6 +33,7 @@ class UIContextClass:
         self._canvas_size = np.array([800, 800])
         self._z_max = 1
         self._z_min = -1
+        self._dirty_layouts = WeakSet()
         self._initialized = True
 
     @property
@@ -56,6 +59,25 @@ class UIContextClass:
             UI element that is currently hot, or `None` if no element is hot.
         """
         self._hot_ui = element
+
+    def request_layout(self, element):
+        """
+        Queue a UI element whose layout must be solved before the next frame.
+
+        Parameters
+        ----------
+        element : UI
+            The root of a layout tree that changed.
+        """
+        self._dirty_layouts.add(element)
+
+    def flush_layouts(self):
+        """Solve every queued layout."""
+        while self._dirty_layouts:
+            elements = list(self._dirty_layouts)
+            self._dirty_layouts.clear()
+            for element in elements:
+                element.update_layout()
 
     @property
     def active_ui(self):

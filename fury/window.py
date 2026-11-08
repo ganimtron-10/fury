@@ -592,11 +592,10 @@ def render_screens(renderer, screens, stats=None):
     if stats is not None:
         stats.start()
 
+    UIContext.flush_layouts()
+
     for screen in screens:
         scene_root = screen.scene
-
-        for ui_element in scene_root.ui_elements:
-            ui_element.update_layout()
 
         screen.viewport.render(scene_root.main_scene, screen.camera, flush=False)
         screen.viewport.render(scene_root.ui_scene, scene_root.ui_camera, flush=False)
