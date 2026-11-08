@@ -9,6 +9,7 @@ from fury.physics.bodies import BodySet
 from fury.physics.broadphase import find_pairs
 from fury.physics.narrowphase import empty_contacts, generate_contacts
 from fury.physics.shapes import (
+    BOX,
     DYNAMIC,
     KINEMATIC,
     STATIC,
@@ -312,13 +313,13 @@ class World:
                 logging.warning("density is ignored because mass was given.")
             if mass is None:
                 density = 1.0 if density is None else density
-                body_mass = _per_body(density, count, "density") * volume(size)
+                body_mass = _per_body(density, count, "density") * volume(code, size)
             else:
                 body_mass = _per_body(mass, count, "mass")
             if np.any(body_mass <= 0) or not np.all(np.isfinite(body_mass)):
                 raise ValueError("density and mass must be positive and finite.")
             im = 1.0 / body_mass
-            ii = 1.0 / inertia(size, body_mass)
+            ii = 1.0 / inertia(code, size, body_mass)
 
         frictions = _per_body(friction, count, "friction")
         if np.any(frictions < 0) or not np.all(np.isfinite(frictions)):
@@ -365,7 +366,7 @@ class World:
             _inverse_inertia=ii,
             _shape=code,
             _size=size,
-            _radius=bounding_radius(size),
+            _radius=bounding_radius(code, size),
             _kind=np.full(count, kind_code, dtype=np.intp),
             _friction=frictions,
             _restitution=restitutions,
@@ -581,7 +582,10 @@ class World:
         ndarray, shape (B, 3)
             Half widths.
         """
-        return self._radius[:, None] * np.ones((self.count, 3))
+        extents = self._radius[:, None] * np.ones((self.count, 3))
+        boxes = self._shape == BOX
+        extents[boxes] = (np.abs(rotation[boxes]) @ self._size[boxes, :, None])[..., 0]
+        return extents
 
     def _candidates(self):
         """

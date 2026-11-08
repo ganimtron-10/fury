@@ -4,10 +4,11 @@
 __all__ = [
     "Body",
     "BodySet",
+    "Box",
     "Sphere",
     "World",
 ]
 
 from .bodies import Body, BodySet
-from .shapes import Sphere
+from .shapes import Box, Sphere
 from .world import World

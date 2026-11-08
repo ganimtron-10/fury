@@ -3,6 +3,7 @@
 import numpy as np
 
 SPHERE = 0
+BOX = 1
 
 DYNAMIC = 0
 STATIC = 1
@@ -99,12 +100,49 @@ class Sphere(Shape):
         return np.repeat(radii, 3, axis=1)
 
 
-def bounding_radius(size):
+class Box(Shape):
+    """
+    A box.
+
+    Parameters
+    ----------
+    half_extents : float or array_like
+        Half the width along each local axis. Accepts one value, three values,
+        or ``(N, 3)`` values for one size per body.
+    """
+
+    kind = BOX
+
+    def __init__(self, half_extents):
+        self.half_extents = half_extents
+
+    def sizes(self, count):
+        """
+        Return half extents.
+
+        Parameters
+        ----------
+        count : int
+            Number of bodies using this shape.
+
+        Returns
+        -------
+        ndarray, shape (count, 3)
+            Half extents of each body.
+        """
+        return _broadcast_positive(
+            self.half_extents, count, name="half_extents", width=3
+        )
+
+
+def bounding_radius(kind, size):
     """
     Return the radius of a sphere enclosing each body.
 
     Parameters
     ----------
+    kind : ndarray, shape (N,)
+        Shape codes.
     size : ndarray, shape (N, 3)
         Size parameters.
 
@@ -113,15 +151,17 @@ def bounding_radius(size):
     ndarray, shape (N,)
         Bounding radii.
     """
-    return size[:, 0].copy()
+    return np.where(kind == BOX, np.linalg.norm(size, axis=1), size[:, 0])
 
 
-def volume(size):
+def volume(kind, size):
     """
     Return the volume of each body.
 
     Parameters
     ----------
+    kind : ndarray, shape (N,)
+        Shape codes.
     size : ndarray, shape (N, 3)
         Size parameters.
 
@@ -130,15 +170,18 @@ def volume(size):
     ndarray, shape (N,)
         Volume per body.
     """
-    return 4 / 3 * np.pi * size[:, 0] ** 3
+    sphere = 4 / 3 * np.pi * size[:, 0] ** 3
+    return np.where(kind == BOX, 8.0 * size.prod(axis=1), sphere)
 
 
-def inertia(size, mass):
+def inertia(kind, size, mass):
     """
     Return the diagonal body-space inertia of each body.
 
     Parameters
     ----------
+    kind : ndarray, shape (N,)
+        Shape codes.
     size : ndarray, shape (N, 3)
         Size parameters.
     mass : ndarray, shape (N,)
@@ -149,4 +192,15 @@ def inertia(size, mass):
     ndarray, shape (N, 3)
         Principal moments of inertia.
     """
-    return np.repeat((0.4 * mass * size[:, 0] ** 2)[:, None], 3, axis=1)
+    squared = size**2
+    box = np.stack(
+        [
+            squared[:, 1] + squared[:, 2],
+            squared[:, 0] + squared[:, 2],
+            squared[:, 0] + squared[:, 1],
+        ],
+        axis=1,
+    )
+    box = mass[:, None] / 3.0 * box
+    sphere = 0.4 * mass[:, None] * squared[:, 0, None]
+    return np.where((kind == BOX)[:, None], box, sphere)
