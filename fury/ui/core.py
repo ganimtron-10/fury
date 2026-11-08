@@ -215,6 +215,7 @@ class UI(object, metaclass=abc.ABCMeta):
         if not node.dirty or not node.children or node.parent is not None:
             return
 
+        node.dirty = False
         compute_sizes(node, available=UIContext.canvas_size)
         if node.resizable and tuple(self.size) != node.rect.size:
             self.resize(node.rect.size)
