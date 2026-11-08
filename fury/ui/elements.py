@@ -46,7 +46,7 @@ from fury.ui.core import (
     TextBlock2D,
 )
 from fury.ui.helpers import clip_overflow
-from fury.ui.layout import Align, Direction, grow
+from fury.ui.layout import Align, Direction, grow, percent
 
 TWO_PI = 2.0 * np.pi
 
@@ -2854,9 +2854,6 @@ class ComboBox2D(UI):
             self.text_block_size,
             self.drop_menu_size,
             self.drop_button_size,
-            self._sel_pos,
-            self._btn_pos,
-            self._menu_pos,
         ) = self._calculate_layout(size)
 
         self._icon_files = {
@@ -2912,9 +2909,13 @@ class ComboBox2D(UI):
         self.panel = Panel2D(self.panel_size, opacity=0.0)
         self.panel.background.actor.material.pick_write = False
         self.panel.background.actor.material.depth_write = False
-        self.panel.add_element(self.selection_box, self._sel_pos)
-        self.panel.add_element(self.drop_down_button, self._btn_pos)
-        self.panel.add_element(self.drop_down_menu, self._menu_pos)
+        header = Row(width=grow(), height=percent(0.2))
+        header.add(self.selection_box, width=percent(0.85), height=grow())
+        header.add(self.drop_down_button, width=percent(0.15), height=grow())
+        self.panel.set_layout(direction=Direction.COLUMN)
+        self.panel.add(header)
+        self.panel.add(self.drop_down_menu, width=grow(), height=percent(0.8))
+        self.panel.update_layout()
 
         self._setup_drag_events()
 
@@ -2967,25 +2968,13 @@ class ComboBox2D(UI):
         Returns
         -------
         tuple
-            Tuple of (text_block_size, drop_menu_size, drop_button_size,
-            sel_pos, btn_pos, menu_pos).
+            Tuple of (text_block_size, drop_menu_size, drop_button_size).
         """
         text_block_size = (int(0.85 * size[0]), int(0.2 * size[1]))
         drop_menu_size = (size[0], int(0.8 * size[1]))
         drop_button_size = (int(0.15 * size[0]), int(0.2 * size[1]))
 
-        sel_pos = (0.0, 0.0)
-        btn_pos = (0.85, 0.0)
-        menu_pos = (0.0, 0.2)
-
-        return (
-            text_block_size,
-            drop_menu_size,
-            drop_button_size,
-            sel_pos,
-            btn_pos,
-            menu_pos,
-        )
+        return text_block_size, drop_menu_size, drop_button_size
 
     def resize(self, size):
         """
@@ -3000,31 +2989,20 @@ class ComboBox2D(UI):
         self.font_size = max(1, int(self.font_size * ratio))
         self.panel_size = size
 
-        self.panel.resize(size)
-
         (
             self.text_block_size,
             self.drop_menu_size,
             self.drop_button_size,
-            sel_pos,
-            btn_pos,
-            menu_pos,
         ) = self._calculate_layout(size)
-
-        self.panel.update_element(self.selection_box, sel_pos)
-        self.panel.update_element(self.drop_down_button, btn_pos)
-        self.panel.update_element(self.drop_down_menu, menu_pos)
-
-        self.drop_down_button.resize(self.drop_button_size)
 
         self.drop_down_menu.font_size = self.font_size
         self.drop_down_menu.slot_height = max(
             1, int(self.font_size * self.drop_down_menu.line_spacing)
         )
-        self.drop_down_menu.resize(self.drop_menu_size)
 
         self.selection_box.font_size = self.font_size
-        self.selection_box.resize(self.text_block_size)
+        self.panel.resize(size)
+        self.panel.update_layout()
 
         if not self._menu_visibility:
             self.drop_down_menu.set_visibility(False)
