@@ -7,6 +7,7 @@ import numpy as np
 from fury.io import load_image
 from fury.lib import Texture
 from fury.ui.core import UI, Anchor, Rectangle2D, TextBlock2D
+from fury.ui.layout import Direction, place
 
 
 class Panel2D(UI):
@@ -64,6 +65,9 @@ class Panel2D(UI):
         self._border_color = border_color
         self._border_width = border_width
         super(Panel2D, self).__init__(position=position)
+        self.set_layout(
+            width=size[0], height=size[1], border=border_width if has_border else 0
+        )
         self.resize(size)
         self.alignment = align
         self.color = color
@@ -145,6 +149,13 @@ class Panel2D(UI):
         size : (float, float)
             Panel size (width, height) in pixels.
         """
+        style = self.layout_style
+        if style.width.is_fixed:
+            style.update(width=size[0])
+        if style.height.is_fixed:
+            style.update(height=size[1])
+        self.mark_layout_dirty()
+
         self.background.resize(size)
 
         if self.has_border:
@@ -299,6 +310,51 @@ class Panel2D(UI):
         offset = element.get_position() - self.get_position()
         self.element_offsets.append((element, offset))
 
+    def add(self, element, **properties):
+        """
+        Add a UI component to be positioned by the panel's layout.
+
+        Use :meth:`set_layout` on the panel to choose the direction, padding
+        and alignment. Use :meth:`add_element` for manual placement instead.
+
+        Parameters
+        ----------
+        element : UI
+            The UI item to be added.
+        **properties : dict
+            Layout properties applied to ``element``.
+
+        Returns
+        -------
+        UI
+            The added element.
+        """
+        if properties:
+            element.set_layout(**properties)
+        self._layout_node.add(element._layout_node)
+        self._elements.append(element)
+        self._children.append(element)
+        self.element_offsets.append((element, np.zeros(2)))
+        return element
+
+    def _apply_layout(self, rect):
+        """
+        Record where the layout placed the children, then move the panel.
+
+        The offsets let the panel be dragged without solving the layout again.
+
+        Parameters
+        ----------
+        rect : LayoutRect
+            The computed position and size.
+        """
+        origin = np.array(rect.position, dtype=float)
+        for index, (element, _) in enumerate(self.element_offsets):
+            if element._layout_node.parent is self._layout_node:
+                offset = np.array(element.layout_rect.position, dtype=float) - origin
+                self.element_offsets[index] = (element, offset)
+        super()._apply_layout(rect)
+
     def remove_element(self, element):
         """
         Remove a UI component from the panel.
@@ -314,6 +370,8 @@ class Panel2D(UI):
             If the element is not found in the panel's elements list.
         """
         idx = self._elements.index(element)
+        if element._layout_node.parent is self._layout_node:
+            self._layout_node.remove(element._layout_node)
         del self._elements[idx]
         del self.element_offsets[idx]
         if element in self._children:
@@ -486,12 +544,164 @@ class Panel2D(UI):
             )
             return
 
+        self.set_layout(border=border_width)
         if side.lower() in ["left", "right"]:
             self.borders[side].width = border_width
         elif side.lower() in ["top", "bottom"]:
             self.borders[side].height = border_width
         else:
             raise ValueError(f"{side} not a valid border side")
+
+
+class LayoutBox(UI):
+    """
+    An invisible container that positions its children with the layout engine.
+
+    Parameters
+    ----------
+    position : (float, float), optional
+        Absolute coordinates (x, y) of the box.
+    children : iterable of UI, optional
+        Initial children.
+    **properties : dict
+        Layout properties of the box, such as ``padding`` or ``gap``.
+    """
+
+    def __init__(self, *, position=(0, 0), children=(), **properties):
+        """Initialize the box."""
+        self._box_children = []
+        super(LayoutBox, self).__init__(position=position)
+        self.set_layout(**properties)
+        for child in children:
+            self.add(child)
+
+    def _setup(self):
+        """Set up this UI component, which has nothing to create."""
+
+    def _get_actors(self):
+        """
+        Get the actors composing this UI component.
+
+        Returns
+        -------
+        list
+            An empty list, as a box draws nothing itself.
+        """
+        return []
+
+    def _get_size(self):
+        """
+        Get the computed size of the box.
+
+        Returns
+        -------
+        (int, int)
+            Width and height in pixels.
+        """
+        self.update_layout()
+        return self._layout_node.rect.size
+
+    def resize(self, size):
+        """
+        Give the box a fixed size.
+
+        Parameters
+        ----------
+        size : (int, int)
+            Width and height in pixels.
+        """
+        self.set_layout(width=size[0], height=size[1])
+
+    def _update_actors_position(self):
+        """Move the children together with the box."""
+        position = self.get_position()
+        node = self._layout_node
+        if node.parent is None:
+            if tuple(position) != node.rect.position:
+                place(node, position)
+            return
+
+        origin = np.array(node.rect.position)
+        for child in self._box_children:
+            offset = np.array(child.layout_rect.position) - origin
+            child.set_position(position + offset)
+
+    def add(self, element, **properties):
+        """
+        Add a UI component to the box.
+
+        Parameters
+        ----------
+        element : UI
+            The UI item to be added.
+        **properties : dict
+            Layout properties applied to ``element``.
+
+        Returns
+        -------
+        UI
+            The added element.
+        """
+        if properties:
+            element.set_layout(**properties)
+        self._layout_node.add(element._layout_node)
+        self._box_children.append(element)
+        self._children.append(element)
+        element.z_order = self.z_order
+        return element
+
+    def remove(self, element):
+        """
+        Remove a UI component from the box.
+
+        Parameters
+        ----------
+        element : UI
+            The UI item to be removed.
+        """
+        self._layout_node.remove(element._layout_node)
+        self._box_children.remove(element)
+        self._children.remove(element)
+
+
+class Row(LayoutBox):
+    """
+    An invisible container placing its children from left to right.
+
+    Parameters
+    ----------
+    *children : UI
+        Initial children.
+    position : (float, float), optional
+        Absolute coordinates (x, y) of the row.
+    **properties : dict
+        Layout properties of the row, such as ``padding`` or ``gap``.
+    """
+
+    def __init__(self, *children, position=(0, 0), **properties):
+        """Initialize the row."""
+        properties.setdefault("direction", Direction.ROW)
+        super().__init__(position=position, children=children, **properties)
+
+
+class Column(LayoutBox):
+    """
+    An invisible container placing its children from top to bottom.
+
+    Parameters
+    ----------
+    *children : UI
+        Initial children.
+    position : (float, float), optional
+        Absolute coordinates (x, y) of the column.
+    **properties : dict
+        Layout properties of the column, such as ``padding`` or ``gap``.
+    """
+
+    def __init__(self, *children, position=(0, 0), **properties):
+        """Initialize the column."""
+        properties.setdefault("direction", Direction.COLUMN)
+        super().__init__(position=position, children=children, **properties)
 
 
 class TabPanel2D(UI):
