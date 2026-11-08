@@ -4743,9 +4743,13 @@ class Card2D(UI):
             has_border=self.has_border,
         )
 
-        self.panel.add_element(self.image, (0, 0))
-        self.panel.add_element(self.title_box, (0, 0))
-        self.panel.add_element(self.body_box, (0, 0))
+        # The padding is measured from the panel edge, so the border is part of it.
+        side = max(self.padding - int(self.border_width), 0)
+        text_margin = (self.padding, side, 0, side)
+        self.panel.set_layout(direction=Direction.COLUMN)
+        self.panel.add(self.image)
+        self.panel.add(self.title_box, margin=text_margin)
+        self.panel.add(self.body_box, margin=text_margin)
 
         self._setup_drag_events()
         self._children.append(self.panel)
@@ -4803,26 +4807,15 @@ class Card2D(UI):
         self.card_size = size
         self.panel.resize(size)
 
-        self._image_size, _title_box_size, _body_box_size = self._calculate_sizes(size)
+        self._image_size, title_size, body_size = self._calculate_sizes(size)
 
-        bw = int(self.border_width)
-        img_h = self._image_size[1]
-        title_h = _title_box_size[1]
-
-        _img_coords = (bw, bw)
-        _title_coords = (self.padding, img_h + self.padding + bw)
-        _body_coords = (
-            self.padding,
-            img_h + self.padding + title_h + self.padding + bw,
-        )
-
-        self.panel.update_element(self.image, _img_coords)
-        self.panel.update_element(self.title_box, _title_coords)
-        self.panel.update_element(self.body_box, _body_coords)
-
-        self.image.resize(self._image_size)
-        self.title_box.resize(_title_box_size)
-        self.body_box.resize(_body_box_size)
+        for element, element_size in (
+            (self.image, self._image_size),
+            (self.title_box, title_size),
+            (self.body_box, body_size),
+        ):
+            element.set_layout(width=element_size[0], height=element_size[1])
+        self.panel.update_layout()
 
     def _update_actors_position(self):
         """Update the internal position of the UI element."""

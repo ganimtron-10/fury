@@ -456,8 +456,12 @@ class Panel2D(UI):
         if not self.has_border:
             return
 
-        for key in self.borders.keys():
-            self.update_element(self.borders[key], self.border_coords[key])
+        for key, border in self.borders.items():
+            offset = np.array(self.border_coords[key]) * self.size
+            for index, (element, _) in enumerate(self.element_offsets):
+                if element is border:
+                    self.element_offsets[index] = (border, offset)
+            border.set_position(self.get_position() + offset)
 
     @property
     def border_color(self):
