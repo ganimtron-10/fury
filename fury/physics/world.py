@@ -8,6 +8,7 @@ from fury.physics._math import cross, quat_to_matrix, world_inverse_inertia
 from fury.physics.bindings import FollowBinding, describe_actor
 from fury.physics.bodies import BodySet
 from fury.physics.broadphase import find_pairs
+from fury.physics.forces import Relaxation, _number, _vector, combined_relaxation
 from fury.physics.kinematics import Container, KinematicBodySet
 from fury.physics.narrowphase import (
     container_contacts,
@@ -187,6 +188,7 @@ class World:
         self._container_serials = 0
         self._bindings = []
         self._step_callbacks = []
+        self._force_fields = []
         self._accumulator = 0.0
         self._alpha = 1.0
         self._previous = None
@@ -708,6 +710,95 @@ class World:
         """
         np.add.at(self._force[:, 3:], body, torque)
 
+    def add_force(self, field):
+        """
+        Add a force field that acts on every dynamic body at each step.
+
+        Parameters
+        ----------
+        field : callable
+            Called with the world; returns forces as an array of shape
+            ``(world.count, 3)``. See :mod:`fury.physics.forces` for ready-made
+            fields.
+
+        Returns
+        -------
+        callable
+            The same field, for :meth:`remove_force`.
+        """
+        if not callable(field):
+            raise TypeError("A force field must be callable.")
+        self._force_fields.append(field)
+        return field
+
+    def remove_force(self, field):
+        """
+        Remove a force field.
+
+        Parameters
+        ----------
+        field : callable
+            A field passed to :meth:`add_force`.
+        """
+        if field not in self._force_fields:
+            raise ValueError("This field was not added to the world.")
+        self._force_fields.remove(field)
+
+    def explode(self, center, *, strength=10.0, radius=5.0):
+        """
+        Throw bodies away from a point.
+
+        The speed each body gains falls off linearly to zero at ``radius``,
+        whatever its mass.
+
+        Parameters
+        ----------
+        center : array_like, shape (3,)
+            Centre of the blast.
+        strength : float, optional
+            Speed gained by a body at the centre.
+        radius : float, optional
+            Distance beyond which nothing is affected.
+
+        Returns
+        -------
+        int
+            The number of bodies affected.
+        """
+        center = _vector(center, "center")
+        strength = _number(strength, "strength")
+        radius = _number(radius, "radius", positive=True)
+        offset = self._positions - center
+        distance = np.linalg.norm(offset, axis=1)
+        hit = np.flatnonzero((distance < radius) & (self._kind == DYNAMIC))
+        if hit.size == 0:
+            return 0
+        direction = offset[hit].copy()
+        direction[distance[hit] < 1e-9] = (0.0, 1.0, 0.0)
+        direction /= np.linalg.norm(direction, axis=1, keepdims=True)
+        falloff = strength * (1.0 - distance[hit] / radius)
+        self._velocities[hit, :3] += direction * falloff[:, None]
+        return int(hit.size)
+
+    def _apply_force_fields(self):
+        """Add the output of every force field to the accumulated forces."""
+        fields = list(self._force_fields)
+        relaxing = [field for field in fields if isinstance(field, Relaxation)]
+        if relaxing:
+            self._force[:, :3] += combined_relaxation(self, relaxing)
+        for field in fields:
+            if isinstance(field, Relaxation):
+                continue
+            forces = np.asarray(field(self), dtype=float)
+            if forces.shape != (self.count, 3):
+                raise ValueError(
+                    "A force field must return an array of shape "
+                    f"({self.count}, 3); got {forces.shape}."
+                )
+            if not np.all(np.isfinite(forces)):
+                raise ValueError("A force field returned non-finite forces.")
+            self._force[:, :3] += forces
+
     def _solver_dynamic_mask(self):
         """
         Return the bodies the solver may move.
@@ -1011,6 +1102,7 @@ class World:
             binding.before_step(self.dt)
         if self.interpolate:
             self._previous = (self._positions.copy(), self._rotations.copy())
+        self._apply_force_fields()
         rotation = quat_to_matrix(self._rotations)
         self.contacts = self._find_contacts(rotation)
         self._solver.solve(self, self.contacts, rotation, self._acceleration(rotation))
