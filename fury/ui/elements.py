@@ -2654,15 +2654,11 @@ class ButtonGroup(UI):
         z_order=0,
     ):
         """Init class instance."""
-        if orientation not in ("vertical", "horizontal"):
-            raise ValueError(
-                f"orientation should be 'vertical' or 'horizontal', "
-                f"got {orientation!r}."
-            )
+        self._check_orientation(orientation)
 
         self.labels = list(labels)
         self._checked_labels = list(checked_labels)
-        self.orientation = orientation
+        self._orientation = orientation
         self._gap = gap
         self._font_size = font_size
         self.font_family = font_family
@@ -2673,7 +2669,7 @@ class ButtonGroup(UI):
         self.button_states = button_states
 
         self.button_size = (int(font_size * 1.2), int(font_size * 1.2))
-        self.button_label_gap = max(12, int(round(font_size * 0.8)))
+        self._button_label_gap = max(12, int(round(font_size * 0.8)))
 
         super(ButtonGroup, self).__init__(position=position, z_order=z_order)
 
@@ -2694,12 +2690,54 @@ class ButtonGroup(UI):
         """
         return _toggle_icon_states("checkbox")
 
+    @staticmethod
+    def _check_orientation(orientation):
+        """
+        Check that an orientation is supported.
+
+        Parameters
+        ----------
+        orientation : str
+            The orientation to check.
+
+        Raises
+        ------
+        ValueError
+            If ``orientation`` is not ``"vertical"`` or ``"horizontal"``.
+        """
+        if orientation not in ("vertical", "horizontal"):
+            raise ValueError(
+                f"orientation should be 'vertical' or 'horizontal', "
+                f"got {orientation!r}."
+            )
+
+    def _direction(self):
+        """
+        Get the layout direction matching the orientation.
+
+        Returns
+        -------
+        Direction
+            ``Direction.COLUMN`` for vertical options, ``Direction.ROW``
+            for horizontal ones.
+        """
+        if self._orientation == "vertical":
+            return Direction.COLUMN
+        return Direction.ROW
+
     def _setup(self):
-        """Set up this UI component."""
+        """
+        Set up this UI component.
+
+        The options are placed by an inner box whose layout node is the only
+        child of this group's node. The group therefore joins the layout tree
+        of any parent it is added to, and is a layout root of its own when it
+        is placed directly in a scene.
+        """
         self.options = {}
         self._label_by_button = {}
+        self._rows = []
 
-        rows = []
         for label in self.labels:
             button = TexturedButton2D(
                 states=self.button_states,
@@ -2723,18 +2761,16 @@ class ButtonGroup(UI):
 
             self.options[label] = (button, text)
             self._label_by_button[id(button)] = label
-            rows.append(
+            self._rows.append(
                 Row(button, text, gap=self.button_label_gap, align_cross=Align.CENTER)
             )
 
-        vertical = self.orientation == "vertical"
         self._box = LayoutBox(
-            children=rows,
-            direction=Direction.COLUMN if vertical else Direction.ROW,
-            gap=self.gap,
+            children=self._rows, direction=self._direction(), gap=self.gap
         )
         self._box.z_order = self.z_order
         self._children.append(self._box)
+        self._layout_node.add(self._box._layout_node)
 
     def _get_actors(self):
         """
@@ -2756,11 +2792,22 @@ class ButtonGroup(UI):
         (int, int)
             Width and height of the UI component in pixels.
         """
-        return self._box.size
+        self.update_layout()
+        return self._layout_node.rect.size
 
     def _update_actors_position(self):
-        """Update the position of the internal actors."""
-        self._box.set_position(self.get_position())
+        """
+        Update the position of the internal actors.
+
+        As a layout root, the group solves its layout again, which also picks
+        up resized buttons and a changed canvas height. Inside a parent
+        layout, the parent solves the tree and the group only moves its box.
+        """
+        if self._layout_node.parent is None:
+            self.mark_layout_dirty()
+            self.update_layout()
+        else:
+            self._box.set_position(self.get_position())
 
     def _handle_button_clicked(self, button):
         """
@@ -2835,6 +2882,68 @@ class ButtonGroup(UI):
             Labels of the options that are currently toggled on.
         """
         return list(self._checked_labels)
+
+    @property
+    def orientation(self):
+        """
+        Get the layout direction of the options.
+
+        Returns
+        -------
+        str
+            ``"vertical"`` or ``"horizontal"``.
+        """
+        return self._orientation
+
+    @orientation.setter
+    def orientation(self, orientation):
+        """
+        Set the layout direction of the options.
+
+        The options are laid out again before the next frame.
+
+        Parameters
+        ----------
+        orientation : str
+            ``"vertical"`` stacks the options from top to bottom and
+            ``"horizontal"`` places them from left to right.
+
+        Raises
+        ------
+        ValueError
+            If ``orientation`` is not ``"vertical"`` or ``"horizontal"``.
+        """
+        self._check_orientation(orientation)
+        self._orientation = orientation
+        self._box.set_layout(direction=self._direction())
+
+    @property
+    def button_label_gap(self):
+        """
+        Get the space between each button and its label.
+
+        Returns
+        -------
+        float
+            Spacing in pixels.
+        """
+        return self._button_label_gap
+
+    @button_label_gap.setter
+    def button_label_gap(self, gap):
+        """
+        Set the space between each button and its label.
+
+        The options are laid out again before the next frame.
+
+        Parameters
+        ----------
+        gap : float
+            Spacing in pixels. Must not be negative.
+        """
+        self._button_label_gap = gap
+        for row in self._rows:
+            row.set_layout(gap=gap)
 
     @property
     def font_size(self):
