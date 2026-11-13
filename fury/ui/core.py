@@ -107,6 +107,7 @@ class UI(object, metaclass=abc.ABCMeta):
         self._children = []
         self._ui_scene = None
         self._held_by_scene = False
+        self._visibility = True
         self._anchors = [x_anchor, y_anchor]
         self.z_order = z_order
         self._layout_node = LayoutNode(
@@ -305,7 +306,9 @@ class UI(object, metaclass=abc.ABCMeta):
             Scene dedicated to UI elements.
         direct : bool, optional
             True when the scene holds this component itself, rather than
-            through a parent component.
+            through a parent component. This is recorded as a single flag, not
+            per scene: a component held directly by two scenes is treated as
+            held until either scene removes it.
         """
         if direct:
             self._held_by_scene = True
@@ -346,7 +349,9 @@ class UI(object, metaclass=abc.ABCMeta):
         """
         Make a UI component a child of this one.
 
-        If this component is drawn, the child is drawn in the same scene.
+        If this component is drawn, the child is drawn in the same scene. If
+        this component was last hidden with :meth:`set_visibility`, the child
+        is hidden too.
 
         Parameters
         ----------
@@ -356,6 +361,8 @@ class UI(object, metaclass=abc.ABCMeta):
         self._children.append(child)
         if self._ui_scene is not None:
             child._add_to_ui_scene(self._ui_scene)
+        if not self._visibility:
+            child.set_visibility(False)
 
     def _remove_child(self, child):
         """
@@ -574,6 +581,7 @@ class UI(object, metaclass=abc.ABCMeta):
         visibility : bool
             If `True`, the UI component will be visible. If `False`, it will be hidden.
         """
+        self._visibility = visibility
         for actor in self.actors:
             actor.visible = visibility
 

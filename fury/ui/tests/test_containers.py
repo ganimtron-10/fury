@@ -1209,3 +1209,13 @@ def test_panel_ignores_an_explicit_layout_border(caplog):
     panel.border_width = ("left", 10)
     panel.update_layout()
     npt.assert_array_equal(child.get_position(), (10, 4))
+
+
+def test_invalid_panel_layout_keeps_the_previous_padding():
+    panel = ui.Panel2D((100, 100), has_border=True, border_width=4)
+    child = panel.add(_block())
+    with npt.assert_raises(TypeError):
+        panel.set_layout(padding=5, bogus=1)
+    panel.border_width = ("left", 10)
+    panel.update_layout()
+    npt.assert_array_equal(child.get_position(), (10, 4))

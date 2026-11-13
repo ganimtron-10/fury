@@ -460,3 +460,60 @@ def test_child_also_held_by_the_scene_stays_drawn_after_leaving_a_container():
     _draw(show_m)
     assert element.actor.parent is None
     show_m.close()
+
+
+def _assert_hidden(show_m, element):
+    """The element is drawn nowhere and cannot be picked at its center."""
+    actors = _all_actors(element)
+    assert all(not actor.visible for actor in actors)
+    assert _picked(show_m, *_center(element)) not in actors
+
+
+def test_child_added_to_a_hidden_panel_stays_hidden():
+    panel = ui.Panel2D((200, 100), position=(10, 10))
+    show_m = _show(panel)
+    panel.set_visibility(False)
+
+    placed = ui.Rectangle2D(size=(30, 30), color=(1, 0, 0))
+    panel.add_element(placed, (10, 10))
+    laid_out = panel.add(ui.Rectangle2D(size=(30, 30), color=(0, 1, 0)))
+    _draw(show_m)
+    _assert_hidden(show_m, placed)
+    _assert_hidden(show_m, laid_out)
+
+    panel.set_visibility(True)
+    _draw(show_m)
+    assert _picked(show_m, *_center(placed)) is placed.actor
+    show_m.close()
+
+
+def test_child_added_to_a_hidden_row_stays_hidden():
+    row = ui.Row(ui.Rectangle2D(size=(40, 40)), gap=10, position=(10, 10))
+    show_m = _show(row)
+    row.set_visibility(False)
+
+    late = row.add(ui.TextButton2D(label="Go", size=(80, 30)))
+    _draw(show_m)
+    _assert_hidden(show_m, late)
+
+    row.set_visibility(True)
+    _draw(show_m)
+    assert _picked(show_m, *_center(late)) in _all_actors(late)
+    show_m.close()
+
+
+def test_node_added_to_a_collapsed_tree_node_stays_hidden():
+    root = ui.elements.TreeNode2D("root", position=(10, 10), size=(200, 200))
+    show_m = _show(root)
+    assert not root.expanded
+
+    child = ui.elements.TreeNode2D("child", size=(200, 100))
+    root.add_node(child)
+    _draw(show_m)
+    _assert_hidden(show_m, child)
+
+    root.expanded = True
+    _draw(show_m)
+    target = _picked(show_m, *_center(child.title_panel))
+    assert target in _all_actors(child.title_panel)
+    show_m.close()

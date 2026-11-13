@@ -199,14 +199,22 @@ class Panel2D(UI):
                 "Panel2D sets its layout border from border_width; "
                 "the border layout property is ignored."
             )
+        content_padding = self._content_padding
         if "padding" in properties:
-            self._content_padding = Edges.of(properties.pop("padding"))
-            properties.update(self._border_inset())
-        return super().set_layout(**properties)
+            content_padding = Edges.of(properties.pop("padding"))
+            properties.update(self._border_inset(content_padding))
+        super().set_layout(**properties)
+        self._content_padding = content_padding
+        return self
 
-    def _border_inset(self):
+    def _border_inset(self, padding):
         """
         Get the layout border and padding that keep content inside the borders.
+
+        Parameters
+        ----------
+        padding : Edges
+            Padding given by the user, without the borders.
 
         Returns
         -------
@@ -215,7 +223,6 @@ class Panel2D(UI):
         """
         widths = self._border_widths
         shared = min(widths.values())
-        padding = self._content_padding
         return {
             "border": shared,
             "padding": Edges(
@@ -228,7 +235,7 @@ class Panel2D(UI):
 
     def _update_border_inset(self):
         """Apply the current border widths to the layout."""
-        super().set_layout(**self._border_inset())
+        super().set_layout(**self._border_inset(self._content_padding))
 
     def _update_actors_position(self):
         """Update the position of the internal actors."""
@@ -269,6 +276,7 @@ class Panel2D(UI):
             If True, the panel and its elements will be visible. If False, it will
             be hidden.
         """
+        self._visibility = visibility
         for element in self._elements:
             element.set_visibility(visibility)
 
