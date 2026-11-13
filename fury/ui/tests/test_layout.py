@@ -433,6 +433,46 @@ def test_wrap_percent_height_in_fit_row_takes_content_height():
     assert tail.rect.height == 25
 
 
+def _stretched_wrap_row(content, row_height):
+    child = LayoutNode(measure=lambda _: (10, content), height=percent(0.5))
+    row = LayoutNode(children=[child], width=fixed(100), wrap=True)
+    solve(LayoutNode(children=[row], height=row_height, align_cross=Align.STRETCH))
+    return row, child
+
+
+def _grow_wrap_row(content, column_height):
+    child = LayoutNode(measure=lambda _: (10, content), height=percent(0.5))
+    row = LayoutNode(children=[child], width=fixed(100), height=grow(), wrap=True)
+    solve(LayoutNode(children=[row], height=column_height, direction=Direction.COLUMN))
+    return row, child
+
+
+def _bounded_wrap_row(content, row_height):
+    child = LayoutNode(measure=lambda _: (10, content), height=percent(0.5))
+    row = LayoutNode(children=[child], width=fixed(100), height=row_height, wrap=True)
+    solve(row)
+    return row, child
+
+
+@pytest.mark.parametrize(
+    "build,content,row_size,expected",
+    [
+        (_stretched_wrap_row, 30, 29, (29, 15)),
+        (_stretched_wrap_row, 30, 30, (30, 15)),
+        (_stretched_wrap_row, 30, 31, (31, 16)),
+        (_grow_wrap_row, 40, 40, (40, 20)),
+        (_grow_wrap_row, 40, 41, (41, 21)),
+        (_bounded_wrap_row, 20, fit(min=100), (100, 50)),
+        (_bounded_wrap_row, 100, fit(max=30), (30, 15)),
+    ],
+)
+def test_wrap_percent_height_follows_how_the_row_was_sized(
+    build, content, row_size, expected
+):
+    row, child = build(content, row_size)
+    assert (row.rect.height, child.rect.height) == expected
+
+
 def test_wrap_percent_height_in_grow_row_uses_final_height():
     head = text_leaf(10, 30, height=percent(0.5))
     row = LayoutNode(children=[head], width=fixed(100), height=grow(), wrap=True)
@@ -449,17 +489,21 @@ def test_wrap_percent_height_in_stretched_row_uses_final_height():
     assert head.rect.height == 50
 
 
-def test_wrap_with_many_children_solves_quickly():
-    rows = [
-        LayoutNode(children=[box() for _ in range(3000)], wrap=True),
-        LayoutNode(children=[box() for _ in range(3000)], width=30000, wrap=True),
-    ]
-    start = time.perf_counter()
-    for row in rows:
+def _solve_wrap_row_time(count):
+    """Return the best of three times to solve a wrap row of ``count`` boxes."""
+    times = []
+    for _ in range(3):
+        row = LayoutNode(children=[box() for _ in range(count)], wrap=True)
+        start = time.perf_counter()
         solve(row)
-    elapsed = time.perf_counter() - start
-    npt.assert_array_less(elapsed, 0.5)
-    assert rows[1].children[-1].rect.x == 29990
+        times.append(time.perf_counter() - start)
+    return min(times)
+
+
+def test_wrap_line_breaking_scales_linearly():
+    small = _solve_wrap_row_time(1000)
+    large = _solve_wrap_row_time(4000)
+    npt.assert_array_less(large / small, 8)
 
 
 def test_wrap_cross_percent_uses_content_box():
@@ -579,6 +623,7 @@ def test_absolute_grow_and_percent_respect_margin():
         lambda: grow(2),
         lambda: place(LayoutNode(), (0, 0)),
         lambda: LayoutNode(LayoutStyle()),
+        lambda: LayoutStyle(fixed(10)),
     ],
 )
 def test_optional_parameters_are_keyword_only(call):

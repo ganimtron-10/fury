@@ -215,9 +215,10 @@ def percent(fraction, *, min=0, max=_INF):  # noqa: A002
     wrapping row the gaps on a line are only known once lines are broken, so
     widths there are a fraction of the whole content width, and two children at
     ``percent(0.5)`` only share a line when there is no gap. A percent height
-    in a wrapping row whose height comes from its own content would make that
-    height depend on itself, so there the child takes the height of its
-    content instead.
+    in a wrapping row whose height is the height of its content (a ``fit``
+    height within its bounds, not grown, stretched or shrunk by the parent)
+    would make that height depend on itself, so there the child takes the
+    height of its content instead.
 
     Parameters
     ----------
@@ -363,7 +364,7 @@ _STYLE_CONVERTERS = {
 }
 
 
-@dataclass
+@dataclass(kw_only=True)
 class LayoutStyle:
     """
     Layout properties of one node.
@@ -595,6 +596,7 @@ class LayoutNode:
         self._solving = False
         self._size = [0.0, 0.0]
         self._content_size = [0.0, 0.0]
+        self._sized_by_content = [False, False]
         self._lines = []
         self._float_cycles = frozenset()
         for child in children:
@@ -850,13 +852,36 @@ def _fit_pass(node, axis):
         content = _leaf_content_size(node, axis)
 
     sizing = _sizing(node, axis)
-    node._content_size[axis] = sizing.clamp(content + node.style.inset(axis))
+    wanted = content + node.style.inset(axis)
+    node._content_size[axis] = sizing.clamp(wanted)
+    node._sized_by_content[axis] = (
+        (sizing.kind is _Kind.FIT or not node.resizable)
+        and not sizing.is_fixed
+        and sizing.min <= wanted <= sizing.max
+    )
     if sizing.kind is _Kind.FIXED:
         node._size[axis] = sizing.value
     elif _is_percent(node, axis):
         node._size[axis] = sizing.clamp(0.0)
     else:
         node._size[axis] = node._content_size[axis]
+
+
+def _set_size(node, axis, size):
+    """
+    Set a size decided by the parent or the root, not by the node's content.
+
+    Parameters
+    ----------
+    node : LayoutNode
+        The node.
+    axis : int
+        0 for horizontal and 1 for vertical.
+    size : float
+        Size in pixels.
+    """
+    node._size[axis] = size
+    node._sized_by_content[axis] = False
 
 
 def _share_space(nodes, amount, axis, weights, limits):
@@ -893,7 +918,7 @@ def _share_space(nodes, amount, axis, weights, limits):
                 target = limit
                 finished.append(node)
             distributed += target - node._size[axis]
-            node._size[axis] = target
+            _set_size(node, axis, target)
         amount -= distributed
         if not finished:
             return
@@ -971,7 +996,7 @@ def _resolve_main_axis(line, content, gap, axis, *, wrap=False):
     for child in line:
         size = _main_percent_size(child, percent_space, axis)
         if size is not None:
-            child._size[axis] = size
+            _set_size(child, axis, size)
 
     free = content - gaps - sum(_outer(c, axis) for c in line)
     if free > _EPSILON:
@@ -1013,7 +1038,7 @@ def _resolve_percent(children, content, axis):
         sizing = _sizing(child, axis)
         if child.resizable and sizing.kind is _Kind.PERCENT:
             room = max(content - child.style.margin.total(axis), 0)
-            child._size[axis] = sizing.clamp(sizing.value * room)
+            _set_size(child, axis, sizing.clamp(sizing.value * room))
 
 
 def _fill(child, room, axis):
@@ -1032,7 +1057,7 @@ def _fill(child, room, axis):
     size = _sizing(child, axis).clamp(room)
     if child.style.shrink == 0:
         size = max(size, child._size[axis])
-    child._size[axis] = size
+    _set_size(child, axis, size)
 
 
 def _resolve_cross_axis(line, available, axis, align):
@@ -1066,7 +1091,7 @@ def _resolve_cross_axis(line, available, axis, align):
             and child.style.shrink > 0
             and child._size[axis] > room
         ):
-            child._size[axis] = sizing.clamp(room)
+            _set_size(child, axis, sizing.clamp(room))
 
 
 def _build_lines(node, flow, content):
@@ -1128,31 +1153,7 @@ def _resolve_out_of_flow(node, content, axis):
     for child in children:
         if _sizing(child, axis).kind is _Kind.GROW:
             room = max(content - child.style.margin.total(axis), 0)
-            child._size[axis] = _sizing(child, axis).clamp(room)
-
-
-def _size_follows_content(node, axis):
-    """
-    Check whether a node's final size along an axis is the size of its content.
-
-    Fixed and percent sizes never follow the content. Other sizes do unless
-    the parent grew, stretched or shrank the node.
-
-    Parameters
-    ----------
-    node : LayoutNode
-        The node, after its parent has distributed space.
-    axis : int
-        0 for horizontal and 1 for vertical.
-
-    Returns
-    -------
-    bool
-        True if the size is the one the content asked for.
-    """
-    if _sizing(node, axis).is_fixed or _is_percent(node, axis):
-        return False
-    return abs(node._size[axis] - node._content_size[axis]) <= _EPSILON
+            _set_size(child, axis, _sizing(child, axis).clamp(room))
 
 
 def _distribute_pass(node, axis):
@@ -1178,7 +1179,7 @@ def _distribute_pass(node, axis):
             for line in node._lines:
                 _resolve_main_axis(line, content, style.gap, axis, wrap=style.wrap)
         elif style.wrap:
-            follows_content = _size_follows_content(node, axis)
+            follows_content = node._sized_by_content[axis]
             for line in node._lines:
                 if follows_content:
                     for child in line:
@@ -1215,9 +1216,9 @@ def _resolve_root(root, available, axis):
         return
     sizing = _sizing(root, axis)
     if sizing.kind is _Kind.GROW:
-        root._size[axis] = sizing.clamp(available[axis])
+        _set_size(root, axis, sizing.clamp(available[axis]))
     elif sizing.kind is _Kind.PERCENT:
-        root._size[axis] = sizing.clamp(sizing.value * available[axis])
+        _set_size(root, axis, sizing.clamp(sizing.value * available[axis]))
 
 
 def _main_offsets(style, free, count):
