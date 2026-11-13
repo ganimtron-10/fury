@@ -394,9 +394,45 @@ def test_centering_keeps_integer_size(size, space):
 
 def test_wrap_resolves_percent_before_breaking_lines():
     children = [box(width=percent(0.5)) for _ in range(4)]
-    solve(LayoutNode(children=children, width=fixed(110), wrap=True, gap=10))
+    solve(LayoutNode(children=children, width=fixed(100), wrap=True))
     assert [c.rect.width for c in children] == [50, 50, 50, 50]
-    assert [c.rect.position for c in children] == [(0, 0), (60, 0), (0, 20), (60, 20)]
+    assert [c.rect.position for c in children] == [(0, 0), (50, 0), (0, 10), (50, 10)]
+
+
+@pytest.mark.parametrize(
+    "fraction,positions",
+    [
+        (0.45, [(0, 0), (55, 0), (0, 20)]),
+        (0.5, [(0, 0), (0, 20), (0, 40)]),
+    ],
+)
+def test_wrap_percent_ignores_gaps_and_matches_across_lines(fraction, positions):
+    children = [box(width=percent(fraction)) for _ in range(3)]
+    solve(LayoutNode(children=children, width=fixed(100), wrap=True, gap=10))
+    assert len({c.rect.width for c in children}) == 1
+    assert children[0].rect.width == fraction * 100
+    assert [c.rect.position for c in children] == positions
+
+
+def test_wrap_percent_height_in_fit_row_does_not_overflow():
+    tall = box(fixed(60), 40)
+    half = box(50, percent(1.0))
+    root = LayoutNode(children=[tall, half], width=100, wrap=True)
+    rect = solve(root)
+    assert half.rect.y + half.rect.height <= rect.height
+
+
+def test_wrap_with_many_children_solves_quickly():
+    rows = [
+        LayoutNode(children=[box() for _ in range(3000)], wrap=True),
+        LayoutNode(children=[box() for _ in range(3000)], width=30000, wrap=True),
+    ]
+    start = time.perf_counter()
+    for row in rows:
+        solve(row)
+    elapsed = time.perf_counter() - start
+    npt.assert_array_less(elapsed, 0.5)
+    assert rows[1].children[-1].rect.x == 29990
 
 
 def test_wrap_cross_percent_uses_content_box():
@@ -426,8 +462,45 @@ def test_floating_cycle_is_placed_once_with_a_warning(caplog):
     second.style.update(float_to=first)
     root = LayoutNode(children=[first, second])
     solve(root)
-    assert "cycle" in caplog.text
+    assert "2 floating nodes form a cycle" in caplog.text
     assert second.rect.x == first.rect.x + 5
+
+
+def test_floating_cycle_warns_once_per_cycle(caplog):
+    first, second = box(position=Position.FLOATING), box(position=Position.FLOATING)
+    first.style.update(float_to=second)
+    second.style.update(float_to=first)
+    root = LayoutNode(children=[first, second])
+    for _ in range(3):
+        solve(root)
+    assert caplog.text.count("cycle") == 1
+
+
+def test_floating_chain_into_cycle_places_followers_from_fresh_rects():
+    lead = box(position=Position.FLOATING, offset=(1, 0))
+    first = box(position=Position.FLOATING, offset=(10, 0))
+    second = box(position=Position.FLOATING, offset=(100, 0))
+    lead.style.update(float_to=first)
+    first.style.update(float_to=second)
+    second.style.update(float_to=first)
+    solve(LayoutNode(children=[lead, first, second]))
+    assert second.rect.x == first.rect.x + 100
+    assert lead.rect.x == first.rect.x + 1
+
+
+def test_long_floating_chain_in_reverse_order():
+    nodes = [box(position=Position.FLOATING, offset=(1, 0)) for _ in range(1500)]
+    for node, target in zip(nodes, nodes[1:], strict=False):
+        node.style.update(float_to=target)
+    solve(LayoutNode(children=nodes))
+    assert nodes[0].rect.x == 1500
+
+
+def test_floating_margin_moves_and_shrinks_alike():
+    menu = box(width=percent(0.5), position=Position.FLOATING, margin=5)
+    solve(LayoutNode(children=[menu], width=100, height=100))
+    assert menu.rect.position == (5, 5)
+    assert menu.rect.width == 45
 
 
 @pytest.mark.parametrize(

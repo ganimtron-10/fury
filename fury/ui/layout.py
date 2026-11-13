@@ -211,7 +211,11 @@ def percent(fraction, *, min=0, max=_INF):  # noqa: A002
     Size an axis as a fraction of the parent's content box.
 
     On the parent's main axis the gaps are removed first, so two children at
-    ``percent(0.5)`` always fit side by side.
+    ``percent(0.5)`` always fit side by side. In a wrapping row the gaps on a
+    line are only known once lines are broken, so widths there are a fraction
+    of the whole content width. A percent height in a wrapping row is only
+    resolved when the row has a fixed or percent height; otherwise the child
+    keeps the height of its content.
 
     Parameters
     ----------
@@ -582,6 +586,7 @@ class LayoutNode:
         self._solving = False
         self._size = [0.0, 0.0]
         self._lines = []
+        self._float_cycles = frozenset()
         for child in children:
             self.add(child)
 
@@ -868,38 +873,29 @@ def _main_percent_size(child, space, axis):
     return sizing.clamp(sizing.value * max(space, 0))
 
 
-def _line_extent(line, content, gap, axis):
+def _wrap_outer_width(child, content):
     """
-    Measure a line along the main axis with its percent children resolved.
+    Get a child's width in a wrapping row, including margins.
 
     Parameters
     ----------
-    line : list of LayoutNode
-        The children on the line.
+    child : LayoutNode
+        The child.
     content : float
-        Size of the container's content box along the axis.
-    gap : float
-        Space between adjacent children.
-    axis : int
-        0 for horizontal and 1 for vertical.
+        Width of the row's content box.
 
     Returns
     -------
     float
-        The outer size of the children plus the gaps between them.
+        The outer width in pixels, with a percent width already resolved.
     """
-    gaps = gap * max(len(line) - 1, 0)
-    total = gaps
-    for child in line:
-        size = _main_percent_size(child, content - gaps, axis)
-        if size is None:
-            total += _outer(child, axis)
-        else:
-            total += size + child.style.margin.total(axis)
-    return total
+    size = _main_percent_size(child, content, 0)
+    if size is None:
+        return _outer(child, 0)
+    return size + child.style.margin.total(0)
 
 
-def _resolve_main_axis(line, content, gap, axis):
+def _resolve_main_axis(line, content, gap, axis, *, wrap=False):
     """
     Resolve percent, grow and shrink along the main axis of one line.
 
@@ -913,10 +909,14 @@ def _resolve_main_axis(line, content, gap, axis):
         Space between adjacent children.
     axis : int
         0 for horizontal and 1 for vertical.
+    wrap : bool, optional
+        If True, percent sizes are a fraction of ``content`` without removing
+        the gaps, so they do not depend on how the lines were broken.
     """
     gaps = gap * max(len(line) - 1, 0)
+    percent_space = content if wrap else content - gaps
     for child in line:
-        size = _main_percent_size(child, content - gaps, axis)
+        size = _main_percent_size(child, percent_space, axis)
         if size is not None:
             child._size[axis] = size
 
@@ -1039,14 +1039,16 @@ def _build_lines(node, flow, content):
         return [flow] if flow else []
 
     lines = [[]]
+    used = 0.0
     for child in flow:
-        candidate = lines[-1] + [child]
-        if lines[-1] and _line_extent(candidate, content, style.gap, 0) > (
-            content + _EPSILON
-        ):
-            lines.append([child])
-        else:
-            lines[-1] = candidate
+        size = _wrap_outer_width(child, content)
+        extra = size if not lines[-1] else size + style.gap
+        if lines[-1] and used + extra > content + _EPSILON:
+            lines.append([])
+            used = 0.0
+            extra = size
+        lines[-1].append(child)
+        used += extra
     return lines
 
 
@@ -1076,6 +1078,26 @@ def _resolve_out_of_flow(node, content, axis):
             child._size[axis] = _sizing(child, axis).clamp(room)
 
 
+def _is_content_independent(node, axis):
+    """
+    Check whether a node's size along an axis does not depend on its children.
+
+    Parameters
+    ----------
+    node : LayoutNode
+        The node.
+    axis : int
+        0 for horizontal and 1 for vertical.
+
+    Returns
+    -------
+    bool
+        True for fixed sizes, and for percent sizes of resizable nodes.
+    """
+    sizing = _sizing(node, axis)
+    return sizing.is_fixed or (node.resizable and sizing.kind is _Kind.PERCENT)
+
+
 def _distribute_pass(node, axis):
     """
     Share each container's space between its children, top-down.
@@ -1097,10 +1119,12 @@ def _distribute_pass(node, axis):
     if flow:
         if axis == style.main_axis():
             for line in node._lines:
-                _resolve_main_axis(line, content, style.gap, axis)
+                _resolve_main_axis(line, content, style.gap, axis, wrap=style.wrap)
         elif style.wrap:
+            definite = _is_content_independent(node, axis)
             for line in node._lines:
-                _resolve_percent(line, content, axis)
+                if definite:
+                    _resolve_percent(line, content, axis)
                 height = max(_outer(c, axis) for c in line)
                 _resolve_cross_axis(line, height, axis, style.align_cross)
         else:
@@ -1375,9 +1399,9 @@ def _floating_owner(node):
     return None
 
 
-def _order_floating(node, root, order, visiting):
+def _float_dependency(node, root):
     """
-    Append a floating node to the order after the floating node it depends on.
+    Get the floating node that must be placed before a floating node.
 
     Parameters
     ----------
@@ -1385,28 +1409,63 @@ def _order_floating(node, root, order, visiting):
         The floating node.
     root : LayoutNode
         The root of the tree.
-    order : list of LayoutNode
-        Floating nodes in placement order, extended in place.
-    visiting : list of LayoutNode
-        Floating nodes whose dependencies are being ordered.
+
+    Returns
+    -------
+    LayoutNode or None
+        The floating node that positions this node's target, or None if the
+        target is placed with the rest of the tree.
     """
-    if node in order:
-        return
-    if node in visiting:
-        logging.warning(
-            "Floating nodes form a cycle through their float_to targets; "
-            "the first one in tree order is placed from its target's previous "
-            "rectangle."
-        )
-        order.append(node)
-        return
-    visiting.append(node)
-    owner = _floating_owner(_float_target(node, root))
-    if owner is not None:
-        _order_floating(owner, root, order, visiting)
-    visiting.remove(node)
-    if node not in order:
-        order.append(node)
+    return _floating_owner(_float_target(node, root))
+
+
+def _order_floating(floating, root):
+    """
+    Order floating nodes so each comes after the floating node it depends on.
+
+    Each floating node depends on at most one other, so the dependencies form
+    chains. They are followed iteratively, so long chains are safe. In a cycle,
+    the node reached first is placed first, from its target's previous
+    rectangle.
+
+    Parameters
+    ----------
+    floating : list of LayoutNode
+        The floating nodes in tree order.
+    root : LayoutNode
+        The root of the tree.
+
+    Returns
+    -------
+    order : list of LayoutNode
+        The floating nodes in placement order.
+    cycles : set of frozenset of LayoutNode
+        The floating nodes of each cycle.
+    """
+    order = []
+    ordered = set()
+    cycles = set()
+    for start in floating:
+        path = []
+        on_path = set()
+        node = start
+        while node is not None and node not in ordered and node not in on_path:
+            path.append(node)
+            on_path.add(node)
+            node = _float_dependency(node, root)
+        if node in on_path:
+            cycle_start = path.index(node)
+            cycles.add(frozenset(path[cycle_start:]))
+            path = [
+                node,
+                *reversed(path[cycle_start + 1 :]),
+                *reversed(path[:cycle_start]),
+            ]
+        else:
+            path.reverse()
+        order.extend(path)
+        ordered.update(path)
+    return order, cycles
 
 
 def _place_floating(root):
@@ -1414,7 +1473,9 @@ def _place_floating(root):
     Place floating nodes once the nodes they attach to have their rectangles.
 
     A floating node attached to a node inside another floating subtree is
-    placed after that subtree. Cycles are broken in tree order with a warning.
+    placed after that subtree. A cycle is broken by placing one of its nodes
+    from its target's previous rectangle, with a warning the first time that
+    cycle appears.
 
     Parameters
     ----------
@@ -1423,16 +1484,27 @@ def _place_floating(root):
     """
     floating = []
     _floating_nodes(root, floating)
-    order = []
-    for node in floating:
-        _order_floating(node, root, order, [])
+    order, cycles = _order_floating(floating, root)
+    for cycle in cycles - root._float_cycles:
+        logging.warning(
+            "%d floating nodes form a cycle through float_to; one of them is "
+            "placed from its target's previous rectangle.",
+            len(cycle),
+        )
+    root._float_cycles = frozenset(cycles)
     for node in order:
         target = _float_target(node, root).rect
         style = node.style
         _place_pass(
             node,
-            target.x + target.width * style.float_anchor[0] + style.offset[0],
-            target.y + target.height * style.float_anchor[1] + style.offset[1],
+            target.x
+            + target.width * style.float_anchor[0]
+            + style.offset[0]
+            + style.margin.left,
+            target.y
+            + target.height * style.float_anchor[1]
+            + style.offset[1]
+            + style.margin.top,
         )
 
 
