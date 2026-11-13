@@ -932,8 +932,6 @@ def line(
 
     obj = create_line(geometry=geo, material=mat)
 
-    obj.local.position = lines_positions[0]
-
     obj.prim_count = len(lines)
 
     return obj

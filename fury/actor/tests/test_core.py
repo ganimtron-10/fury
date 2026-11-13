@@ -173,6 +173,21 @@ def test_line():
     actor.line(line, colors=line, material="basic")
 
 
+def test_line_keeps_given_coordinates():
+    lines_points = np.array(
+        [[[5, 5, 5], [6, 6, 6]], [[7, 7, 7], [8, 8, 8]]], dtype=np.float32
+    )
+    line_actor = actor.line(lines_points)
+
+    np.testing.assert_array_equal(
+        line_actor.local.position, np.array([0, 0, 0], dtype=np.float32)
+    )
+    np.testing.assert_array_almost_equal(
+        line_actor.get_world_bounding_box(),
+        np.array([[5, 5, 5], [8, 8, 8]], dtype=np.float32),
+    )
+
+
 def test_arrow():
     centers = np.array([[0, 0, 0]])
     colors = np.array([[1, 0, 0]])
