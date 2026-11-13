@@ -5500,18 +5500,30 @@ class Tree2D(UI):
         """
         Show exactly the area the parent layout gives this tree.
 
-        The layout size becomes the visible size on every solve, also when
-        it equals the content size, so a limit that is lifted stops the
-        scrolling. A tree without a layout parent keeps its own size.
+        The layout size is compared with the visible size, not with the
+        content size, so a limit that is lifted stops the scrolling. The
+        nodes are resized only when the width changes, a new height only
+        updates the scrollbar, and the nodes are moved only when the tree
+        moves. A tree without a layout parent keeps its own size.
 
         Parameters
         ----------
         rect : LayoutRect
             The computed position and size.
         """
-        if self._layout_node.parent is not None:
-            self.resize(rect.size)
-        super()._apply_layout(rect)
+        if self._layout_node.parent is None:
+            super()._apply_layout(rect)
+            return
+
+        width, height = (int(value) for value in rect.size)
+        if width != self.content_size[0]:
+            self.resize((width, height))
+        elif height != self.content_size[1]:
+            self.content_size = (width, height)
+            self.update_scrollbar()
+        if not np.array_equal(self.get_position(), rect.position):
+            self.set_position(rect.position)
+        self._layout_applied_size = tuple(int(value) for value in self.size)
 
     def add_content(self, node, content, coords=(0.0, 0.0)):
         """

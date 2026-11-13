@@ -3340,7 +3340,7 @@ def test_tree_node2d_resize_below_node_height():
     node = ui.elements.TreeNode2D(label="Node", child_height=25)
     node.resize((200, 10))
 
-    assert node.content_panel.size[1] <= 1
+    npt.assert_equal(node.content_panel.layout_style.height.value, 0)
     npt.assert_equal(node.title_panel.size[1], 25)
 
 
@@ -3441,6 +3441,37 @@ def _assert_tree_does_not_scroll(show_m, tree):
     _wheel_on(show_m, node_c.label_text)
     npt.assert_equal(tree.view_offset, 0)
     npt.assert_array_equal(node_c.get_position(), c_position)
+
+
+@pytest.mark.parametrize("height", [None, 120])
+def test_tree2d_solve_with_an_unchanged_rect_keeps_the_nodes(height):
+    """
+    A solve that gives the tree the same rectangle does not resize its nodes.
+
+    Parameters
+    ----------
+    height : int or None
+        Layout height of the tree, or None to fit its content.
+    """
+    tree = ui.elements.Tree2D(
+        structure=[{"A": ["a1", "a2"]}, {"B": []}], tree_name="T", size=(200, 200)
+    )
+    if height is not None:
+        tree.set_layout(height=height)
+    sibling = ui.Rectangle2D(size=(50, 20))
+    column = ui.Column(tree, sibling, position=(0, 0))
+    show_m = _show_offscreen(column)
+    leaf_geometry = tree.select_node("a1").title_panel.background.actor.geometry
+    rect = tree.layout_rect.size
+
+    sibling.set_layout(height=40)
+    show_m.render()
+    show_m.window.draw()
+    npt.assert_equal(sibling.size[1], 40)
+    npt.assert_equal(tree.layout_rect.size, rect)
+    leaf = tree.select_node("a1").title_panel.background.actor
+    assert leaf.geometry is leaf_geometry
+    show_m.close()
 
 
 def test_tree2d_stops_scrolling_when_the_layout_height_is_lifted():
