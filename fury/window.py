@@ -11,6 +11,7 @@ from functools import reduce
 import logging
 import os
 import sys
+import time
 from typing import Iterable
 
 from PIL.Image import fromarray as image_from_array
@@ -804,6 +805,9 @@ class ShowManager:
         self.screens = self._create_screens()
         self._callbacks = {}
         self._animations = []
+        self._physics_worlds = []
+        self._physics_clock = None
+        self._physics_frozen = False
 
         self._stats = None
         self._stats_initialized = False
@@ -1239,6 +1243,89 @@ class ShowManager:
             animation._set_record_callback(None)
         if self.screens:
             animation.remove_from_scene(self.screens[0].scene)
+
+    def add_physics(self, world):
+        """
+        Simulate a physics world in step with drawing.
+
+        Parameters
+        ----------
+        world : fury.physics.World
+            The world to advance before each frame is drawn.
+        """
+        if not hasattr(world, "advance") or not hasattr(world, "sync"):
+            raise TypeError("Expected a fury.physics.World.")
+        if world not in self._physics_worlds:
+            self._physics_worlds.append(world)
+            world.sync()
+
+    def remove_physics(self, world):
+        """
+        Stop simulating a physics world.
+
+        Parameters
+        ----------
+        world : fury.physics.World
+            The world to remove.
+        """
+        if world in self._physics_worlds:
+            self._physics_worlds.remove(world)
+
+    def record_physics(self, fname, *, duration=5.0, fps=30):
+        """
+        Simulate the added physics worlds and save the frames as a GIF.
+
+        The result does not depend on how fast this machine is, because time
+        advances by a fixed amount per frame.
+
+        Parameters
+        ----------
+        fname : str or os.PathLike
+            Output file; it must end in ``.gif``.
+        duration : float, optional
+            Simulated seconds to record.
+        fps : int, optional
+            Frames per second of the GIF.
+
+        Returns
+        -------
+        int
+            The number of frames rendered. GIF timing has a resolution of
+            10 ms, so above 100 fps some frames may be merged in the file.
+        """
+        if not str(fname).lower().endswith(".gif"):
+            raise ValueError("record_physics writes GIF files only.")
+        if not self._physics_worlds:
+            raise ValueError("Add a world with add_physics before recording.")
+        if duration <= 0 or fps <= 0:
+            raise ValueError("duration and fps must be positive.")
+
+        frames = []
+        count = max(1, int(round(duration * fps)))
+        done = [0] * len(self._physics_worlds)
+        self._physics_frozen = True
+        try:
+            for frame in range(count):
+                for index, world in enumerate(self._physics_worlds):
+                    target = int(round((frame + 1) / (fps * world.dt)))
+                    if not world.paused:
+                        world.step(target - done[index])
+                    done[index] = target
+                    world.sync()
+                self._draw_function()
+                frames.append(image_from_array(self._snapshot_array()).convert("RGB"))
+        finally:
+            self._physics_frozen = False
+            self._physics_clock = None
+        ends = np.round(np.arange(count + 1) * 100.0 / fps) * 10
+        frames[0].save(
+            fname,
+            save_all=True,
+            append_images=frames[1:],
+            duration=[int(d) for d in np.diff(ends)],
+            loop=0,
+        )
+        return count
 
     def record_animation(
         self, animation, fname, *, fps=30, speed=1.0, size=None, return_frames=False
@@ -1858,24 +1945,21 @@ class ShowManager:
             single PNG snapshot.
         """
         frames = []
-        if self._callbacks and record_animation:
+        if (self._callbacks or self._physics_worlds) and record_animation:
             max_frames = 300
             env_max_frames = os.environ.get("FURY_OFFSCREEN_MAX_FRAMES")
             if env_max_frames and env_max_frames.isdigit():
                 max_frames = int(env_max_frames)
 
             for _ in range(max_frames):
-                if not self._callbacks:
+                if not self._callbacks and not self._physics_worlds:
                     break
 
                 for _name, cb_info in list(self._callbacks.items()):
                     func, cb_time, repeat, args = cb_info
                     func(*args)
 
-                self._draw_function()
-                if self._qt_app is not None:
-                    self._qt_app.processEvents()
-                frames.append(image_from_array(self._snapshot_array()))
+                self._capture_frame(frames)
 
         if frames:
             gif_name = f"{self._title.replace(' ', '_')}.gif"
@@ -1887,8 +1971,40 @@ class ShowManager:
                 loop=0,
             )
         else:
+            self._step_physics_once()
+            self._physics_frozen = True
+            try:
+                self._draw_function()
+                self.snapshot(fname=f"{self._title}.png")
+            finally:
+                self._physics_frozen = False
+
+    def _step_physics_once(self):
+        """Advance every physics world by exactly one step and update actors."""
+        for world in self._physics_worlds:
+            world.advance()
+            world.sync()
+
+    def _capture_frame(self, frames):
+        """
+        Draw one documentation frame, with physics advanced by one fixed step.
+
+        Captures are then the same on every machine and window type.
+
+        Parameters
+        ----------
+        frames : list
+            Captured images; the new frame is appended.
+        """
+        self._step_physics_once()
+        self._physics_frozen = True
+        try:
             self._draw_function()
-            self.snapshot(fname=f"{self._title}.png")
+            if self._qt_app is not None:
+                self._qt_app.processEvents()
+            frames.append(image_from_array(self._snapshot_array()))
+        finally:
+            self._physics_frozen = False
 
     def _start_qt_offscreen_capture(self, record_animation):
         """
@@ -1917,8 +2033,25 @@ class ShowManager:
         if self._qt_app is not None:
             self._qt_app.exec()
 
+    def _advance_physics(self):
+        """Step every physics world for this frame and update its actors."""
+        if not self._physics_worlds or self._physics_frozen:
+            return
+        elapsed = None
+        if self._window_type != "offscreen":
+            now = time.perf_counter()
+            if self._physics_clock is not None:
+                elapsed = now - self._physics_clock
+            else:
+                elapsed = 0.0
+            self._physics_clock = now
+        for world in self._physics_worlds:
+            world.advance(elapsed=elapsed)
+            world.sync()
+
     def _draw_function(self):
         """Draw all screens and request a window redraw."""
+        self._advance_physics()
         if self._show_fps and not self._stats_initialized:
             self._stats = Stats(self.renderer)
             self._stats_initialized = True

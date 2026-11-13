@@ -83,9 +83,9 @@ class TransformBinding(_Binding):
     def sync(self):
         """Write position and rotation to the actor's transform."""
         world, row = self.bodies.world, self.bodies.start
-        turned = Rotation.from_quat(world._rotations[row]) * self._inverse_rest
+        turned = Rotation.from_quat(world._render_rotations[row]) * self._inverse_rest
         self.actor.world.rotation = tuple(turned.as_quat())
-        self.actor.world.position = tuple(world._positions[row])
+        self.actor.world.position = tuple(world._render_positions[row])
 
 
 class MeshBatchBinding(_Binding):
@@ -148,14 +148,16 @@ class MeshBatchBinding(_Binding):
         bodies, geometry = self.bodies, self.actor.geometry
         world, span = bodies.world, bodies._range
         repeat = self._per_primitive
-        rotation = np.repeat(quat_to_matrix(world._rotations[span]), repeat, axis=0)
+        rotation = np.repeat(
+            quat_to_matrix(world._render_rotations[span]), repeat, axis=0
+        )
         positions = (rotation @ self._rest[..., None])[..., 0]
-        positions += np.repeat(world._positions[span], repeat, axis=0)
+        positions += np.repeat(world._render_positions[span], repeat, axis=0)
         geometry.positions.data[:] = positions.astype(np.float32)
         geometry.positions.update_full()
         info = self.actor.primitive_info
-        info.centers = world._positions[span].copy()
-        info.rotations = world._rotations[span].copy()
+        info.centers = world._render_positions[span].copy()
+        info.rotations = world._render_rotations[span].copy()
         if self._rest_normals is not None:
             normals = (rotation @ self._rest_normals[..., None])[..., 0]
             geometry.normals.data[:] = normals.astype(np.float32)
@@ -181,7 +183,7 @@ class BillboardBinding(_Binding):
     def sync(self):
         """Write sphere centres to the actor."""
         bodies, actor = self.bodies, self.actor
-        centers = bodies.world._positions[bodies._range].astype(np.float32)
+        centers = bodies.world._render_positions[bodies._range].astype(np.float32)
         actor.geometry.positions.data[:] = np.repeat(
             centers, self._per_billboard, axis=0
         )
