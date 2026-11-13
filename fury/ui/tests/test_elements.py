@@ -10,7 +10,7 @@ import pytest
 
 from fury import ui, window
 from fury.data import DATA_DIR, fetch_viz_icons, fetch_viz_new_icons, read_viz_icons
-from fury.lib import KeyboardEvent
+from fury.lib import KeyboardEvent, WheelEvent
 from fury.testing import VisualTest
 from fury.ui.helpers import Anchor
 
@@ -3219,6 +3219,301 @@ def test_ui_tree2d_wheel_scrolling_logic():
     tree.wheel_scroll(event_down)
 
     npt.assert_equal(tree.view_offset, 0)
+
+
+def _show_offscreen(*elements):
+    """
+    Show elements in an offscreen window and draw one frame.
+
+    Parameters
+    ----------
+    *elements : UI
+        Elements added to the scene.
+
+    Returns
+    -------
+    ShowManager
+        The offscreen show manager.
+    """
+    scene = window.Scene()
+    scene.add(*elements)
+    show_m = window.ShowManager(
+        scene=scene, size=(640, 480), pixel_ratio=1, window_type="offscreen"
+    )
+    show_m.render()
+    show_m.window.draw()
+    return show_m
+
+
+def _click_center(show_m, element):
+    """
+    Press and release the left button on the center of a drawn element.
+
+    Parameters
+    ----------
+    show_m : ShowManager
+        The show manager drawing the element.
+    element : UI
+        The element to click.
+    """
+    x, y = element.get_position()
+    width, height = element.size
+    x, y = int(x + width / 2), int(y + height / 2)
+    target = show_m.renderer.get_pick_info((x, y))["world_object"]
+    assert target is not None, f"Nothing is drawn at ({x}, {y})"
+    for event_type in (window.EventType.POINTER_DOWN, window.EventType.POINTER_UP):
+        event = window.PointerEvent(x=x, y=y, type=event_type, target=target, button=1)
+        show_m.renderer.dispatch_event(event)
+    show_m.render()
+    show_m.window.draw()
+
+
+def _wheel_on(show_m, element):
+    """
+    Send one wheel step through the renderer to the center of an element.
+
+    Parameters
+    ----------
+    show_m : ShowManager
+        The show manager drawing the element.
+    element : UI
+        The element under the wheel.
+    """
+    x, y = element.get_position()
+    width, height = element.size
+    x, y = int(x + width / 2), int(y + height / 2)
+    target = show_m.renderer.get_pick_info((x, y))["world_object"]
+    assert target is not None, f"Nothing is drawn at ({x}, {y})"
+    event = WheelEvent(type="wheel", x=x, y=y, dx=0, dy=1, target=target)
+    show_m.renderer.dispatch_event(event)
+    show_m.render()
+    show_m.window.draw()
+
+
+def test_tree2d_in_column_reflows_on_expand_and_collapse():
+    """Clicking a node's button moves the element below the tree."""
+    tree = ui.elements.Tree2D(
+        structure=[{"A": ["a1", "a2"]}, {"B": []}], tree_name="T", size=(200, 200)
+    )
+    below = ui.Rectangle2D(size=(100, 20))
+    column = ui.Column(tree, below, position=(10, 10), gap=5)
+    show_m = _show_offscreen(column)
+    node = tree.select_node("A")
+    collapsed_y = below.get_position()[1]
+    npt.assert_equal(collapsed_y, tree.get_position()[1] + tree.size[1] + 5)
+
+    _click_center(show_m, node.button)
+    assert node.expanded
+    expanded_y = below.get_position()[1]
+    npt.assert_equal(expanded_y, collapsed_y + 2 * tree.node_height)
+    npt.assert_equal(expanded_y, tree.get_position()[1] + tree.size[1] + 5)
+
+    _click_center(show_m, node.button)
+    assert not node.expanded
+    npt.assert_equal(below.get_position()[1], collapsed_y)
+    show_m.close()
+
+
+@pytest.mark.parametrize("layout_size", [{"height": 10}, {"width": 10, "height": 0}])
+def test_tree2d_layout_size_below_node_size(layout_size):
+    """
+    A layout size smaller than one node is applied without raising.
+
+    Parameters
+    ----------
+    layout_size : dict
+        Layout properties given to the tree.
+    """
+    tree = ui.elements.Tree2D(structure=[{"A": ["a1"]}], tree_name="T")
+    tree.set_layout(**layout_size)
+    column = ui.Column(tree, ui.Rectangle2D(size=(50, 20)), position=(0, 0))
+    show_m = _show_offscreen(column)
+
+    npt.assert_equal(tree.layout_rect.size[1], layout_size["height"])
+    npt.assert_equal(tree.content_size[1], layout_size["height"])
+    npt.assert_equal(tree.base_node.title_panel.size[1], tree.node_height)
+    show_m.close()
+
+
+def test_tree_node2d_resize_below_node_height():
+    """Resizing a node below its title height leaves an empty content panel."""
+    node = ui.elements.TreeNode2D(label="Node", child_height=25)
+    node.resize((200, 10))
+
+    npt.assert_equal(node.content_panel.layout_style.height.value, 0)
+    npt.assert_equal(node.title_panel.size[1], 25)
+
+
+def test_tree2d_applies_a_layout_size_with_scrollbar():
+    """A layout size moves the scrollbar and enables scrolling of the content."""
+    tree = ui.elements.Tree2D(
+        structure=[{"A": [f"a{i}" for i in range(8)]}, {"B": []}], tree_name="T"
+    )
+    tree.set_layout(width=150, height=120)
+    below = ui.Rectangle2D(size=(50, 20))
+    column = ui.Column(tree, below, position=(0, 0), gap=5)
+    show_m = _show_offscreen(column)
+
+    npt.assert_equal(tree.content_size, (150, 120))
+    npt.assert_equal(tree.size[0], 150)
+    scroll_bar_right = tree.scroll_bar.get_position()[0] + tree.scroll_bar.size[0]
+    npt.assert_equal(scroll_bar_right, tree.get_position()[0] + 150)
+    npt.assert_equal(tree.scroll_step_size, 0)
+
+    _click_center(show_m, tree.select_node("A").button)
+    assert tree.scroll_step_size > 0
+    npt.assert_equal(tree.layout_rect.size, (150, 120))
+    npt.assert_equal(below.get_position()[1], 125)
+    scroll_bar_bottom = tree.scroll_bar.get_position()[1] + tree.scroll_bar.size[1]
+    assert scroll_bar_bottom <= tree.get_position()[1] + 120
+
+    node_b = tree.select_node("B")
+    b_y = node_b.get_position()[1]
+    _wheel_on(show_m, node_b.label_text)
+    assert tree.view_offset > 0
+    npt.assert_equal(node_b.get_position()[1], b_y - tree.view_offset)
+    show_m.close()
+
+
+def test_tree2d_width_only_layout_keeps_its_visible_height():
+    """A layout that sets only the width does not make expanded nodes scroll."""
+    tree = ui.elements.Tree2D(
+        structure=[{"A": ["a1", "a2"]}, {"B": []}], tree_name="T", size=(200, 200)
+    )
+    tree.set_layout(width=150)
+    below = ui.Rectangle2D(size=(50, 20))
+    column = ui.Column(tree, below, position=(0, 0), gap=5)
+    show_m = _show_offscreen(column)
+    node_b = tree.select_node("B")
+
+    _click_center(show_m, tree.select_node("A").button)
+    npt.assert_equal(below.get_position()[1], 125 + 5)
+    npt.assert_equal(tree.content_size[1], 125)
+    npt.assert_equal(tree.scroll_step_size, 0)
+
+    b_position = node_b.get_position()
+    _wheel_on(show_m, node_b.label_text)
+    npt.assert_equal(tree.view_offset, 0)
+    npt.assert_array_equal(node_b.get_position(), b_position)
+    show_m.close()
+
+
+def _limited_tree_column(height):
+    """
+    Build a tree whose expanded content is 200 pixels tall inside a Column.
+
+    Parameters
+    ----------
+    height : Sizing or int
+        Height of the Column.
+
+    Returns
+    -------
+    tuple
+        The tree, the Column and the offscreen show manager.
+    """
+    tree = ui.elements.Tree2D(
+        structure=[{"A": []}, {"B": ["b1", "b2", "b3", "b4"]}, {"C": []}],
+        tree_name="T",
+        size=(200, 200),
+    )
+    column = ui.Column(tree, position=(0, 0), height=height)
+    show_m = _show_offscreen(column)
+    _click_center(show_m, tree.select_node("B").button)
+    return tree, column, show_m
+
+
+def _assert_tree_does_not_scroll(show_m, tree):
+    """
+    Check that the whole tree is visible and a wheel step leaves it in place.
+
+    Parameters
+    ----------
+    show_m : ShowManager
+        The show manager drawing the tree.
+    tree : Tree2D
+        The tree under test.
+    """
+    npt.assert_equal(tree.content_size[1], tree.size[1])
+    npt.assert_equal(tree.scroll_step_size, 0)
+    node_c = tree.select_node("C")
+    c_position = node_c.get_position()
+    _wheel_on(show_m, node_c.label_text)
+    npt.assert_equal(tree.view_offset, 0)
+    npt.assert_array_equal(node_c.get_position(), c_position)
+
+
+@pytest.mark.parametrize("height", [None, 120])
+def test_tree2d_solve_with_an_unchanged_rect_keeps_the_nodes(height):
+    """
+    A solve that gives the tree the same rectangle does not resize its nodes.
+
+    Parameters
+    ----------
+    height : int or None
+        Layout height of the tree, or None to fit its content.
+    """
+    tree = ui.elements.Tree2D(
+        structure=[{"A": ["a1", "a2"]}, {"B": []}], tree_name="T", size=(200, 200)
+    )
+    if height is not None:
+        tree.set_layout(height=height)
+    sibling = ui.Rectangle2D(size=(50, 20))
+    column = ui.Column(tree, sibling, position=(0, 0))
+    show_m = _show_offscreen(column)
+    leaf_geometry = tree.select_node("a1").title_panel.background.actor.geometry
+    rect = tree.layout_rect.size
+
+    sibling.set_layout(height=40)
+    show_m.render()
+    show_m.window.draw()
+    npt.assert_equal(sibling.size[1], 40)
+    npt.assert_equal(tree.layout_rect.size, rect)
+    leaf = tree.select_node("a1").title_panel.background.actor
+    assert leaf.geometry is leaf_geometry
+    show_m.close()
+
+
+def test_tree2d_stops_scrolling_when_the_layout_height_is_lifted():
+    """A tree limited by its parent shows everything once the limit is gone."""
+    tree, column, show_m = _limited_tree_column(150)
+    npt.assert_equal(tree.size[1], 200)
+    assert tree.content_size[1] < 200
+    assert tree.scroll_step_size > 0
+
+    column.set_layout(height=ui.fit())
+    show_m.render()
+    show_m.window.draw()
+    _assert_tree_does_not_scroll(show_m, tree)
+    show_m.close()
+
+
+def test_tree2d_stops_scrolling_after_collapsing_below_a_max_height():
+    """Collapsing a node below a maximum layout height removes the scrolling."""
+    tree, _, show_m = _limited_tree_column(ui.fit(max=150))
+    assert tree.scroll_step_size > 0
+
+    _click_center(show_m, tree.select_node("B").button)
+    npt.assert_equal(tree.size[1], 100)
+    _assert_tree_does_not_scroll(show_m, tree)
+    show_m.close()
+
+
+def test_tree2d_add_content_reflows_the_parent_layout():
+    """Content added to an expanded node moves the element below the tree."""
+    tree = ui.elements.Tree2D(structure=[{"A": []}, {"B": []}], tree_name="T")
+    below = ui.Rectangle2D(size=(50, 20))
+    column = ui.Column(tree, below, position=(0, 0), gap=5)
+    show_m = _show_offscreen(column)
+    _click_center(show_m, tree.select_node("A").button)
+    before = below.get_position()[1]
+
+    tree.add_content("A", ui.Rectangle2D(size=(40, 40)), (0, 0))
+    show_m.render()
+    show_m.window.draw()
+    assert below.get_position()[1] > before
+    npt.assert_equal(below.get_position()[1], tree.size[1] + 5)
+    show_m.close()
 
 
 def _click_event():

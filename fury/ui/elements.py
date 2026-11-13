@@ -4473,6 +4473,10 @@ class TreeNode2D(UI):
         """
         Resize the Tree Node.
 
+        The title keeps its ``child_height``; the content panel takes the
+        remaining height, which is zero when ``size`` is shorter than the
+        title.
+
         Parameters
         ----------
         size : (int, int)
@@ -4483,7 +4487,7 @@ class TreeNode2D(UI):
         width = size[0] - getattr(self, "right_margin", 0)
 
         self.title_panel.resize((size[0], self.child_height))
-        self.content_panel.resize((size[0], size[1] - self.child_height))
+        self.content_panel.resize((size[0], max(size[1] - self.child_height, 0)))
 
         _btn_size = max(int(self.child_height * 0.7), 10)
         _btn_y = (self.child_height - _btn_size) // 2
@@ -4502,7 +4506,7 @@ class TreeNode2D(UI):
         icon_width = self.label_image.size[0] if self.has_icon else 0
         self.label_text.resize(
             (
-                width - self.button.size[0] - icon_width,
+                max(width - self.button.size[0] - icon_width, 0),
                 self.child_height,
             )
         )
@@ -4534,11 +4538,14 @@ class TreeNode2D(UI):
             for child in self._child_nodes:
                 if isinstance(child, TreeNode2D):
                     if recursive:
-                        _child_size = (
+                        _child_width = (
                             size[0]
                             - self.indent
                             - self.child_indent
-                            - getattr(self, "right_margin", 0),
+                            - getattr(self, "right_margin", 0)
+                        )
+                        _child_size = (
+                            max(_child_width, 0),
                             child.children_size() + child.child_height,
                         )
 
@@ -4586,6 +4593,7 @@ class TreeNode2D(UI):
 
         self_size = (self.size[0], self.children_size() + self.child_height)
         self.resize(self_size, recursive=False)
+        self.mark_layout_dirty()
 
         parent = self.parent
         while parent is not None:
@@ -4595,6 +4603,7 @@ class TreeNode2D(UI):
                     parent.children_size() + parent.child_height,
                 )
                 parent.resize(new_size, recursive=False)
+            parent.mark_layout_dirty()
             if hasattr(parent, "on_resize_callback"):
                 parent.on_resize_callback()
             parent = parent.parent
@@ -5192,7 +5201,7 @@ class Tree2D(UI):
         for actor in self.scroll_bar.actors:
             actor.add_event_handler(self.wheel_scroll, EventType.WHEEL)
 
-        self.base_node.on_resize_callback = self.update_scrollbar
+        self.base_node.on_resize_callback = self._on_content_resized
         self.base_node.right_margin = sb_width
         self.base_node.resize(
             (
@@ -5284,7 +5293,7 @@ class Tree2D(UI):
         )
         track_y = int(self.get_position()[1] + self.base_node.child_height)
 
-        visible_height = self.content_size[1] - self.base_node.child_height
+        visible_height = self._visible_height()
         actual_height = self.base_node.children_size()
 
         if actual_height > visible_height:
@@ -5296,9 +5305,25 @@ class Tree2D(UI):
         else:
             self.scroll_bar.set_position((scroll_x, track_y))
 
+    def _visible_height(self):
+        """
+        Get the height available to the nodes below the tree title.
+
+        Returns
+        -------
+        int
+            Visible height in pixels, never negative.
+        """
+        return max(self.content_size[1] - self.base_node.child_height, 0)
+
+    def _on_content_resized(self):
+        """Refresh the scrollbar and reflow the layout after nodes resize."""
+        self.update_scrollbar()
+        self.mark_layout_dirty()
+
     def update_scrollbar(self):
         """Update scrollbar geometry and visibility."""
-        visible_height = self.content_size[1] - self.base_node.child_height
+        visible_height = self._visible_height()
         actual_height = self.base_node.children_size()
 
         if actual_height <= visible_height:
@@ -5314,7 +5339,7 @@ class Tree2D(UI):
             )
 
             denom = visible_height - self.scroll_bar.size[1]
-            if denom == 0:
+            if denom <= 0:
                 denom = 1
             self.scroll_step_size = (actual_height - visible_height) / denom
 
@@ -5451,14 +5476,54 @@ class Tree2D(UI):
 
     def resize(self, size):
         """
-        Resize the Tree Node.
+        Resize the visible area of the tree.
+
+        The width includes the scrollbar. The nodes keep the height of their
+        content, and the scrollbar scrolls them when they are taller than
+        the visible height.
 
         Parameters
         ----------
         size : (int, int)
             New width and height in pixels.
         """
-        self.base_node.resize(size)
+        self.content_size = (int(size[0]), int(size[1]))
+        self.base_node.resize(
+            (
+                self.content_size[0],
+                self.base_node.children_size() + self.base_node.child_height,
+            )
+        )
+        self.update_scrollbar()
+
+    def _apply_layout(self, rect):
+        """
+        Show exactly the area the parent layout gives this tree.
+
+        The layout size is compared with the visible size, not with the
+        content size, so a limit that is lifted stops the scrolling. The
+        nodes are resized only when the width changes, a new height only
+        updates the scrollbar, and the nodes are moved only when the tree
+        moves. A tree without a layout parent keeps its own size.
+
+        Parameters
+        ----------
+        rect : LayoutRect
+            The computed position and size.
+        """
+        if self._layout_node.parent is None:
+            super()._apply_layout(rect)
+            return
+
+        width, height = (int(value) for value in rect.size)
+        if width != self.content_size[0]:
+            self.resize((width, height))
+        elif height != self.content_size[1]:
+            self.content_size = (width, height)
+            self.update_scrollbar()
+        if not np.array_equal(self.get_position(), rect.position):
+            self.set_position(rect.position)
+        self._layout_applied_size = tuple(int(value) for value in self.size)
 
     def add_content(self, node, content, coords=(0.0, 0.0)):
         """
@@ -5483,6 +5548,7 @@ class Tree2D(UI):
             _node.add_element(content, coords)
 
         _node.set_visibility(False)
+        self._on_content_resized()
 
     def select_node(self, node):
         """
