@@ -3561,7 +3561,7 @@ class ListBox2D(UI):
         size = self.panel_size
         font_size = self.font_size
         # Calculating the number of slots.
-        self.nb_slots = int((size[1] - 2 * self.padding) // max(1, self.slot_height))
+        self.nb_slots = self._count_slots(size[1])
 
         # This panel facilitates adding slots at the right position.
         self.panel = Panel2D(size=size, color=(1, 1, 1))
@@ -3629,7 +3629,7 @@ class ListBox2D(UI):
         self.panel_size = np.array(size, dtype=int)
         self.panel.resize(size)
 
-        self.nb_slots = int((size[1] - 2 * self.padding) // max(1, self.slot_height))
+        self.nb_slots = self._count_slots(size[1])
 
         new_scrollbar_width = int(size[0] / 20)
         self._scroll_bar_x = int(size[0] - new_scrollbar_width - self.padding)
@@ -3674,6 +3674,22 @@ class ListBox2D(UI):
         self.scroll_bar.width = new_scrollbar_width
         self.update()
         self.update_scrollbar()
+
+    def _count_slots(self, height):
+        """
+        Get how many whole slots fit inside the padding.
+
+        Parameters
+        ----------
+        height : int
+            Height of the list in pixels.
+
+        Returns
+        -------
+        int
+            Number of slots, 0 when the height is not larger than the padding.
+        """
+        return max(0, int((height - 2 * self.padding) // max(1, self.slot_height)))
 
     def _set_slots_layout(self, scroll_bar_width):
         """

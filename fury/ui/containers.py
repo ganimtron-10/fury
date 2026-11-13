@@ -7,7 +7,7 @@ import numpy as np
 from fury.io import load_image
 from fury.lib import Texture
 from fury.ui.core import UI, Anchor, Rectangle2D, TextBlock2D
-from fury.ui.layout import Align, Direction, Position, place
+from fury.ui.layout import Align, Direction, Edges, Position, place
 
 
 class Panel2D(UI):
@@ -41,6 +41,8 @@ class Panel2D(UI):
         Alignment of the panel with respect to the overall screen.
     """
 
+    _is_layout_container = True
+
     def __init__(
         self,
         size,
@@ -63,11 +65,12 @@ class Panel2D(UI):
         }
         self.has_border = has_border
         self._border_color = border_color
-        self._border_width = border_width
+        side_width = border_width if has_border else 0
+        self._border_widths = dict.fromkeys(self.border_sides, side_width)
+        self._content_padding = Edges()
         super(Panel2D, self).__init__(position=position)
-        self.set_layout(
-            width=size[0], height=size[1], border=border_width if has_border else 0
-        )
+        self.set_layout(width=size[0], height=size[1])
+        self._update_border_inset()
         self.resize(size)
         self.alignment = align
         self.color = color
@@ -159,37 +162,109 @@ class Panel2D(UI):
         self.background.resize(size)
 
         if self.has_border:
-            self.borders["left"].resize(
-                (self._border_width, size[1] + self._border_width)
-            )
-
-            self.borders["right"].resize(
-                (self._border_width, size[1] + self._border_width)
-            )
-
-            self.borders["top"].resize(
-                (self.size[0] + self._border_width, self._border_width)
-            )
-
-            self.borders["bottom"].resize(
-                (self.size[0] + self._border_width, self._border_width)
-            )
+            widths = self._border_widths
+            for side in ("left", "right"):
+                self.borders[side].resize((widths[side], size[1] + widths["bottom"]))
+            for side in ("top", "bottom"):
+                self.borders[side].resize(
+                    (self.size[0] + widths["right"], widths[side])
+                )
 
             self.update_border_coords()
+
+    def set_layout(self, **properties):
+        """
+        Change the layout properties of this panel.
+
+        The panel sets the layout ``border`` from its border widths: it holds
+        the width shared by all sides. When one side is thicker, the extra
+        width is added to that side of ``padding``, so ``layout_style.padding``
+        then reads back larger than the padding given here.
+
+        Parameters
+        ----------
+        **properties : dict
+            Properties of :class:`fury.ui.layout.LayoutStyle`, such as
+            ``width``, ``padding`` or ``gap``. ``border`` is ignored; set
+            :attr:`border_width` instead.
+
+        Returns
+        -------
+        Panel2D
+            This panel, so calls can be chained.
+        """
+        if "border" in properties:
+            properties.pop("border")
+            logging.warning(
+                "Panel2D sets its layout border from border_width; "
+                "the border layout property is ignored."
+            )
+        content_padding = self._content_padding
+        if "padding" in properties:
+            content_padding = Edges.of(properties.pop("padding"))
+            properties.update(self._border_inset(content_padding))
+        super().set_layout(**properties)
+        self._content_padding = content_padding
+        return self
+
+    def _border_inset(self, padding):
+        """
+        Get the layout border and padding that keep content inside the borders.
+
+        Parameters
+        ----------
+        padding : Edges
+            Padding given by the user, without the borders.
+
+        Returns
+        -------
+        dict
+            ``border`` and ``padding`` layout properties.
+        """
+        widths = self._border_widths
+        shared = min(widths.values())
+        return {
+            "border": shared,
+            "padding": Edges(
+                padding.top + widths["top"] - shared,
+                padding.right + widths["right"] - shared,
+                padding.bottom + widths["bottom"] - shared,
+                padding.left + widths["left"] - shared,
+            ),
+        }
+
+    def _update_border_inset(self):
+        """Apply the current border widths to the layout."""
+        super().set_layout(**self._border_inset(self._content_padding))
 
     def _update_actors_position(self):
         """Update the position of the internal actors."""
         coords = self.get_position()
 
         for element, offset in self.element_offsets:
-            if element == self.background:
-                element.z_order = self.z_order
-            elif self.has_border and element in self.borders.values():
-                element.z_order = self.z_order + 1
-            else:
-                element.z_order = self.z_order + 2
-
+            element.z_order = self._element_z_order(element)
             element.set_position(coords + offset)
+
+    def _element_z_order(self, element):
+        """
+        Get the Z-order that draws an element above the panel's background.
+
+        Parameters
+        ----------
+        element : UI
+            An element of the panel.
+
+        Returns
+        -------
+        int
+            The panel's Z-order for the background, one more for the
+            borders, and two more for the other elements.
+        """
+        if element is self.background:
+            return self.z_order
+        if self.has_border and element in self.borders.values():
+            return self.z_order + 1
+        return self.z_order + 2
 
     def set_visibility(self, visibility):
         """
@@ -201,6 +276,7 @@ class Panel2D(UI):
             If True, the panel and its elements will be visible. If False, it will
             be hidden.
         """
+        self._visibility = visibility
         for element in self._elements:
             element.set_visibility(visibility)
 
@@ -281,6 +357,29 @@ class Panel2D(UI):
             If coordinates are normalized but outside the [0,1] range, or if
             an unknown anchor is provided.
         """
+        self._place_element(element, coords, anchor=anchor)
+        if not _is_internal:
+            self._add_child(element)
+
+    def _place_element(self, element, coords, *, anchor="position"):
+        """
+        Position a UI component in the panel and record its offset.
+
+        Parameters
+        ----------
+        element : UI
+            The UI item to be placed.
+        coords : (float, float) or (int, int)
+            Normalized coordinates in [0, 1] if float, pixels if int.
+        anchor : str, optional
+            Supported anchors are 'position' (top-left) and 'center'.
+
+        Raises
+        ------
+        ValueError
+            If coordinates are normalized but outside the [0,1] range, or if
+            an unknown anchor is provided.
+        """
         coords = np.array(coords)
 
         if np.issubdtype(coords.dtype, np.floating):
@@ -289,6 +388,7 @@ class Panel2D(UI):
 
             coords = coords * self.size
 
+        element.z_order = self._element_z_order(element)
         if anchor == "center":
             element.set_position(
                 self.get_position() + coords,
@@ -305,8 +405,6 @@ class Panel2D(UI):
             raise ValueError(msg)
 
         self._elements.append(element)
-        if not _is_internal:
-            self._children.append(element)
         offset = element.get_position() - self.get_position()
         self.element_offsets.append((element, offset))
 
@@ -331,10 +429,11 @@ class Panel2D(UI):
         """
         if properties:
             element.set_layout(**properties)
+        element.z_order = self._element_z_order(element)
         self._layout_node.add(element._layout_node)
         self._elements.append(element)
-        self._children.append(element)
         self.element_offsets.append((element, np.zeros(2)))
+        self._add_child(element)
         return element
 
     def _apply_layout(self, rect):
@@ -369,13 +468,32 @@ class Panel2D(UI):
         ValueError
             If the element is not found in the panel's elements list.
         """
+        self._forget_element(element)
+        if element in self._children:
+            self._remove_child(element)
+
+    def _forget_element(self, element):
+        """
+        Stop positioning a UI component, leaving it drawn.
+
+        Parameters
+        ----------
+        element : UI
+            The UI item to forget.
+
+        Raises
+        ------
+        ValueError
+            If the element is not found in the panel's elements list.
+        """
         idx = self._elements.index(element)
-        if element._layout_node.parent is self._layout_node:
-            self._layout_node.remove(element._layout_node)
+        node = self._layout_node
+        if element._layout_node.parent is node:
+            node.remove(element._layout_node)
+            if not node.children:
+                self._layout_natural_size = (node.style.inset(0), node.style.inset(1))
         del self._elements[idx]
         del self.element_offsets[idx]
-        if element in self._children:
-            self._children.remove(element)
 
     def update_element(self, element, coords, *, anchor="position"):
         """
@@ -400,8 +518,8 @@ class Panel2D(UI):
             If coordinates are normalized but outside the [0,1] range, or if
             an unknown anchor is provided.
         """
-        self.remove_element(element)
-        self.add_element(element, coords, anchor=anchor)
+        self._forget_element(element)
+        self._place_element(element, coords, anchor=anchor)
 
     def left_button_pressed(self, event):
         """
@@ -539,8 +657,23 @@ class Panel2D(UI):
         ----------
         side_width : Iterable
             Iterable `[side, width]` containing the side (str) and the width (float).
+            Only that side's inset of the layout changes. A side thicker than
+            the others adds its extra width to that side of
+            ``layout_style.padding``.
+
+        Raises
+        ------
+        ValueError
+            If the side is not one of left, right, top or bottom, or the width
+            is negative.
         """
         side, border_width = side_width
+        side = side.lower()
+
+        if side not in self.border_sides:
+            raise ValueError(f"{side} not a valid border side")
+        if border_width < 0:
+            raise ValueError(f"Border width must not be negative, got {border_width}.")
 
         if not self.has_border:
             logging.warning(
@@ -548,13 +681,12 @@ class Panel2D(UI):
             )
             return
 
-        self.set_layout(border=border_width)
-        if side.lower() in ["left", "right"]:
+        self._border_widths[side] = border_width
+        if side in ["left", "right"]:
             self.borders[side].width = border_width
-        elif side.lower() in ["top", "bottom"]:
-            self.borders[side].height = border_width
         else:
-            raise ValueError(f"{side} not a valid border side")
+            self.borders[side].height = border_width
+        self._update_border_inset()
 
 
 class LayoutBox(UI):
@@ -570,6 +702,8 @@ class LayoutBox(UI):
     **properties : dict
         Layout properties of the box, such as ``padding`` or ``gap``.
     """
+
+    _is_layout_container = True
 
     def __init__(self, *, position=(0, 0), children=(), **properties):
         """Initialize the box."""
@@ -592,6 +726,22 @@ class LayoutBox(UI):
             An empty list, as a box draws nothing itself.
         """
         return []
+
+    def _measure_layout(self, max_width):
+        """
+        Report the content size of the box when it has no children.
+
+        Parameters
+        ----------
+        max_width : float or None
+            Width available to the content, or None when unconstrained.
+
+        Returns
+        -------
+        (float, float)
+            Zero, as a box has no content of its own.
+        """
+        return (0.0, 0.0)
 
     def _get_size(self):
         """
@@ -650,8 +800,8 @@ class LayoutBox(UI):
             element.set_layout(**properties)
         self._layout_node.add(element._layout_node)
         self._box_children.append(element)
-        self._children.append(element)
         element.z_order = self.z_order
+        self._add_child(element)
         return element
 
     def remove(self, element):
@@ -665,7 +815,7 @@ class LayoutBox(UI):
         """
         self._layout_node.remove(element._layout_node)
         self._box_children.remove(element)
-        self._children.remove(element)
+        self._remove_child(element)
 
 
 class Row(LayoutBox):

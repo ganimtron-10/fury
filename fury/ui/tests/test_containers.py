@@ -1129,3 +1129,93 @@ def test_clean_frames_do_no_layout_work():
     assert solved == []
     assert len(ui.UIContext._dirty_layouts) == 0
     show_m.close()
+
+
+def test_childless_box_reports_its_own_size():
+    """A box without children is solved like any other root."""
+    npt.assert_array_equal(ui.Row(width=200, height=50).size, (200, 50))
+    npt.assert_array_equal(ui.Column(padding=5).size, (10, 10))
+
+
+def test_box_shrinks_when_its_last_child_is_removed():
+    child = _block((40, 20))
+    row = ui.Row(child, padding=5)
+    npt.assert_array_equal(row.size, (50, 30))
+    row.remove(child)
+    npt.assert_array_equal(row.size, (10, 10))
+    assert not row._layout_node.dirty
+
+
+def test_fit_panel_shrinks_when_its_last_child_is_removed():
+    panel = ui.Panel2D((100, 100))
+    panel.set_layout(height=ui.fit(), padding=(5, 0))
+    child = panel.add(_block((40, 30)))
+    panel.update_layout()
+    npt.assert_array_equal(panel.size, (100, 40))
+    panel.remove_element(child)
+    panel.update_layout()
+    npt.assert_array_equal(panel.size, (100, 10))
+
+
+def test_panel_border_side_insets_only_that_side():
+    panel = ui.Panel2D((100, 100), has_border=True, border_width=4)
+    panel.set_layout(padding=1)
+    child = panel.add(_block())
+    panel.border_width = ("left", 20)
+    panel.update_layout()
+    npt.assert_array_equal(child.get_position(), (21, 5))
+    assert panel.border_width == [20, 4, 4, 4]
+
+    panel.border_width = ("Top", 10)
+    panel.update_layout()
+    npt.assert_array_equal(child.get_position(), (21, 11))
+
+
+def test_panel_border_side_keeps_its_width_after_resize():
+    panel = ui.Panel2D((100, 100), has_border=True, border_width=4)
+    panel.border_width = ("right", 9)
+    panel.resize((150, 120))
+    assert panel.border_width == [4, 9, 4, 4]
+
+
+def test_invalid_panel_border_side_changes_nothing():
+    panel = ui.Panel2D((100, 100), has_border=True, border_width=4)
+    child = panel.add(_block())
+    with npt.assert_raises(ValueError):
+        panel.border_width = ("middle", 20)
+    panel.update_layout()
+    npt.assert_array_equal(child.get_position(), (4, 4))
+    assert panel.border_width == [4, 4, 4, 4]
+
+
+def test_panel_children_are_drawn_above_the_background():
+    panel = ui.Panel2D((200, 100), has_border=True, border_width=2)
+    panel.z_order = 3
+    laid_out = panel.add(_block())
+    placed = ui.Rectangle2D(size=(10, 10))
+    panel.add_element(placed, (50, 50))
+    panel.update_layout()
+    assert laid_out.z_order == 5
+    assert placed.z_order == 5
+    assert laid_out.actor.render_order > panel.background.actor.render_order
+
+
+def test_panel_ignores_an_explicit_layout_border(caplog):
+    panel = ui.Panel2D((100, 100), has_border=True, border_width=4)
+    child = panel.add(_block())
+    with caplog.at_level("WARNING"):
+        panel.set_layout(border=0)
+    assert "border" in caplog.text
+    panel.border_width = ("left", 10)
+    panel.update_layout()
+    npt.assert_array_equal(child.get_position(), (10, 4))
+
+
+def test_invalid_panel_layout_keeps_the_previous_padding():
+    panel = ui.Panel2D((100, 100), has_border=True, border_width=4)
+    child = panel.add(_block())
+    with npt.assert_raises(TypeError):
+        panel.set_layout(padding=5, bogus=1)
+    panel.border_width = ("left", 10)
+    panel.update_layout()
+    npt.assert_array_equal(child.get_position(), (10, 4))
