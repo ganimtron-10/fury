@@ -364,7 +364,7 @@ def add_ui_to_scene(ui_scene, ui_obj):
     ui_obj : UI
         UI element to add into scene.
     """
-    ui_obj._add_to_ui_scene(ui_scene)
+    ui_obj._add_to_ui_scene(ui_scene, direct=True)
 
 
 def remove_ui_from_scene(ui_scene, ui_obj):
@@ -378,7 +378,7 @@ def remove_ui_from_scene(ui_scene, ui_obj):
     ui_obj : UI
         UI element to be removed from the scene.
     """
-    ui_obj._remove_from_ui_scene(ui_scene)
+    ui_obj._remove_from_ui_scene(ui_scene, direct=True)
 
 
 def create_screen(

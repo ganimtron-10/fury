@@ -3708,3 +3708,12 @@ def test_listbox_2d_smaller_than_its_padding_has_no_slots():
     listbox.resize((100, 100))
     npt.assert_equal(len(listbox.slots), 2)
     npt.assert_equal(listbox.slots[0].element, "a")
+
+
+def test_button_2d_registers_its_child_once():
+    button = ui.TextButton2D(label="Go", size=(80, 30))
+    actors = [button.actors for _ in range(3)]
+    assert actors == [[], [], []]
+    assert button._children == [button.child]
+    button.z_order = 4
+    assert button.child.z_order == 4

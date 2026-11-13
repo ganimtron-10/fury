@@ -416,3 +416,47 @@ def test_listbox_squeezed_below_its_padding_shows_no_slots():
     assert listbox.nb_slots > 0
     _assert_slots_drawn_and_clickable(show_m, listbox)
     show_m.close()
+
+
+def test_standalone_fixed_size_text_keeps_its_single_line():
+    """A text block outside any layout is not re-wrapped by the render loop."""
+    text = ui.TextBlock2D(
+        text="Hello world, a longer label",
+        size=(80, 20),
+        bg_color=(0.3, 0.3, 0.3),
+        position=(10, 10),
+    )
+    max_width = text.actor.max_width
+    show_m = _show(text)
+    _draw(show_m)
+
+    assert text.actor.max_width == max_width
+    npt.assert_array_equal(text.size, (80, 20))
+    box = text.actor.get_world_bounding_box()
+    assert box[1][1] - box[0][1] < 20
+    show_m.close()
+
+
+def test_child_also_held_by_the_scene_stays_drawn_after_leaving_a_container():
+    """Leaving a container does not undraw an element the scene holds."""
+    element = ui.Rectangle2D(size=(40, 40), color=(1, 0, 0))
+    row = ui.Row(ui.Rectangle2D(size=(40, 40)), gap=10)
+    show_m = _show(row, element)
+    scene = show_m.screens[0].scene
+
+    row.add(element)
+    _draw(show_m)
+    row.remove(element)
+    _draw(show_m)
+    assert element in scene.ui_elements
+    assert _picked(show_m, *_center(element)) is element.actor
+
+    row.add(element)
+    scene.remove(row)
+    _draw(show_m)
+    assert _picked(show_m, *_center(element)) is element.actor
+
+    scene.remove(element)
+    _draw(show_m)
+    assert element.actor.parent is None
+    show_m.close()

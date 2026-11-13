@@ -41,6 +41,8 @@ class Panel2D(UI):
         Alignment of the panel with respect to the overall screen.
     """
 
+    _is_layout_container = True
+
     def __init__(
         self,
         size,
@@ -174,21 +176,29 @@ class Panel2D(UI):
         """
         Change the layout properties of this panel.
 
-        The panel's borders are added to ``padding``: the layout ``border``
-        holds the width shared by all sides, and ``padding`` holds the given
-        padding plus any extra width of a thicker side.
+        The panel sets the layout ``border`` from its border widths: it holds
+        the width shared by all sides. When one side is thicker, the extra
+        width is added to that side of ``padding``, so ``layout_style.padding``
+        then reads back larger than the padding given here.
 
         Parameters
         ----------
         **properties : dict
             Properties of :class:`fury.ui.layout.LayoutStyle`, such as
-            ``width``, ``padding`` or ``gap``.
+            ``width``, ``padding`` or ``gap``. ``border`` is ignored; set
+            :attr:`border_width` instead.
 
         Returns
         -------
         Panel2D
             This panel, so calls can be chained.
         """
+        if "border" in properties:
+            properties.pop("border")
+            logging.warning(
+                "Panel2D sets its layout border from border_width; "
+                "the border layout property is ignored."
+            )
         if "padding" in properties:
             self._content_padding = Edges.of(properties.pop("padding"))
             properties.update(self._border_inset())
@@ -639,7 +649,9 @@ class Panel2D(UI):
         ----------
         side_width : Iterable
             Iterable `[side, width]` containing the side (str) and the width (float).
-            Only that side's inset of the layout changes.
+            Only that side's inset of the layout changes. A side thicker than
+            the others adds its extra width to that side of
+            ``layout_style.padding``.
 
         Raises
         ------
@@ -682,6 +694,8 @@ class LayoutBox(UI):
     **properties : dict
         Layout properties of the box, such as ``padding`` or ``gap``.
     """
+
+    _is_layout_container = True
 
     def __init__(self, *, position=(0, 0), children=(), **properties):
         """Initialize the box."""

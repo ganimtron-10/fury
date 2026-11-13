@@ -1186,3 +1186,26 @@ def test_invalid_panel_border_side_changes_nothing():
     panel.update_layout()
     npt.assert_array_equal(child.get_position(), (4, 4))
     assert panel.border_width == [4, 4, 4, 4]
+
+
+def test_panel_children_are_drawn_above_the_background():
+    panel = ui.Panel2D((200, 100), has_border=True, border_width=2)
+    panel.z_order = 3
+    laid_out = panel.add(_block())
+    placed = ui.Rectangle2D(size=(10, 10))
+    panel.add_element(placed, (50, 50))
+    panel.update_layout()
+    assert laid_out.z_order == 5
+    assert placed.z_order == 5
+    assert laid_out.actor.render_order > panel.background.actor.render_order
+
+
+def test_panel_ignores_an_explicit_layout_border(caplog):
+    panel = ui.Panel2D((100, 100), has_border=True, border_width=4)
+    child = panel.add(_block())
+    with caplog.at_level("WARNING"):
+        panel.set_layout(border=0)
+    assert "border" in caplog.text
+    panel.border_width = ("left", 10)
+    panel.update_layout()
+    npt.assert_array_equal(child.get_position(), (10, 4))

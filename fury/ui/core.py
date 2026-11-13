@@ -97,6 +97,8 @@ class UI(object, metaclass=abc.ABCMeta):
         Callback function for when a keyboard key is pressed.
     """
 
+    _is_layout_container = False
+
     def __init__(
         self, *, position=(0, 0), x_anchor=Anchor.LEFT, y_anchor=Anchor.TOP, z_order=0
     ):
@@ -104,6 +106,7 @@ class UI(object, metaclass=abc.ABCMeta):
         self._position = np.array([0, 0])
         self._children = []
         self._ui_scene = None
+        self._held_by_scene = False
         self._anchors = [x_anchor, y_anchor]
         self.z_order = z_order
         self._layout_node = LayoutNode(
@@ -231,10 +234,14 @@ class UI(object, metaclass=abc.ABCMeta):
         Solve the layout rooted at this component if it is out of date.
 
         The render loop calls this before drawing. Call it directly to read
-        up-to-date sizes and positions before the next frame.
+        up-to-date sizes and positions before the next frame. A widget that
+        is not part of a layout keeps the size it was given: only layout
+        containers are solved when they have no children.
         """
         node = self._layout_node
         if not node.dirty or node.parent is not None:
+            return
+        if not node.children and not self._is_layout_container:
             return
 
         node.dirty = False
@@ -285,7 +292,7 @@ class UI(object, metaclass=abc.ABCMeta):
             self.set_position(rect.position)
         self._layout_applied_size = tuple(int(value) for value in self.size)
 
-    def _add_to_ui_scene(self, ui_scene):
+    def _add_to_ui_scene(self, ui_scene, *, direct=False):
         """
         Draw this component and its children in a UI scene.
 
@@ -296,22 +303,37 @@ class UI(object, metaclass=abc.ABCMeta):
         ----------
         ui_scene : GfxScene
             Scene dedicated to UI elements.
+        direct : bool, optional
+            True when the scene holds this component itself, rather than
+            through a parent component.
         """
+        if direct:
+            self._held_by_scene = True
         self._ui_scene = ui_scene
         if self.actors:
             ui_scene.add(*self.actors)
         for child in self._children:
             child._add_to_ui_scene(ui_scene)
 
-    def _remove_from_ui_scene(self, ui_scene):
+    def _remove_from_ui_scene(self, ui_scene, *, direct=False):
         """
         Stop drawing this component and its children in a UI scene.
+
+        A component that the scene also holds directly stays drawn until it
+        is removed from the scene itself.
 
         Parameters
         ----------
         ui_scene : GfxScene
             Scene dedicated to UI elements.
+        direct : bool, optional
+            True when the scene itself removes this component, rather than a
+            parent component or a parent's removal.
         """
+        if direct:
+            self._held_by_scene = False
+        elif self._held_by_scene:
+            return
         if self._ui_scene is ui_scene:
             self._ui_scene = None
         actors = [actor for actor in self.actors if actor.parent is ui_scene]
