@@ -2940,7 +2940,14 @@ class ButtonGroup(UI):
         ----------
         gap : float
             Spacing in pixels. Must not be negative.
+
+        Raises
+        ------
+        ValueError
+            If ``gap`` is negative. The group is left unchanged.
         """
+        if gap < 0:
+            raise ValueError(f"button_label_gap must not be negative, got {gap}.")
         self._button_label_gap = gap
         for row in self._rows:
             row.set_layout(gap=gap)
