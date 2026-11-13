@@ -18,6 +18,7 @@ the height of wrapped text depends on its final width.
 
 from dataclasses import dataclass, field, fields
 from enum import Enum
+import logging
 import math
 
 _INF = math.inf
@@ -156,7 +157,7 @@ def fixed(size):
     return Sizing(_Kind.FIXED, value=float(size), min=float(size), max=float(size))
 
 
-def fit(min=0, max=_INF):  # noqa: A002
+def fit(*, min=0, max=_INF):  # noqa: A002
     """
     Size an axis to its content.
 
@@ -176,7 +177,7 @@ def fit(min=0, max=_INF):  # noqa: A002
     return Sizing(_Kind.FIT, min=float(min), max=float(max))
 
 
-def grow(weight=1, *, min=0, max=_INF):  # noqa: A002
+def grow(*, weight=1, min=0, max=_INF):  # noqa: A002
     """
     Size an axis to its content, then take a share of the leftover space.
 
@@ -547,8 +548,8 @@ class LayoutNode:
     apply : callable, optional
         ``apply(rect)`` is called with the final :class:`LayoutRect`.
     resizable : bool, optional
-        If False the node keeps its fit size: grow, shrink, percent and
-        stretch are ignored.
+        If False the node keeps its fit size, limited by the sizing rule's
+        ``min`` and ``max``: grow, shrink, percent and stretch are ignored.
     on_dirty : callable, optional
         Called with no arguments when this node is the root of a tree that
         became dirty.
@@ -558,8 +559,8 @@ class LayoutNode:
 
     def __init__(
         self,
-        style=None,
         *,
+        style=None,
         children=(),
         measure=None,
         apply=None,
@@ -794,11 +795,9 @@ def _fit_pass(node, axis):
         content = _leaf_content_size(node, axis)
 
     sizing = _sizing(node, axis)
-    if not node.resizable and sizing.kind is not _Kind.FIXED:
-        node._size[axis] = content + node.style.inset(axis)
-    elif sizing.kind is _Kind.FIXED:
+    if sizing.kind is _Kind.FIXED:
         node._size[axis] = sizing.value
-    elif sizing.kind is _Kind.PERCENT:
+    elif sizing.kind is _Kind.PERCENT and node.resizable:
         node._size[axis] = sizing.clamp(0.0)
     else:
         node._size[axis] = sizing.clamp(content + node.style.inset(axis))
@@ -845,6 +844,61 @@ def _share_space(nodes, amount, axis, weights, limits):
         active = [n for n in active if n not in finished]
 
 
+def _main_percent_size(child, space, axis):
+    """
+    Get the size a percent child takes along its parent's main axis.
+
+    Parameters
+    ----------
+    child : LayoutNode
+        The child.
+    space : float
+        Space shared by the line's children once gaps are removed.
+    axis : int
+        0 for horizontal and 1 for vertical.
+
+    Returns
+    -------
+    float or None
+        The size in pixels, or None if the child is not a resizable percent.
+    """
+    sizing = _sizing(child, axis)
+    if not child.resizable or sizing.kind is not _Kind.PERCENT:
+        return None
+    return sizing.clamp(sizing.value * max(space, 0))
+
+
+def _line_extent(line, content, gap, axis):
+    """
+    Measure a line along the main axis with its percent children resolved.
+
+    Parameters
+    ----------
+    line : list of LayoutNode
+        The children on the line.
+    content : float
+        Size of the container's content box along the axis.
+    gap : float
+        Space between adjacent children.
+    axis : int
+        0 for horizontal and 1 for vertical.
+
+    Returns
+    -------
+    float
+        The outer size of the children plus the gaps between them.
+    """
+    gaps = gap * max(len(line) - 1, 0)
+    total = gaps
+    for child in line:
+        size = _main_percent_size(child, content - gaps, axis)
+        if size is None:
+            total += _outer(child, axis)
+        else:
+            total += size + child.style.margin.total(axis)
+    return total
+
+
 def _resolve_main_axis(line, content, gap, axis):
     """
     Resolve percent, grow and shrink along the main axis of one line.
@@ -862,9 +916,9 @@ def _resolve_main_axis(line, content, gap, axis):
     """
     gaps = gap * max(len(line) - 1, 0)
     for child in line:
-        sizing = _sizing(child, axis)
-        if child.resizable and sizing.kind is _Kind.PERCENT:
-            child._size[axis] = sizing.clamp(sizing.value * max(content - gaps, 0))
+        size = _main_percent_size(child, content - gaps, axis)
+        if size is not None:
+            child._size[axis] = size
 
     free = content - gaps - sum(_outer(c, axis) for c in line)
     if free > _EPSILON:
@@ -889,9 +943,50 @@ def _resolve_main_axis(line, content, gap, axis):
         )
 
 
+def _resolve_percent(children, content, axis):
+    """
+    Resolve percent sizes against the parent's content box, minus margins.
+
+    Parameters
+    ----------
+    children : list of LayoutNode
+        The children to resolve.
+    content : float
+        Size of the parent's content box along the axis.
+    axis : int
+        0 for horizontal and 1 for vertical.
+    """
+    for child in children:
+        sizing = _sizing(child, axis)
+        if child.resizable and sizing.kind is _Kind.PERCENT:
+            room = max(content - child.style.margin.total(axis), 0)
+            child._size[axis] = sizing.clamp(sizing.value * room)
+
+
+def _fill(child, room, axis):
+    """
+    Size a child to fill the room, unless that would shrink a non-shrinking child.
+
+    Parameters
+    ----------
+    child : LayoutNode
+        The child.
+    room : float
+        Space available to the child, without its margins.
+    axis : int
+        0 for horizontal and 1 for vertical.
+    """
+    size = _sizing(child, axis).clamp(room)
+    if child.style.shrink == 0:
+        size = max(size, child._size[axis])
+    child._size[axis] = size
+
+
 def _resolve_cross_axis(line, available, axis, align):
     """
-    Resolve percent, grow, stretch and shrink across the main axis of a line.
+    Resolve grow, stretch and shrink across the main axis of a line.
+
+    Percent sizes are resolved beforehand with :func:`_resolve_percent`.
 
     Parameters
     ----------
@@ -909,12 +1004,10 @@ def _resolve_cross_axis(line, available, axis, align):
             continue
         sizing = _sizing(child, axis)
         room = max(available - child.style.margin.total(axis), 0)
-        if sizing.kind is _Kind.PERCENT:
-            child._size[axis] = sizing.clamp(sizing.value * room)
-        elif sizing.kind is _Kind.GROW or (
+        if sizing.kind is _Kind.GROW or (
             sizing.kind is _Kind.FIT and align is Align.STRETCH
         ):
-            child._size[axis] = sizing.clamp(room)
+            _fill(child, room, axis)
         elif (
             sizing.kind is _Kind.FIT
             and child.style.shrink > 0
@@ -946,16 +1039,14 @@ def _build_lines(node, flow, content):
         return [flow] if flow else []
 
     lines = [[]]
-    used = 0.0
     for child in flow:
-        size = _outer(child, 0)
-        extra = size if not lines[-1] else size + style.gap
-        if lines[-1] and used + extra > content + _EPSILON:
-            lines.append([])
-            used = 0.0
-            extra = size
-        lines[-1].append(child)
-        used += extra
+        candidate = lines[-1] + [child]
+        if lines[-1] and _line_extent(candidate, content, style.gap, 0) > (
+            content + _EPSILON
+        ):
+            lines.append([child])
+        else:
+            lines[-1] = candidate
     return lines
 
 
@@ -968,18 +1059,21 @@ def _resolve_out_of_flow(node, content, axis):
     node : LayoutNode
         The parent node.
     content : float
-        Size of the parent's content box along the axis.
+        Size of the parent's content box along the axis. Each child's
+        margins are removed from it.
     axis : int
         0 for horizontal and 1 for vertical.
     """
-    for child in node.children:
-        if child.style.position is Position.FLOW or not child.resizable:
-            continue
-        sizing = _sizing(child, axis)
-        if sizing.kind is _Kind.PERCENT:
-            child._size[axis] = sizing.clamp(sizing.value * content)
-        elif sizing.kind is _Kind.GROW:
-            child._size[axis] = sizing.clamp(content)
+    children = [
+        c
+        for c in node.children
+        if c.style.position is not Position.FLOW and c.resizable
+    ]
+    _resolve_percent(children, content, axis)
+    for child in children:
+        if _sizing(child, axis).kind is _Kind.GROW:
+            room = max(content - child.style.margin.total(axis), 0)
+            child._size[axis] = _sizing(child, axis).clamp(room)
 
 
 def _distribute_pass(node, axis):
@@ -1006,9 +1100,11 @@ def _distribute_pass(node, axis):
                 _resolve_main_axis(line, content, style.gap, axis)
         elif style.wrap:
             for line in node._lines:
+                _resolve_percent(line, content, axis)
                 height = max(_outer(c, axis) for c in line)
                 _resolve_cross_axis(line, height, axis, style.align_cross)
         else:
+            _resolve_percent(flow, content, axis)
             _resolve_cross_axis(flow, content, axis, style.align_cross)
 
     _resolve_out_of_flow(node, content, axis)
@@ -1090,6 +1186,25 @@ def _cross_offset(align, free):
     return 0.0
 
 
+def _round_edge(value):
+    """
+    Round an edge to a whole pixel, rounding halves up.
+
+    Both edges of a box round the same way, so whole-pixel sizes are kept.
+
+    Parameters
+    ----------
+    value : float
+        Edge position in pixels.
+
+    Returns
+    -------
+    int
+        The rounded edge.
+    """
+    return math.floor(value + 0.5)
+
+
 def _to_rect(x, y, size):
     """
     Round a box to whole pixels, keeping adjacent boxes gap-free.
@@ -1108,8 +1223,9 @@ def _to_rect(x, y, size):
     LayoutRect
         The rounded rectangle.
     """
-    left, top = round(x), round(y)
-    return LayoutRect(left, top, round(x + size[0]) - left, round(y + size[1]) - top)
+    left, top = _round_edge(x), _round_edge(y)
+    right, bottom = _round_edge(x + size[0]), _round_edge(y + size[1])
+    return LayoutRect(left, top, right - left, bottom - top)
 
 
 def _place_line(node, line, origin, cross_start, cross_size):
@@ -1193,33 +1309,131 @@ def _place_pass(node, x, y):
             )
 
 
-def _place_floating(node, root):
+def _floating_nodes(node, found):
     """
-    Place floating nodes once the nodes they attach to have their rectangles.
+    Collect the floating nodes of a subtree in tree order.
 
     Parameters
     ----------
     node : LayoutNode
-        The subtree to process.
+        The subtree to search.
+    found : list of LayoutNode
+        Receives the floating nodes.
+    """
+    for child in node.children:
+        if child.style.position is Position.FLOATING:
+            found.append(child)
+        _floating_nodes(child, found)
+
+
+def _float_target(node, root):
+    """
+    Get the node a floating node attaches to.
+
+    Parameters
+    ----------
+    node : LayoutNode
+        The floating node.
+    root : LayoutNode
+        The root of the tree.
+
+    Returns
+    -------
+    LayoutNode
+        ``float_to``, or the parent when it is not set.
+
+    Raises
+    ------
+    ValueError
+        If the target is in another tree.
+    """
+    target = node.style.float_to if node.style.float_to is not None else node.parent
+    if target.root is not root:
+        raise ValueError("float_to must be a node in the same tree.")
+    return target
+
+
+def _floating_owner(node):
+    """
+    Get the floating node whose placement positions a node.
+
+    Parameters
+    ----------
+    node : LayoutNode
+        The node.
+
+    Returns
+    -------
+    LayoutNode or None
+        The nearest floating node among the node and its ancestors, or None if
+        the node is placed with the rest of the tree.
+    """
+    while node is not None:
+        if node.style.position is Position.FLOATING:
+            return node
+        node = node.parent
+    return None
+
+
+def _order_floating(node, root, order, visiting):
+    """
+    Append a floating node to the order after the floating node it depends on.
+
+    Parameters
+    ----------
+    node : LayoutNode
+        The floating node.
+    root : LayoutNode
+        The root of the tree.
+    order : list of LayoutNode
+        Floating nodes in placement order, extended in place.
+    visiting : list of LayoutNode
+        Floating nodes whose dependencies are being ordered.
+    """
+    if node in order:
+        return
+    if node in visiting:
+        logging.warning(
+            "Floating nodes form a cycle through their float_to targets; "
+            "the first one in tree order is placed from its target's previous "
+            "rectangle."
+        )
+        order.append(node)
+        return
+    visiting.append(node)
+    owner = _floating_owner(_float_target(node, root))
+    if owner is not None:
+        _order_floating(owner, root, order, visiting)
+    visiting.remove(node)
+    if node not in order:
+        order.append(node)
+
+
+def _place_floating(root):
+    """
+    Place floating nodes once the nodes they attach to have their rectangles.
+
+    A floating node attached to a node inside another floating subtree is
+    placed after that subtree. Cycles are broken in tree order with a warning.
+
+    Parameters
+    ----------
     root : LayoutNode
         The root of the tree.
     """
-    for child in node.children:
-        style = child.style
-        if style.position is Position.FLOATING:
-            target = style.float_to if style.float_to is not None else node
-            if target.root is not root:
-                raise ValueError("float_to must be a node in the same tree.")
-            _place_pass(
-                child,
-                target.rect.x
-                + target.rect.width * style.float_anchor[0]
-                + style.offset[0],
-                target.rect.y
-                + target.rect.height * style.float_anchor[1]
-                + style.offset[1],
-            )
-        _place_floating(child, root)
+    floating = []
+    _floating_nodes(root, floating)
+    order = []
+    for node in floating:
+        _order_floating(node, root, order, [])
+    for node in order:
+        target = _float_target(node, root).rect
+        style = node.style
+        _place_pass(
+            node,
+            target.x + target.width * style.float_anchor[0] + style.offset[0],
+            target.y + target.height * style.float_anchor[1] + style.offset[1],
+        )
 
 
 def _notify(node):
@@ -1255,7 +1469,7 @@ def compute_sizes(root, *, available=None):
     root.rect = LayoutRect(root.rect.x, root.rect.y, *_to_rect(0, 0, root._size).size)
 
 
-def place(root, origin=(0, 0)):
+def place(root, *, origin=(0, 0)):
     """
     Position an already sized tree and notify its nodes.
 
@@ -1269,7 +1483,7 @@ def place(root, origin=(0, 0)):
     root._solving = True
     try:
         _place_pass(root, float(origin[0]), float(origin[1]))
-        _place_floating(root, root)
+        _place_floating(root)
         root.dirty = False
         _notify(root)
     finally:
@@ -1296,5 +1510,5 @@ def solve(root, *, available=None, origin=(0, 0)):
     """
     root.style.validate()
     compute_sizes(root, available=available)
-    place(root, origin)
+    place(root, origin=origin)
     return root.rect

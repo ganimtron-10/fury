@@ -7,7 +7,7 @@ Each axis of an element has a sizing rule:
 
 * ``fixed(px)`` is an exact size.
 * ``fit()`` follows the content.
-* ``grow(weight)`` takes a share of the leftover space.
+* ``grow(weight=...)`` takes a share of the leftover space.
 * ``percent(p)`` is a fraction of the parent.
 
 This tutorial builds one row per rule. Resize the window to see them react.
@@ -52,8 +52,8 @@ column = ui.Column(
 # more than the first.
 
 row = ui.Row(gap=8)
-row.add(bar(), width=ui.grow(1))
-row.add(bar(OTHER), width=ui.grow(3))
+row.add(bar(), width=ui.grow(weight=1))
+row.add(bar(OTHER), width=ui.grow(weight=3))
 column.add(row)
 
 ##############################################################################

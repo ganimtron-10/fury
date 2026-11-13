@@ -240,7 +240,7 @@ class UI(object, metaclass=abc.ABCMeta):
         compute_sizes(node, available=UIContext.canvas_size)
         if node.resizable and tuple(self.size) != node.rect.size:
             self.resize(node.rect.size)
-        place(node, self.get_position())
+        place(node, origin=self.get_position())
 
     def _measure_layout(self, max_width):
         """

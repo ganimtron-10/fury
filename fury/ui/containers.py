@@ -622,7 +622,7 @@ class LayoutBox(UI):
         node = self._layout_node
         if node.parent is None:
             if tuple(position) != node.rect.position:
-                place(node, position)
+                place(node, origin=position)
             return
 
         origin = np.array(node.rect.position)
