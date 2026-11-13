@@ -532,6 +532,55 @@ consider an ImGui panel as a temporary substitute until they are ported.
 All other 0.12.x UI components have a PyGfx-backed equivalent listed
 above.
 
+**Spacing renames**: UI spacing now uses ``gap`` for the space between
+items and ``padding`` for the space inside a component's edges. The old
+names still work but emit a deprecation warning; they are deprecated
+since ``2.2.0``, and the keyword arguments raise an error in releases
+after ``3.0.0``.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 50 50
+
+   * - Old name
+     - New name
+   * - ``Checkbox(padding=...)``, ``RadioButton(padding=...)``
+     - ``gap=...``
+   * - ``Checkbox.padding``, ``RadioButton.padding`` (read-only)
+     - ``.gap``
+   * - ``ListBox2D.margin`` (read-only)
+     - ``ListBox2D.padding``
+
+.. code-block:: python
+
+   # FURY 0.12.x
+   checkbox = fury.ui.Checkbox(["a", "b"], padding=10)
+
+   # FURY master
+   checkbox = fury.ui.Checkbox(["a", "b"], gap=10)
+
+**Layout**: UI components can be placed by a layout engine instead of by
+absolute coordinates. ``fury.ui.Row`` and ``fury.ui.Column`` are
+invisible containers that place their children left to right or top to
+bottom. ``Panel2D.set_layout`` chooses a panel's direction, ``padding``
+and ``gap``, and ``Panel2D.add`` adds a child to that layout
+(``add_element`` still places a child manually). ``width`` and
+``height`` take a sizing rule: ``fury.ui.fixed`` (exact pixels),
+``fury.ui.fit`` (size to content), ``fury.ui.grow`` (share the leftover
+space) or ``fury.ui.percent`` (a fraction of the parent).
+
+.. code-block:: python
+
+   from fury import ui
+
+   row = ui.Row(gap=8)
+   row.add(ui.Rectangle2D(size=(30, 30)), width=ui.fixed(120))
+   row.add(ui.Rectangle2D(size=(30, 30)), width=ui.grow())
+
+   panel = ui.Panel2D((260, 150))
+   panel.set_layout(direction=ui.Direction.COLUMN, padding=12, gap=8)
+   panel.add(ui.TextBlock2D(text="Inside a panel", dynamic_bbox=True))
+
 
 13. FPS Display and Control
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
