@@ -5480,19 +5480,14 @@ class Tree2D(UI):
 
         The width includes the scrollbar. The nodes keep the height of their
         content, and the scrollbar scrolls them when they are taller than
-        the visible height. A height equal to the current content height,
-        as given by a layout that only fits the tree, keeps the visible
-        height unchanged so that expanded nodes do not scroll.
+        the visible height.
 
         Parameters
         ----------
         size : (int, int)
             New width and height in pixels.
         """
-        height = int(size[1])
-        if height == int(self.size[1]):
-            height = self.content_size[1]
-        self.content_size = (int(size[0]), height)
+        self.content_size = (int(size[0]), int(size[1]))
         self.base_node.resize(
             (
                 self.content_size[0],
@@ -5500,6 +5495,23 @@ class Tree2D(UI):
             )
         )
         self.update_scrollbar()
+
+    def _apply_layout(self, rect):
+        """
+        Show exactly the area the parent layout gives this tree.
+
+        The layout size becomes the visible size on every solve, also when
+        it equals the content size, so a limit that is lifted stops the
+        scrolling. A tree without a layout parent keeps its own size.
+
+        Parameters
+        ----------
+        rect : LayoutRect
+            The computed position and size.
+        """
+        if self._layout_node.parent is not None:
+            self.resize(rect.size)
+        super()._apply_layout(rect)
 
     def add_content(self, node, content, coords=(0.0, 0.0)):
         """

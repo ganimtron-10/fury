@@ -3388,13 +3388,83 @@ def test_tree2d_width_only_layout_keeps_its_visible_height():
 
     _click_center(show_m, tree.select_node("A").button)
     npt.assert_equal(below.get_position()[1], 125 + 5)
-    npt.assert_equal(tree.content_size[1], 200)
+    npt.assert_equal(tree.content_size[1], 125)
     npt.assert_equal(tree.scroll_step_size, 0)
 
     b_position = node_b.get_position()
     _wheel_on(show_m, node_b.label_text)
     npt.assert_equal(tree.view_offset, 0)
     npt.assert_array_equal(node_b.get_position(), b_position)
+    show_m.close()
+
+
+def _limited_tree_column(height):
+    """
+    Build a tree whose expanded content is 200 pixels tall inside a Column.
+
+    Parameters
+    ----------
+    height : Sizing or int
+        Height of the Column.
+
+    Returns
+    -------
+    tuple
+        The tree, the Column and the offscreen show manager.
+    """
+    tree = ui.elements.Tree2D(
+        structure=[{"A": []}, {"B": ["b1", "b2", "b3", "b4"]}, {"C": []}],
+        tree_name="T",
+        size=(200, 200),
+    )
+    column = ui.Column(tree, position=(0, 0), height=height)
+    show_m = _show_offscreen(column)
+    _click_center(show_m, tree.select_node("B").button)
+    return tree, column, show_m
+
+
+def _assert_tree_does_not_scroll(show_m, tree):
+    """
+    Check that the whole tree is visible and a wheel step leaves it in place.
+
+    Parameters
+    ----------
+    show_m : ShowManager
+        The show manager drawing the tree.
+    tree : Tree2D
+        The tree under test.
+    """
+    npt.assert_equal(tree.content_size[1], tree.size[1])
+    npt.assert_equal(tree.scroll_step_size, 0)
+    node_c = tree.select_node("C")
+    c_position = node_c.get_position()
+    _wheel_on(show_m, node_c.label_text)
+    npt.assert_equal(tree.view_offset, 0)
+    npt.assert_array_equal(node_c.get_position(), c_position)
+
+
+def test_tree2d_stops_scrolling_when_the_layout_height_is_lifted():
+    """A tree limited by its parent shows everything once the limit is gone."""
+    tree, column, show_m = _limited_tree_column(150)
+    npt.assert_equal(tree.size[1], 200)
+    assert tree.content_size[1] < 200
+    assert tree.scroll_step_size > 0
+
+    column.set_layout(height=ui.fit())
+    show_m.render()
+    show_m.window.draw()
+    _assert_tree_does_not_scroll(show_m, tree)
+    show_m.close()
+
+
+def test_tree2d_stops_scrolling_after_collapsing_below_a_max_height():
+    """Collapsing a node below a maximum layout height removes the scrolling."""
+    tree, _, show_m = _limited_tree_column(ui.fit(max=150))
+    assert tree.scroll_step_size > 0
+
+    _click_center(show_m, tree.select_node("B").button)
+    npt.assert_equal(tree.size[1], 100)
+    _assert_tree_does_not_scroll(show_m, tree)
     show_m.close()
 
 
