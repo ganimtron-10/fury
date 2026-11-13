@@ -3651,7 +3651,7 @@ def test_button_group_gap_spaces_adjacent_options(widget, orientation):
     )
 
 
-def test_button_group_in_parent_layout_reflows_after_label_change():
+def test_button_group_in_parent_layout_reflows_after_label_change(default_canvas):
     """A longer label pushes the group's sibling aside on the next frame."""
     group = ui.Checkbox(labels=["A", "B"], orientation="horizontal")
     sibling = ui.Rectangle2D(size=(20, 20))
@@ -3691,7 +3691,7 @@ def test_button_group_in_parent_layout_is_clickable_after_resize(default_canvas)
         show_m.close()
 
 
-def test_button_group_orientation_change_relayouts_options():
+def test_button_group_orientation_change_relayouts_options(default_canvas):
     """Changing ``orientation`` re-lays the options out."""
     group = ui.Checkbox(labels=["A", "B"], gap=8, position=(10, 10))
     show_m = _show_group(group, size=(400, 300))
@@ -3715,7 +3715,7 @@ def test_button_group_orientation_change_relayouts_options():
         group.orientation = "diagonal"
 
 
-def test_button_group_button_label_gap_change_moves_labels():
+def test_button_group_button_label_gap_change_moves_labels(default_canvas):
     """Changing ``button_label_gap`` moves every label next to its button."""
     group = ui.RadioButton(labels=["A", "B"], position=(10, 10))
     show_m = _show_group(group, size=(400, 300))
@@ -3749,7 +3749,7 @@ def _pointer_event(show_m, event_type, x, y, target):
     show_m.renderer.dispatch_event(event)
 
 
-def test_button_group_in_dragged_panel_moves_and_stays_clickable():
+def test_button_group_in_dragged_panel_moves_and_stays_clickable(default_canvas):
     """Dragging a panel moves a group it laid out, and the options still click."""
     group = ui.Checkbox(labels=["A", "B"])
     panel = ui.Panel2D((300, 200), position=(10, 10))
