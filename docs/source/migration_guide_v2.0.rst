@@ -536,7 +536,8 @@ above.
 items and ``padding`` for the space inside a component's edges. The old
 names still work but emit a deprecation warning; they are deprecated
 since ``2.2.0``, and the keyword arguments raise an error in releases
-after ``3.0.0``.
+after ``3.0.0``. Release builds hide warnings by default; call
+``fury.enable_warnings()`` to see them.
 
 .. list-table::
    :header-rows: 1
@@ -573,7 +574,7 @@ space) or ``fury.ui.percent`` (a fraction of the parent).
 
    from fury import ui
 
-   row = ui.Row(gap=8)
+   row = ui.Row(gap=8, width=ui.fixed(300))
    row.add(ui.Rectangle2D(size=(30, 30)), width=ui.fixed(120))
    row.add(ui.Rectangle2D(size=(30, 30)), width=ui.grow())
 
