@@ -3541,6 +3541,261 @@ def test_button_group_padding_keyword_is_deprecated(widget):
         npt.assert_equal(group.padding, 7)
 
 
+@pytest.fixture
+def default_canvas():
+    """Start from the 800x800 canvas of a fresh session, then restore it."""
+    previous = np.array(ui.UIContext.canvas_size)
+    ui.UIContext.canvas_size = (800, 800)
+    yield
+    ui.UIContext.canvas_size = previous
+
+
+def _show_group(*elements, size):
+    """Open an offscreen window showing the elements and draw one frame."""
+    scene = window.Scene()
+    scene.add(*elements)
+    show_m = window.ShowManager(
+        scene=scene, size=size, pixel_ratio=1, window_type="offscreen"
+    )
+    _draw_group(show_m)
+    return show_m
+
+
+def _draw_group(show_m):
+    """Draw a frame through the real render path, which solves layouts."""
+    show_m.render()
+    show_m.window.draw()
+
+
+def _pointer_click(show_m, element):
+    """Press and release the left button at an element's on-screen center."""
+    x, y = element.get_position(x_anchor=Anchor.CENTER, y_anchor=Anchor.CENTER)
+    x, y = int(x), int(y)
+    target = show_m.renderer.get_pick_info((x, y))["world_object"]
+    for event_type in (window.EventType.POINTER_DOWN, window.EventType.POINTER_UP):
+        event = window.PointerEvent(x=x, y=y, type=event_type, target=target, button=1)
+        show_m.renderer.dispatch_event(event)
+    return target
+
+
+def _option_rect(group, label):
+    """Return the (left, top, right, bottom) bounds of one option row."""
+    button, text = group.options[label]
+    lefts, tops = zip(button.get_position(), text.get_position(), strict=True)
+    rights = (lefts[0] + button.size[0], lefts[1] + text.size[0])
+    bottoms = (tops[0] + button.size[1], tops[1] + text.size[1])
+    return min(lefts), min(tops), max(rights), max(bottoms)
+
+
+@pytest.mark.parametrize("widget", [ui.Checkbox, ui.RadioButton])
+@pytest.mark.parametrize("canvas_height", [600, 1000])
+def test_button_group_click_on_non_800_canvas_fires_on_change(
+    widget, canvas_height, default_canvas
+):
+    """An option is drawn and clickable where it reports to be on any canvas."""
+    group = widget(labels=["A", "B"], position=(40, 40))
+    changes = []
+    group.on_change = lambda changed: changes.append(changed.checked_labels)
+    show_m = _show_group(group, size=(800, canvas_height))
+    try:
+        button = group.options["B"][0]
+        target = _pointer_click(show_m, button)
+
+        assert target is button.child.actor
+        npt.assert_equal(changes, [["B"]])
+        center_y = button.get_position(y_anchor=Anchor.CENTER)[1]
+        npt.assert_allclose(button.child.actor.local.y, canvas_height - center_y)
+    finally:
+        show_m.close()
+
+
+@pytest.mark.parametrize("widget", [ui.Checkbox, ui.RadioButton])
+def test_button_group_click_after_window_resize_fires_on_change(widget, default_canvas):
+    """Resizing the window moves the options' actors with the canvas."""
+    group = widget(labels=["A", "B"], position=(40, 40))
+    changes = []
+    group.on_change = lambda changed: changes.append(changed.checked_labels)
+    show_m = _show_group(group, size=(800, 600))
+    try:
+        show_m.window.set_logical_size(700, 450)
+        _draw_group(show_m)
+        npt.assert_array_equal(show_m.renderer.logical_size, (700, 450))
+
+        npt.assert_array_equal(group.get_position(), (40, 40))
+        button = group.options["A"][0]
+        assert _pointer_click(show_m, button) is button.child.actor
+        npt.assert_equal(changes, [["A"]])
+    finally:
+        show_m.close()
+
+
+@pytest.mark.parametrize("widget", [ui.Checkbox, ui.RadioButton])
+@pytest.mark.parametrize("orientation", ["vertical", "horizontal"])
+def test_button_group_gap_spaces_adjacent_options(widget, orientation):
+    """``gap`` is the exact space between two adjacent options."""
+    group = widget(
+        labels=["A", "Bb", "Ccc"], orientation=orientation, gap=25, position=(10, 20)
+    )
+
+    rects = [_option_rect(group, label) for label in group.labels]
+    npt.assert_array_equal(rects[0][:2], (10, 20))
+    for previous, current in zip(rects[:-1], rects[1:], strict=True):
+        if orientation == "vertical":
+            npt.assert_equal(current[0], previous[0])
+            npt.assert_equal(current[1] - previous[3], 25)
+        else:
+            npt.assert_equal(current[1], previous[1])
+            npt.assert_equal(current[0] - previous[2], 25)
+    npt.assert_array_equal(
+        group.size, (rects[-1][2] - 10, max(rect[3] for rect in rects) - 20)
+    )
+
+
+def test_button_group_in_parent_layout_reflows_after_label_change(default_canvas):
+    """A longer label pushes the group's sibling aside on the next frame."""
+    group = ui.Checkbox(labels=["A", "B"], orientation="horizontal")
+    sibling = ui.Rectangle2D(size=(20, 20))
+    row = ui.Row(group, sibling, gap=4, position=(10, 10))
+    show_m = _show_group(row, size=(800, 600))
+    try:
+        group_right = group.get_position()[0] + group.size[0]
+        npt.assert_equal(sibling.get_position()[0], group_right + 4)
+
+        group.options["A"][1].message = "a much longer label for A"
+        _draw_group(show_m)
+
+        new_right = group.get_position()[0] + group.size[0]
+        assert new_right > group_right + 50
+        npt.assert_equal(sibling.get_position()[0], new_right + 4)
+        npt.assert_equal(_option_rect(group, "B")[2], new_right)
+    finally:
+        show_m.close()
+
+
+def test_button_group_in_parent_layout_is_clickable_after_resize(default_canvas):
+    """A group placed by a parent layout stays clickable through a resize."""
+    group = ui.RadioButton(labels=["A", "B"])
+    column = ui.Column(ui.Rectangle2D(size=(50, 30)), group, gap=6, position=(5, 5))
+    changes = []
+    group.on_change = lambda changed: changes.append(changed.checked_labels)
+    show_m = _show_group(column, size=(640, 480))
+    try:
+        npt.assert_array_equal(group.get_position(), (5, 41))
+        assert _pointer_click(show_m, group.options["B"][0])
+        show_m.window.set_logical_size(640, 360)
+        _draw_group(show_m)
+        npt.assert_array_equal(show_m.renderer.logical_size, (640, 360))
+        assert _pointer_click(show_m, group.options["A"][0])
+        npt.assert_equal(changes, [["B"], ["A"]])
+    finally:
+        show_m.close()
+
+
+def test_button_group_orientation_change_relayouts_options(default_canvas):
+    """Changing ``orientation`` re-lays the options out."""
+    group = ui.Checkbox(labels=["A", "B"], gap=8, position=(10, 10))
+    show_m = _show_group(group, size=(400, 300))
+    try:
+        group.orientation = "horizontal"
+        _draw_group(show_m)
+
+        first, second = (_option_rect(group, label) for label in group.labels)
+        npt.assert_equal(second[1], first[1])
+        npt.assert_equal(second[0] - first[2], 8)
+
+        group.orientation = "vertical"
+        _draw_group(show_m)
+        first, second = (_option_rect(group, label) for label in group.labels)
+        npt.assert_equal(second[0], first[0])
+        npt.assert_equal(second[1] - first[3], 8)
+    finally:
+        show_m.close()
+
+    with npt.assert_raises(ValueError):
+        group.orientation = "diagonal"
+
+
+def test_button_group_button_label_gap_change_moves_labels(default_canvas):
+    """Changing ``button_label_gap`` moves every label next to its button."""
+    group = ui.RadioButton(labels=["A", "B"], position=(10, 10))
+    show_m = _show_group(group, size=(400, 300))
+    try:
+        group.button_label_gap = 30
+        _draw_group(show_m)
+
+        npt.assert_equal(group.button_label_gap, 30)
+        for button, text in group.options.values():
+            gap = text.get_position()[0] - (button.get_position()[0] + button.size[0])
+            npt.assert_equal(gap, 30)
+    finally:
+        show_m.close()
+
+
+def test_button_group_negative_button_label_gap_is_rejected():
+    """A negative ``button_label_gap`` raises and leaves the group unchanged."""
+    group = ui.Checkbox(labels=["A", "B"])
+    gap = group.button_label_gap
+
+    with npt.assert_raises(ValueError):
+        group.button_label_gap = -5
+
+    npt.assert_equal(group.button_label_gap, gap)
+    npt.assert_equal([row.layout_style.gap for row in group._rows], [gap, gap])
+
+
+def _pointer_event(show_m, event_type, x, y, target):
+    """Send one left-button pointer event through the renderer."""
+    event = window.PointerEvent(x=x, y=y, type=event_type, target=target, button=1)
+    show_m.renderer.dispatch_event(event)
+
+
+def test_button_group_in_dragged_panel_moves_and_stays_clickable(default_canvas):
+    """Dragging a panel moves a group it laid out, and the options still click."""
+    group = ui.Checkbox(labels=["A", "B"])
+    panel = ui.Panel2D((300, 200), position=(10, 10))
+    panel.set_layout(padding=10)
+    panel.add(group)
+    changes = []
+    group.on_change = lambda changed: changes.append(changed.checked_labels)
+    show_m = _show_group(panel, size=(640, 480))
+    try:
+        npt.assert_array_equal(group.get_position(), (20, 20))
+        start = {
+            label: np.array(button.get_position())
+            for label, (button, _) in group.options.items()
+        }
+
+        target = show_m.renderer.get_pick_info((290, 190))["world_object"]
+        assert target is panel.background.actor
+        _pointer_event(show_m, window.EventType.POINTER_DOWN, 290, 190, target)
+        _pointer_event(show_m, window.EventType.POINTER_MOVE, 380, 260, target)
+        _pointer_event(show_m, window.EventType.POINTER_MOVE, 480, 330, target)
+        _pointer_event(show_m, window.EventType.POINTER_UP, 480, 330, target)
+        _draw_group(show_m)
+
+        npt.assert_array_equal(panel.get_position(), (200, 150))
+        npt.assert_array_equal(group.get_position(), (210, 160))
+        for label, (button, _) in group.options.items():
+            npt.assert_array_equal(button.get_position(), start[label] + (190, 140))
+
+        button = group.options["B"][0]
+        assert _pointer_click(show_m, button) is button.child.actor
+        npt.assert_equal(changes, [["B"]])
+    finally:
+        show_m.close()
+
+
+def test_button_group_resized_button_does_not_overlap_next_option():
+    """A resized option button pushes the next option down on set_position."""
+    group = ui.Checkbox(labels=["A", "B"], gap=10, position=(10, 10))
+    group.options["A"][0].resize((60, 60))
+    group.set_position((10, 10))
+
+    first, second = (_option_rect(group, label) for label in group.labels)
+    npt.assert_equal(first[3] - first[1], 60)
+    npt.assert_equal(second[1] - first[3], 10)
+
+
 def test_list_box_margin_is_deprecated():
     """ListBox2D.margin stays readable under its old name."""
     listbox = ui.ListBox2D(values=["a"], size=(100, 100))
