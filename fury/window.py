@@ -245,6 +245,8 @@ class Scene(GfxGroup):
         self.main_scene.add(self._bg_actor)
         self.main_scene.add(*self.lights)
 
+        for element in self.ui_elements:
+            remove_ui_from_scene(self.ui_scene, element)
         self.ui_elements.clear()
         self.ui_scene.clear()
         self.ui_scene.add(self.ui_camera)
@@ -362,11 +364,7 @@ def add_ui_to_scene(ui_scene, ui_obj):
     ui_obj : UI
         UI element to add into scene.
     """
-    if ui_obj.actors:
-        ui_scene.add(*ui_obj.actors)
-
-    for child in ui_obj._children:
-        add_ui_to_scene(ui_scene, child)
+    ui_obj._add_to_ui_scene(ui_scene)
 
 
 def remove_ui_from_scene(ui_scene, ui_obj):
@@ -380,11 +378,7 @@ def remove_ui_from_scene(ui_scene, ui_obj):
     ui_obj : UI
         UI element to be removed from the scene.
     """
-    if ui_obj.actors:
-        ui_scene.remove(*ui_obj.actors)
-
-    for child in ui_obj._children:
-        remove_ui_from_scene(ui_scene, child)
+    ui_obj._remove_from_ui_scene(ui_scene)
 
 
 def create_screen(

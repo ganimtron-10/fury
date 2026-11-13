@@ -3670,3 +3670,41 @@ def test_loader_validation_preserves_rendered_content():
         npt.assert_array_equal(show_m.snapshot(), original)
     finally:
         show_m.close()
+
+
+def test_listbox_2d_slot_geometry():
+    """Slots are stacked inside the padding and leave room for the scroll bar."""
+    listbox = ui.ListBox2D(values=[f"Item {i}" for i in range(30)], size=(200, 300))
+    listbox.set_position((10, 20))
+    pad = listbox.padding
+    scroll_bar_width = int(200 / 20)
+    slot_width = 200 - scroll_bar_width - 3 * pad
+    npt.assert_equal(listbox.slot_width, slot_width)
+    npt.assert_equal(listbox.nb_slots, (300 - 2 * pad) // listbox.slot_height)
+    for index, slot in enumerate(listbox.slots):
+        npt.assert_array_equal(
+            slot.get_position(), (10 + pad, 20 + pad + index * listbox.slot_height)
+        )
+        npt.assert_array_equal(slot.size, (slot_width, listbox.slot_height))
+    scroll_bar_x = listbox.scroll_bar.get_position()[0]
+    npt.assert_equal(scroll_bar_x, 10 + 200 - scroll_bar_width - pad)
+    npt.assert_equal(scroll_bar_x - (10 + pad + slot_width), pad)
+
+
+def test_listbox_2d_shrinks_slots_on_resize():
+    listbox = ui.ListBox2D(values=[f"Item {i}" for i in range(30)], size=(100, 300))
+    listbox.resize((100, 100))
+    npt.assert_equal(listbox.nb_slots, (100 - 2 * listbox.padding) // 28)
+    npt.assert_equal(len(listbox.slots), listbox.nb_slots)
+    npt.assert_equal([slot.element for slot in listbox.slots], ["Item 0", "Item 1"])
+
+
+def test_listbox_2d_smaller_than_its_padding_has_no_slots():
+    listbox = ui.ListBox2D(values=list("abc"), size=(100, 5))
+    npt.assert_equal(listbox.nb_slots, 0)
+    npt.assert_equal(listbox.slots, [])
+    listbox.resize((100, 15))
+    npt.assert_equal(listbox.slots, [])
+    listbox.resize((100, 100))
+    npt.assert_equal(len(listbox.slots), 2)
+    npt.assert_equal(listbox.slots[0].element, "a")

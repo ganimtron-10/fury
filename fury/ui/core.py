@@ -103,6 +103,7 @@ class UI(object, metaclass=abc.ABCMeta):
         """Init scene."""
         self._position = np.array([0, 0])
         self._children = []
+        self._ui_scene = None
         self._anchors = [x_anchor, y_anchor]
         self.z_order = z_order
         self._layout_node = LayoutNode(
@@ -233,7 +234,7 @@ class UI(object, metaclass=abc.ABCMeta):
         up-to-date sizes and positions before the next frame.
         """
         node = self._layout_node
-        if not node.dirty or not node.children or node.parent is not None:
+        if not node.dirty or node.parent is not None:
             return
 
         node.dirty = False
@@ -283,6 +284,69 @@ class UI(object, metaclass=abc.ABCMeta):
         if self._layout_node.parent is not None:
             self.set_position(rect.position)
         self._layout_applied_size = tuple(int(value) for value in self.size)
+
+    def _add_to_ui_scene(self, ui_scene):
+        """
+        Draw this component and its children in a UI scene.
+
+        The component remembers the scene, so children added later are drawn
+        there too.
+
+        Parameters
+        ----------
+        ui_scene : GfxScene
+            Scene dedicated to UI elements.
+        """
+        self._ui_scene = ui_scene
+        if self.actors:
+            ui_scene.add(*self.actors)
+        for child in self._children:
+            child._add_to_ui_scene(ui_scene)
+
+    def _remove_from_ui_scene(self, ui_scene):
+        """
+        Stop drawing this component and its children in a UI scene.
+
+        Parameters
+        ----------
+        ui_scene : GfxScene
+            Scene dedicated to UI elements.
+        """
+        if self._ui_scene is ui_scene:
+            self._ui_scene = None
+        actors = [actor for actor in self.actors if actor.parent is ui_scene]
+        if actors:
+            ui_scene.remove(*actors)
+        for child in self._children:
+            child._remove_from_ui_scene(ui_scene)
+
+    def _add_child(self, child):
+        """
+        Make a UI component a child of this one.
+
+        If this component is drawn, the child is drawn in the same scene.
+
+        Parameters
+        ----------
+        child : UI
+            The component to add.
+        """
+        self._children.append(child)
+        if self._ui_scene is not None:
+            child._add_to_ui_scene(self._ui_scene)
+
+    def _remove_child(self, child):
+        """
+        Remove a child UI component and stop drawing it.
+
+        Parameters
+        ----------
+        child : UI
+            The component to remove.
+        """
+        self._children.remove(child)
+        if self._ui_scene is not None:
+            child._remove_from_ui_scene(self._ui_scene)
 
     @property
     def actors(self):
@@ -2126,6 +2190,8 @@ class Button2D(UI):
         self.toggled = False
 
         super().__init__(position=position)
+        if isinstance(self.child, UI):
+            self._children.append(self.child)
 
         self.is_hovered = False
         self.is_pressed = False
@@ -2380,11 +2446,8 @@ class Button2D(UI):
         list
             List containing the child actor(s).
         """
-        if self.child:
-            if not isinstance(self.child, UI):
-                return [self.child]
-            else:
-                self._children.append(self.child)
+        if self.child and not isinstance(self.child, UI):
+            return [self.child]
         return []
 
 
