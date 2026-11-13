@@ -102,7 +102,7 @@ def square(
     >>> show_manager.start()
     """
     vertices, faces = fp.prim_square()
-    return actor_from_primitive(
+    obj = actor_from_primitive(
         vertices,
         faces,
         centers=centers,
@@ -116,6 +116,8 @@ def square(
         wireframe=wireframe,
         wireframe_thickness=wireframe_thickness,
     )
+    obj.primitive_info.kind = "square"
+    return obj
 
 
 def star(
@@ -285,7 +287,7 @@ def disk(
 
     if all_uniform:
         vertices, faces = fp.prim_disk(radius=radii_arr[0], sectors=sectors)
-        return actor_from_primitive(
+        obj = actor_from_primitive(
             vertices,
             faces,
             centers=centers,
@@ -299,13 +301,16 @@ def disk(
             wireframe=wireframe,
             wireframe_thickness=wireframe_thickness,
         )
+        obj.primitive_info.kind = "disk"
+        obj.primitive_info.radii = np.asarray(radii_arr, dtype=float)
+        return obj
 
     _, faces = fp.prim_disk(radius=radii_arr[0], sectors=sectors)
     all_verts = [
         fp.prim_disk(radius=radii_arr[i], sectors=sectors)[0] for i in range(n_centers)
     ]
     vertices = np.concatenate(all_verts)
-    return actor_from_primitive(
+    obj = actor_from_primitive(
         vertices,
         faces,
         centers=centers,
@@ -320,6 +325,9 @@ def disk(
         wireframe_thickness=wireframe_thickness,
         have_tiled_verts=True,
     )
+    obj.primitive_info.kind = "disk"
+    obj.primitive_info.radii = np.asarray(radii_arr, dtype=float)
+    return obj
 
 
 def triangle(

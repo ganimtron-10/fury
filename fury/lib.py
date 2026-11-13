@@ -121,6 +121,7 @@ PrimitiveTopology = wgpu.PrimitiveTopology
 CullMode = wgpu.CullMode
 Binding = gfx.renderers.wgpu.Binding
 Buffer = gfx.Buffer
+normals_from_vertices = gfx.utils.normals_from_vertices
 BufferUsage = wgpu.BufferUsage
 register_wgpu_render_function = gfx.renderers.wgpu.register_wgpu_render_function
 load_wgsl = gfx.renderers.wgpu.load_wgsl
