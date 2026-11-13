@@ -7,9 +7,16 @@ import numpy as np
 from fury.physics._math import cross, quat_to_matrix, world_inverse_inertia
 from fury.physics.bodies import BodySet
 from fury.physics.broadphase import find_pairs
-from fury.physics.narrowphase import empty_contacts, generate_contacts
+from fury.physics.kinematics import Container, KinematicBodySet
+from fury.physics.narrowphase import (
+    container_contacts,
+    empty_contacts,
+    generate_contacts,
+    merge_contacts,
+)
 from fury.physics.shapes import (
     BOX,
+    CONTAINER,
     DYNAMIC,
     KINEMATIC,
     STATIC,
@@ -53,6 +60,7 @@ def _default_state(count):
         "_linear_damping": np.zeros(count),
         "_angular_damping": np.zeros(count),
         "_gravity_scale": np.ones(count),
+        "_holder": np.full(count, -1, dtype=np.intp),
     }
 
 
@@ -160,6 +168,8 @@ class World:
         self.time = 0.0
         self.step_count = 0
         self._sets = []
+        self._containers = []
+        self._container_serials = 0
         self.contacts = empty_contacts()
         self._solver = Solver()
         self._allocate(0)
@@ -187,6 +197,18 @@ class World:
             Every set of bodies in the world.
         """
         return tuple(self._sets)
+
+    @property
+    def containers(self):
+        """
+        Return every container in the world.
+
+        Returns
+        -------
+        tuple of Container
+            Every container in the world.
+        """
+        return tuple(self._containers)
 
     @property
     def count(self):
@@ -374,10 +396,64 @@ class World:
             _angular_damping=angular_loss,
             _gravity_scale=gravity_scales,
         )
-        bodies = BodySet(self, start, count)
+        kind_class = KinematicBodySet if kind_code == KINEMATIC else BodySet
+        bodies = kind_class(self, start, count)
         self._sets.append(bodies)
         self._update_margin()
         return bodies
+
+    def add_container(
+        self,
+        *,
+        half_extents,
+        center=(0.0, 0.0, 0.0),
+        open_top=False,
+        friction=0.5,
+        restitution=0.2,
+    ):
+        """
+        Add a hollow box that keeps dynamic bodies inside it.
+
+        Parameters
+        ----------
+        half_extents : float or array_like, shape (3,)
+            Half widths of the interior.
+        center : array_like, shape (3,), optional
+            Centre of the container.
+        open_top : bool, optional
+            Whether to leave out the wall on the local +Y side.
+        friction : float, optional
+            Friction of the walls.
+        restitution : float, optional
+            Bounciness of the walls, from 0 to 1.
+
+        Returns
+        -------
+        Container
+            A handle that can shake, tilt, spin or move the container.
+        """
+        size = np.broadcast_to(np.asarray(half_extents, dtype=float), (1, 3)).copy()
+        if np.any(size <= 0) or not np.all(np.isfinite(size)):
+            raise ValueError("half_extents must be positive and finite.")
+        center = np.asarray(center, dtype=float)
+        if center.shape != (3,):
+            raise ValueError("center must contain three values.")
+        if friction < 0:
+            raise ValueError("friction must not be negative.")
+        if not 0 <= restitution <= 1:
+            raise ValueError("restitution must be between 0 and 1.")
+        start = self._append(
+            _positions=center[None],
+            _shape=np.array([CONTAINER], dtype=np.intp),
+            _size=size,
+            _kind=np.array([KINEMATIC], dtype=np.intp),
+            _friction=np.array([float(friction)]),
+            _restitution=np.array([float(restitution)]),
+        )
+        container = Container(self, start, open_top=open_top)
+        self._sets.append(container)
+        self._containers.append(container)
+        return container
 
     def remove(self, bodies):
         """
@@ -395,6 +471,9 @@ class World:
         for name in _default_state(0):
             setattr(self, name, getattr(self, name)[keep])
         self._sets.remove(bodies)
+        if bodies in self._containers:
+            self._containers.remove(bodies)
+            self._holder[self._holder == bodies._serial] = -1
         for other in self._sets:
             if other._start > bodies._start:
                 other._start -= bodies._count
@@ -403,7 +482,7 @@ class World:
         self._solver.clear_cache()
         self._update_margin()
 
-    def _state_changed(self, bodies):
+    def _state_changed(self, bodies, *, row=None):
         """
         Note that user code changed a set's state.
 
@@ -411,7 +490,13 @@ class World:
         ----------
         bodies : BodySet
             The set that changed.
+        row : int, optional
+            The one body that changed, when not the whole set.
         """
+        if bodies in self._containers:
+            self._holder[self._holder == bodies._serial] = -1
+        else:
+            self._holder[bodies._range if row is None else row] = -1
 
     def _spin_about(self, body, vectors, at):
         """
@@ -596,7 +681,35 @@ class World:
         ndarray, shape (B,)
             Boolean mask.
         """
-        return np.ones(self.count, dtype=bool)
+        return self._shape != CONTAINER
+
+    def _new_container_serial(self):
+        """
+        Return a number that identifies a new container for its whole life.
+
+        Returns
+        -------
+        int
+            The container's serial number.
+        """
+        self._container_serials += 1
+        return self._container_serials
+
+    def _contact_mask(self, row):
+        """
+        Return the bodies that can touch a kinematic body or container.
+
+        Parameters
+        ----------
+        row : int
+            Index of the kinematic body.
+
+        Returns
+        -------
+        ndarray, shape (B,)
+            Boolean mask.
+        """
+        return self._kind == DYNAMIC
 
     def _filter_pairs(self, i, j):
         """
@@ -637,7 +750,12 @@ class World:
             self.margin,
         )
         i, j = self._filter_pairs(i, j)
-        return generate_contacts(self, rotation, i, j)
+        parts = [generate_contacts(self, rotation, i, j)]
+        parts.extend(
+            container_contacts(self, rotation, container)
+            for container in self._containers
+        )
+        return merge_contacts(parts)
 
     def step(self, count):
         """
@@ -653,6 +771,9 @@ class World:
 
     def _step_once(self):
         """Advance the simulation by one step."""
+        for bodies in self._sets:
+            if isinstance(bodies, KinematicBodySet):
+                bodies._update(self.time, self.dt)
         rotation = quat_to_matrix(self._rotations)
         self.contacts = self._find_contacts(rotation)
         self._solver.solve(self, self.contacts, rotation, self._acceleration(rotation))

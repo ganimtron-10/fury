@@ -508,3 +508,144 @@ def generate_contacts(world, rotation, i, j):
     if both_boxes.any():
         parts.append(box_box(x, rotation, size, i[both_boxes], j[both_boxes], margin))
     return merge_contacts(parts)
+
+
+_CORNERS = np.array(
+    [[x, y, z] for x in (-1.0, 1.0) for y in (-1.0, 1.0) for z in (-1.0, 1.0)]
+)
+_SPHERE_WALL_FEATURE = 1000
+_BOX_WALL_FEATURE = 2000
+
+
+def _wall_normals(axes, face):
+    """
+    Return the inward normals of container walls.
+
+    Parameters
+    ----------
+    axes : ndarray, shape (3, 3)
+        Container rotation matrix.
+    face : ndarray, shape (N,)
+        Wall indices: 0-2 are the positive sides, 3-5 the negative sides.
+
+    Returns
+    -------
+    ndarray, shape (N, 3)
+        Unit normals pointing into the container.
+    """
+    sign = np.where(face < 3, -1.0, 1.0)
+    return axes[:, face % 3].T * sign[:, None]
+
+
+def _held_bodies(world, container, center, axes, half):
+    """
+    Update and return the bodies a container holds.
+
+    A body is taken in once its centre is inside the container. It is kept,
+    however far it is pushed through a wall, until its centre rises above an
+    open top, its state is set by hand, or the container is removed.
+
+    Parameters
+    ----------
+    world : World
+        The world being stepped.
+    container : Container
+        The container.
+    center : ndarray, shape (3,)
+        Centre of the container.
+    axes : ndarray, shape (3, 3)
+        Rotation matrix of the container.
+    half : ndarray, shape (3,)
+        Half widths of the interior.
+
+    Returns
+    -------
+    ndarray, shape (B,)
+        Boolean mask of the bodies the container's walls act on.
+    """
+    serial = container._serial
+    held = world._holder == serial
+    offset = world._positions - center
+    inside = np.all(np.abs(offset @ axes) <= half, axis=1)
+    keep = inside | held
+    if container.open_top:
+        keep &= offset @ axes[:, 1] <= half[1]
+    keep &= world._contact_mask(container.start)
+    world._holder[held & ~keep] = -1
+    world._holder[keep] = serial
+    return keep
+
+
+def container_contacts(world, rotation, container):
+    """
+    Generate contacts between dynamic bodies and a container's walls.
+
+    Parameters
+    ----------
+    world : World
+        The world being stepped.
+    rotation : ndarray, shape (B, 3, 3)
+        Body rotation matrices.
+    container : Container
+        The container to collide against.
+
+    Returns
+    -------
+    Contacts
+        Contacts with the container as body ``a``.
+    """
+    row = container.start
+    x, size, margin = world._positions, world._size, world.margin
+    center, axes, half = x[row], rotation[row], size[row]
+    walls = container.walls
+    movable = _held_bodies(world, container, center, axes, half)
+    parts = []
+
+    balls = np.flatnonzero((world._shape == SPHERE) & movable)
+    if balls.size:
+        local = (x[balls] - center) @ axes
+        gap = np.concatenate([half - local, half + local], axis=1)
+        gap -= size[balls, 0, None]
+        gap[:, ~walls] = np.inf
+        body, face = np.nonzero(gap <= margin)
+        if body.size:
+            normals = _wall_normals(axes, face)
+            ids = balls[body]
+            depth = gap[body, face]
+            points = x[ids] - normals * (size[ids, 0] + 0.5 * depth)[:, None]
+            parts.append(
+                Contacts(
+                    np.full(body.size, row),
+                    ids,
+                    points,
+                    normals,
+                    depth,
+                    _SPHERE_WALL_FEATURE + face,
+                )
+            )
+
+    boxes = np.flatnonzero((world._shape == BOX) & movable)
+    if boxes.size:
+        offsets = size[boxes][:, None] * _CORNERS[None]
+        corners = (
+            x[boxes][:, None] + (rotation[boxes][:, None] @ offsets[..., None])[..., 0]
+        )
+        local = (corners - center) @ axes
+        gap = np.concatenate([half - local, half + local], axis=2)
+        gap[:, :, ~walls] = np.inf
+        body, corner, face = np.nonzero(gap <= margin)
+        if body.size:
+            normals = _wall_normals(axes, face)
+            depth = gap[body, corner, face]
+            points = corners[body, corner] - normals * (0.5 * depth)[:, None]
+            parts.append(
+                Contacts(
+                    np.full(body.size, row),
+                    boxes[body],
+                    points,
+                    normals,
+                    depth,
+                    _BOX_WALL_FEATURE + face * 8 + corner,
+                )
+            )
+    return merge_contacts(parts)

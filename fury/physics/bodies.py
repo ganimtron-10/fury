@@ -453,7 +453,7 @@ class Body:
             New value.
         """
         array[:] = _finite_rows(value, 1, array.shape[-1])[0]
-        self.bodies.world._state_changed(self.bodies)
+        self.bodies.world._state_changed(self.bodies, row=self._id)
 
     @property
     def position(self):

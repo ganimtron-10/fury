@@ -4,6 +4,7 @@ import numpy as np
 
 SPHERE = 0
 BOX = 1
+CONTAINER = 2
 
 DYNAMIC = 0
 STATIC = 1
