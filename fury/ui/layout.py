@@ -210,12 +210,14 @@ def percent(fraction, *, min=0, max=_INF):  # noqa: A002
     """
     Size an axis as a fraction of the parent's content box.
 
-    On the parent's main axis the gaps are removed first, so two children at
-    ``percent(0.5)`` always fit side by side. In a wrapping row the gaps on a
-    line are only known once lines are broken, so widths there are a fraction
-    of the whole content width. A percent height in a wrapping row is only
-    resolved when the row has a fixed or percent height; otherwise the child
-    keeps the height of its content.
+    On the main axis of a container that does not wrap, the gaps are removed
+    first, so two children at ``percent(0.5)`` always fit side by side. In a
+    wrapping row the gaps on a line are only known once lines are broken, so
+    widths there are a fraction of the whole content width, and two children at
+    ``percent(0.5)`` only share a line when there is no gap. A percent height
+    in a wrapping row whose height comes from its own content would make that
+    height depend on itself, so there the child takes the height of its
+    content instead.
 
     Parameters
     ----------
@@ -375,7 +377,10 @@ class LayoutStyle:
     padding : Edges, optional
         Space between the border and the content.
     margin : Edges, optional
-        Space outside the border, used by the parent when placing this node.
+        Space outside the border. In the flow the parent leaves it around the
+        node. Absolute and floating nodes are moved by the top and left
+        margins, and lose both margins of an axis when they grow or use a
+        percent.
     border : float, optional
         Border thickness. It is part of the node's size, like padding.
     gap : float, optional
@@ -399,7 +404,11 @@ class LayoutStyle:
     offset : (float, float), optional
         Offset used by absolute and floating nodes.
     float_to : LayoutNode, optional
-        Node a floating node is attached to. Defaults to the parent.
+        Node a floating node is attached to. Defaults to the parent. Floating
+        nodes attached to each other in a cycle, or to their own descendant,
+        cannot all be placed from fresh rectangles: one of them uses its
+        target's previous rectangle, so it can drift between solves. A
+        warning is logged the first time each cycle appears.
     float_anchor : (float, float), optional
         Point on the target to attach to, as fractions of its size.
     """
@@ -585,6 +594,7 @@ class LayoutNode:
         self.dirty = True
         self._solving = False
         self._size = [0.0, 0.0]
+        self._content_size = [0.0, 0.0]
         self._lines = []
         self._float_cycles = frozenset()
         for child in children:
@@ -729,6 +739,46 @@ def _outer(node, axis):
     return node._size[axis] + node.style.margin.total(axis)
 
 
+def _is_percent(node, axis):
+    """
+    Check whether the solver resolves a node's size as a percent.
+
+    Parameters
+    ----------
+    node : LayoutNode
+        The node.
+    axis : int
+        0 for horizontal and 1 for vertical.
+
+    Returns
+    -------
+    bool
+        True if the node is resizable and sized with :func:`percent`.
+    """
+    return node.resizable and _sizing(node, axis).kind is _Kind.PERCENT
+
+
+def _wrap_fit_height(child):
+    """
+    Get the height a child asks of a wrapping row, including margins.
+
+    Parameters
+    ----------
+    child : LayoutNode
+        The child.
+
+    Returns
+    -------
+    float
+        The outer height in pixels. A percent height counts as the height of
+        the child's content, which it falls back to when the row's height
+        comes from its content.
+    """
+    if _is_percent(child, 1):
+        return child._content_size[1] + child.style.margin.total(1)
+    return _outer(child, 1)
+
+
 def _flow_content_size(node, flow, axis):
     """
     Compute the size of a container's flow children along an axis.
@@ -749,7 +799,7 @@ def _flow_content_size(node, flow, axis):
     """
     style = node.style
     if style.wrap and axis == 1:
-        heights = [max(_outer(c, 1) for c in line) for line in node._lines]
+        heights = [max(_wrap_fit_height(c) for c in line) for line in node._lines]
         return sum(heights) + style.gap * max(len(heights) - 1, 0)
     sizes = [_outer(c, axis) for c in flow]
     if axis == style.main_axis():
@@ -800,12 +850,13 @@ def _fit_pass(node, axis):
         content = _leaf_content_size(node, axis)
 
     sizing = _sizing(node, axis)
+    node._content_size[axis] = sizing.clamp(content + node.style.inset(axis))
     if sizing.kind is _Kind.FIXED:
         node._size[axis] = sizing.value
-    elif sizing.kind is _Kind.PERCENT and node.resizable:
+    elif _is_percent(node, axis):
         node._size[axis] = sizing.clamp(0.0)
     else:
-        node._size[axis] = sizing.clamp(content + node.style.inset(axis))
+        node._size[axis] = node._content_size[axis]
 
 
 def _share_space(nodes, amount, axis, weights, limits):
@@ -858,7 +909,9 @@ def _main_percent_size(child, space, axis):
     child : LayoutNode
         The child.
     space : float
-        Space shared by the line's children once gaps are removed.
+        Space the fraction applies to: the content size without the line's
+        gaps in a container that does not wrap, and the whole content size in
+        a wrapping row.
     axis : int
         0 for horizontal and 1 for vertical.
 
@@ -1078,24 +1131,28 @@ def _resolve_out_of_flow(node, content, axis):
             child._size[axis] = _sizing(child, axis).clamp(room)
 
 
-def _is_content_independent(node, axis):
+def _size_follows_content(node, axis):
     """
-    Check whether a node's size along an axis does not depend on its children.
+    Check whether a node's final size along an axis is the size of its content.
+
+    Fixed and percent sizes never follow the content. Other sizes do unless
+    the parent grew, stretched or shrank the node.
 
     Parameters
     ----------
     node : LayoutNode
-        The node.
+        The node, after its parent has distributed space.
     axis : int
         0 for horizontal and 1 for vertical.
 
     Returns
     -------
     bool
-        True for fixed sizes, and for percent sizes of resizable nodes.
+        True if the size is the one the content asked for.
     """
-    sizing = _sizing(node, axis)
-    return sizing.is_fixed or (node.resizable and sizing.kind is _Kind.PERCENT)
+    if _sizing(node, axis).is_fixed or _is_percent(node, axis):
+        return False
+    return abs(node._size[axis] - node._content_size[axis]) <= _EPSILON
 
 
 def _distribute_pass(node, axis):
@@ -1121,9 +1178,13 @@ def _distribute_pass(node, axis):
             for line in node._lines:
                 _resolve_main_axis(line, content, style.gap, axis, wrap=style.wrap)
         elif style.wrap:
-            definite = _is_content_independent(node, axis)
+            follows_content = _size_follows_content(node, axis)
             for line in node._lines:
-                if definite:
+                if follows_content:
+                    for child in line:
+                        if _is_percent(child, axis):
+                            child._size[axis] = child._content_size[axis]
+                else:
                     _resolve_percent(line, content, axis)
                 height = max(_outer(c, axis) for c in line)
                 _resolve_cross_axis(line, height, axis, style.align_cross)
@@ -1485,13 +1546,21 @@ def _place_floating(root):
     floating = []
     _floating_nodes(root, floating)
     order, cycles = _order_floating(floating, root)
-    for cycle in cycles - root._float_cycles:
-        logging.warning(
-            "%d floating nodes form a cycle through float_to; one of them is "
-            "placed from its target's previous rectangle.",
-            len(cycle),
-        )
-    root._float_cycles = frozenset(cycles)
+    cycle_ids = {frozenset(id(node) for node in cycle) for cycle in cycles}
+    for cycle in cycle_ids - root._float_cycles:
+        if len(cycle) == 1:
+            logging.warning(
+                "A floating node is attached through float_to to itself or to "
+                "its own descendant; it is placed from its target's previous "
+                "rectangle."
+            )
+        else:
+            logging.warning(
+                "%d floating nodes form a cycle through float_to; one of them "
+                "is placed from its target's previous rectangle.",
+                len(cycle),
+            )
+    root._float_cycles = frozenset(cycle_ids)
     for node in order:
         target = _float_target(node, root).rect
         style = node.style

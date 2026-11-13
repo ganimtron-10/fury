@@ -422,6 +422,33 @@ def test_wrap_percent_height_in_fit_row_does_not_overflow():
     assert half.rect.y + half.rect.height <= rect.height
 
 
+def test_wrap_percent_height_in_fit_row_takes_content_height():
+    head = text_leaf(10, 30, height=percent(0.5))
+    base = text_leaf(10, 80)
+    tail = text_leaf(95, 25, height=percent(0.5))
+    root = LayoutNode(children=[head, base, tail], width=fixed(100), wrap=True)
+    assert solve(root).height == 105
+    assert head.rect.height == 30
+    assert tail.rect.position == (0, 80)
+    assert tail.rect.height == 25
+
+
+def test_wrap_percent_height_in_grow_row_uses_final_height():
+    head = text_leaf(10, 30, height=percent(0.5))
+    row = LayoutNode(children=[head], width=fixed(100), height=grow(), wrap=True)
+    solve(LayoutNode(children=[row], height=100, direction=Direction.COLUMN))
+    assert row.rect.height == 100
+    assert head.rect.height == 50
+
+
+def test_wrap_percent_height_in_stretched_row_uses_final_height():
+    head = text_leaf(10, 30, height=percent(0.5))
+    row = LayoutNode(children=[head], width=fixed(100), wrap=True)
+    solve(LayoutNode(children=[row], height=100, align_cross=Align.STRETCH))
+    assert row.rect.height == 100
+    assert head.rect.height == 50
+
+
 def test_wrap_with_many_children_solves_quickly():
     rows = [
         LayoutNode(children=[box() for _ in range(3000)], wrap=True),
@@ -474,6 +501,15 @@ def test_floating_cycle_warns_once_per_cycle(caplog):
     for _ in range(3):
         solve(root)
     assert caplog.text.count("cycle") == 1
+
+
+def test_floating_attached_to_own_child_warns_in_the_singular(caplog):
+    menu = LayoutNode(position=Position.FLOATING, offset=(1, 0))
+    item = menu.add(box())
+    menu.style.update(float_to=item)
+    solve(LayoutNode(children=[menu]))
+    assert "itself or to its own descendant" in caplog.text
+    assert "1 floating nodes" not in caplog.text
 
 
 def test_floating_chain_into_cycle_places_followers_from_fresh_rects():
