@@ -6,12 +6,21 @@ Jungle Ecosystem Survival Simulation
 An interactive 3D jungle ecosystem survival simulation containing Lions, Elephants,
 and Deers navigating land, lakes, rivers, and vegetation patches.
 Features survival states (thirst, hunger, aging, mating, hunting, and death),
-a dynamic minimap, WASD free fly camera, and diagnostic control interfaces.
+a WASD free fly camera, and diagnostic control interfaces.
+
+The animals are the elephant, lion and deer from Kenney's Cube Pets pack.
+
+Assets: Kenney packs (CC0, https://kenney.nl/assets) are expected in a
+``kenny_assets`` folder next to this script. Set ``FURY_KENNEY_ASSETS`` to use
+another location.
 """
 
+import os
+from time import perf_counter
+
 import numpy as np
-import pygfx as gfx
 from fury import actor, ui, window
+from fury.lib import AmbientLight
 from fury.window import EventType
 
 # Simulation dimensions and constants
@@ -25,11 +34,39 @@ MAX_AGE = {"lion": 90.0, "elephant": 140.0, "deer": 75.0}
 BASE_SPEED = {"lion": 7.0, "elephant": 3.5, "deer": 10.0}
 RUN_SPEED = {"lion": 15.5, "elephant": 8.5, "deer": 14.0}
 MIN_SPEED = 2.0
-ANIMAL_COLOR = {
-    "lion": (0.9, 0.45, 0.1),
-    "elephant": (0.45, 0.45, 0.5),
-    "deer": (0.55, 0.35, 0.2),
+HUNGER_RATE = {"lion": 0.5, "elephant": 0.45, "deer": 0.9}
+THIRST_RATE = {"lion": 1.0, "elephant": 0.55, "deer": 1.1}
+NEED_START = {"food": 40.0, "water": 45.0}
+NEED_MET = 10.0
+NEED_URGENT = 85.0
+STARVATION_DAMAGE = 1.5
+LION_FLEE_RANGE = 40.0
+LION_HUNT_FLEE_RANGE = 15.0
+DEER_FLEE_RANGE = 32.0
+LION_FINISH_RANGE = 15.0
+NURSING_RANGE = 15.0
+ELEPHANT_CHARGE_RANGE = 12.0
+ELEPHANT_DAMAGE = 12.0
+MAX_POPULATION = 150
+SPECIES_LIMIT = {"lion": 25, "elephant": 25, "deer": 100}
+# Simulated time per real second; matches the original 0.16 per tick at 60 FPS
+SIM_TIME_SCALE = 10.0
+MAX_SIM_STEP = 0.17
+MAX_SIM_STEPS_PER_FRAME = 12
+
+# Kenney Cube Pets models (feet at y=0, facing +Z)
+ASSETS_DIR = os.environ.get(
+    "FURY_KENNEY_ASSETS",
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "kenny_assets"),
+)
+ANIMAL_KIT_DIR = os.path.join(ASSETS_DIR, "kenney_cube-pets/Models/OBJ format")
+ANIMAL_MODELS = {
+    "lion": "animal-lion.obj",
+    "elephant": "animal-elephant.obj",
+    "deer": "animal-deer.obj",
 }
+ANIMAL_SCALE = {"lion": 3.0, "elephant": 5.5, "deer": 2.6}
+ANIMAL_HEIGHT = {"lion": 1.75, "elephant": 1.43, "deer": 1.99}
 
 # Grouping / Flocking coefficients per species
 GROUP_COEFFS = {
@@ -46,16 +83,20 @@ veg_patches = [
     np.array([180.0, 0.0, -150.0]),
     np.array([0.0, 0.0, -220.0]),
 ]
+VEG_PATCH_CENTERS = np.array(veg_patches, dtype=np.float64)
 
 
 # Global simulation state
 state = {
     "selected_animal": None,
-    "screen_size": (1024.0, 768.0),
+    "screen_size": None,
+    "layout_due": [],
+    "last_tick": None,
+    "clock": 0.0,
+    "next_label_update": 0.0,
+    "cam_pos": None,
     "animals": [],
     "next_animal_id": 0,
-    "minimap_dots_actor": None,
-    "minimap_selected_actor": None,
     # Camera states
     "keys": set(),
     "cam_yaw": 0.0,
@@ -96,7 +137,7 @@ state = {
 
 # Setup Scene
 scene = window.Scene()
-scene.background = (0.5, 0.7, 0.95)
+scene.background = (0.62, 0.82, 0.95)
 
 
 # Height map generator for rolling hills and valleys terrain
@@ -107,51 +148,38 @@ def get_terrain_height(x, z):
     # Flatten lake
     d_lake = np.sqrt(x**2 + z**2)
     lake_factor = np.clip((d_lake - LAKE_RADIUS) / 25.0, 0.0, 1.0)
-    return y * lake_factor
+
+    # Bank crossing water level exactly at the shoreline, for a clean round edge
+    bank = np.clip((d_lake - LAKE_RADIUS) / 8.0, -1.0, 1.0) * 1.5
+    return y * lake_factor + bank
 
 
 # Procedural Terrain Generation
-def generate_terrain(grid_size=60, size=600.0):
-    M = grid_size + 1
+def generate_terrain(grid_size=120, size=600.0):
     N = grid_size + 1
-    xs = np.linspace(-size / 2, size / 2, M)
-    zs = np.linspace(-size / 2, size / 2, N)
+    axis = np.linspace(-size / 2, size / 2, N)
+    xs, zs = np.meshgrid(axis, axis, indexing="ij")
+    ys = get_terrain_height(xs, zs)
+    vertices = np.column_stack([xs.ravel(), ys.ravel(), zs.ravel()]).astype(np.float32)
 
-    vertices = []
-    colors = []
+    # Color mapping by elevation, blending to sand around the lake
+    h_norm = np.clip((ys.ravel() + 15.0) / 30.0, 0.0, 1.0)[:, None]
+    grass = np.array([0.05, 0.20, 0.05]) + np.array([0.13, 0.14, 0.03]) * h_norm
+    shore = (
+        1.0
+        - np.clip((np.hypot(xs, zs).ravel() - LAKE_RADIUS) / 10.0, 0.0, 1.0)[:, None]
+    )
+    rgb = grass * (1.0 - shore) + np.array([0.62, 0.52, 0.32]) * shore
+    colors = np.column_stack([rgb, np.ones(len(rgb))]).astype(np.float32)
 
-    for r in range(M):
-        for c in range(N):
-            x = xs[r]
-            z = zs[c]
-            y = get_terrain_height(x, z)
-            vertices.append([x, y, z])
-
-            # Color mapping by elevation
-            h_norm = np.clip((y + 15.0) / 30.0, 0.0, 1.0)
-            col = (
-                0.05 + 0.1 * h_norm,
-                0.12 + 0.08 * h_norm,
-                0.05 + 0.05 * h_norm,
-                1.0,
-            )
-            colors.append(col)
-
-    vertices = np.array(vertices, dtype=np.float32)
-    colors = np.array(colors, dtype=np.float32)
-
-    faces = []
-    for r in range(M - 1):
-        for c in range(N - 1):
-            idx0 = r * N + c
-            idx1 = (r + 1) * N + c
-            idx2 = r * N + (c + 1)
-            idx3 = (r + 1) * N + (c + 1)
-
-            faces.append([idx0, idx1, idx2])
-            faces.append([idx1, idx3, idx2])
-
-    faces = np.array(faces, dtype=np.int32)
+    r, c = np.meshgrid(np.arange(N - 1), np.arange(N - 1), indexing="ij")
+    idx0 = (r * N + c).ravel()
+    idx1 = ((r + 1) * N + c).ravel()
+    idx2 = (r * N + c + 1).ravel()
+    idx3 = ((r + 1) * N + c + 1).ravel()
+    faces = np.concatenate(
+        [np.column_stack([idx0, idx1, idx2]), np.column_stack([idx1, idx3, idx2])]
+    ).astype(np.int32)
     return vertices, faces, colors
 
 
@@ -164,34 +192,36 @@ scene.add(ground)
 lake = actor.cylinder(
     centers=np.array([[LAKE_CENTER[0], 0.02, LAKE_CENTER[2]]]),
     directions=np.array([[0.0, 1.0, 0.0]]),
-    colors=(0.1, 0.4, 0.75),
+    colors=(0.10, 0.45, 0.70),
     height=0.08,
     radii=LAKE_RADIUS,
+    sectors=128,
 )
 scene.add(lake)
 
 
-# Vegetation patches (represented by small green cones on terrain)
+# Vegetation patches, batched into one actor
+bush_centers, bush_heights = [], []
 for vp in veg_patches:
     for _ in range(12):
-        offset_x = np.random.uniform(-15.0, 15.0)
-        offset_z = np.random.uniform(-15.0, 15.0)
-        wx = vp[0] + offset_x
-        wz = vp[2] + offset_z
-        wy = get_terrain_height(wx, wz) + 0.5
-        c_pos = np.array([wx, wy, wz])
-        sh = np.random.uniform(1.0, 2.0)
-        bush = actor.cone(
-            centers=np.array([c_pos]),
-            directions=np.array([[0.0, 1.0, 0.0]]),
-            colors=(0.15, 0.5, 0.2),
-            height=sh,
-            radii=sh * 0.4,
-        )
-        scene.add(bush)
+        wx = vp[0] + np.random.uniform(-15.0, 15.0)
+        wz = vp[2] + np.random.uniform(-15.0, 15.0)
+        sh = np.random.uniform(4.0, 8.0)
+        bush_centers.append([wx, get_terrain_height(wx, wz) + sh * 0.4, wz])
+        bush_heights.append(sh)
+
+bush_heights = np.array(bush_heights)
+bushes = actor.cone(
+    centers=np.array(bush_centers),
+    directions=np.array([[0.0, 1.0, 0.0]] * len(bush_centers)),
+    colors=(0.10, 0.42, 0.14),
+    height=bush_heights,
+    radii=bush_heights * 0.4,
+)
+scene.add(bushes)
 
 # Lights
-ambient = gfx.AmbientLight(color=(0.55, 0.6, 0.55), intensity=1.8)
+ambient = AmbientLight(color=(0.55, 0.6, 0.55), intensity=1.8)
 scene.add(ambient)
 
 
@@ -231,34 +261,119 @@ def disable_depth_testing(world_object):
             disable_depth_testing(child)
 
 
+def load_obj(path):
+    """
+    Read a triangulated, flat-shaded mesh and its UVs from a Kenney OBJ file.
+
+    Parameters
+    ----------
+    path : str
+        Path of the OBJ file.
+
+    Returns
+    -------
+    tuple of ndarray
+        Vertices (N, 3), triangle indices (M, 3) and UV coordinates (N, 2).
+    """
+    verts, uvs, faces, uv_indices = [], [], [], []
+    with open(path) as f:
+        for line in f:
+            parts = line.split()
+            if not parts:
+                continue
+            if parts[0] == "v":
+                verts.append([float(p) for p in parts[1:4]])
+            elif parts[0] == "vt":
+                uvs.append([float(p) for p in parts[1:3]])
+            elif parts[0] == "f":
+                ids = [p.split("/") for p in parts[1:]]
+                for i in range(1, len(ids) - 1):
+                    tri = (ids[0], ids[i], ids[i + 1])
+                    faces.append([int(p[0]) - 1 for p in tri])
+                    uv_indices.append([int(p[1]) - 1 for p in tri])
+
+    verts = np.array(verts, dtype=np.float32)
+    uvs = np.array(uvs, dtype=np.float32)
+    # OBJ UVs start at the bottom of the image, textures at the top
+    uvs[:, 1] = 1.0 - uvs[:, 1]
+
+    flat_verts = verts[np.array(faces).ravel()]
+    flat_uvs = uvs[np.array(uv_indices).ravel()]
+    flat_faces = np.arange(len(flat_verts)).reshape(-1, 3)
+    return flat_verts, flat_faces, flat_uvs
+
+
+_animal_templates = {}
+
+
+def create_animal_actor(species):
+    """
+    Create a mesh for a species, sharing geometry and texture per species.
+
+    Parameters
+    ----------
+    species : str
+        One of "lion", "elephant" or "deer".
+
+    Returns
+    -------
+    Mesh
+        The animal actor.
+    """
+    if species not in _animal_templates:
+        path = os.path.join(ANIMAL_KIT_DIR, ANIMAL_MODELS[species])
+        texture = os.path.join(ANIMAL_KIT_DIR, "Textures", "colormap.png")
+        if not os.path.exists(path):
+            raise FileNotFoundError(
+                f"Missing {path}. Download Kenney's Cube Pets pack "
+                "(https://kenney.nl/assets/cube-pets) into the assets folder, "
+                "or set FURY_KENNEY_ASSETS."
+            )
+        v, f, uv = load_obj(path)
+        template = actor.surface(v, f, texture=texture, texture_coords=uv)
+        template.material.pick_write = True
+        _animal_templates[species] = (template.geometry, template.material)
+
+    geometry, material = _animal_templates[species]
+    return actor.create_mesh(geometry, material)
+
+
+# Gold marker that hovers over the selected animal
+selection_marker = actor.cone(
+    centers=np.array([[0.0, 0.0, 0.0]]),
+    directions=np.array([[0.0, -1.0, 0.0]]),
+    colors=(1.0, 0.8, 0.1),
+    height=3.0,
+    radii=1.4,
+)
+selection_marker.visible = False
+scene.add(selection_marker)
+
+
 # Animal Spawn Helper
 def spawn_animal(species, position, is_child=False):
-    color = ANIMAL_COLOR[species]
-    h_offset = 0.6 if species == "lion" else 0.5
-    if species == "elephant":
-        h_offset = 1.0
+    """
+    Add an animal to the scene and the simulation.
 
-    position[1] = get_terrain_height(position[0], position[2]) + h_offset
+    Parameters
+    ----------
+    species : str
+        One of "lion", "elephant" or "deer".
+    position : ndarray
+        Ground position; its height is replaced by the terrain height.
+    is_child : bool, optional
+        Whether the animal is born young and still growing.
 
-    if species == "lion":
-        art = actor.ellipsoid(
-            centers=np.array([[0.0, 0.0, 0.0]]),
-            lengths=(2.0, 1.0, 1.0),
-            colors=color,
-        )
-    elif species == "elephant":
-        art = actor.box(
-            centers=np.array([[0.0, 0.0, 0.0]]), colors=color, scales=(3.2, 1.8, 1.6)
-        )
-    else:
-        art = actor.cone(
-            centers=np.array([[0.0, 0.0, 0.0]]),
-            directions=np.array([[0.0, 0.0, 1.0]]),
-            colors=color,
-            height=1.5,
-            radii=0.45,
-        )
+    Returns
+    -------
+    dict
+        The new animal's simulation record.
+    """
+    position[1] = get_terrain_height(position[0], position[2])
 
+    art = create_animal_actor(species)
+    base_scale = ANIMAL_SCALE[species]
+    art.local.scale = [base_scale, base_scale, base_scale]
     art.local.position = position
     scene.add(art)
 
@@ -276,13 +391,17 @@ def spawn_animal(species, position, is_child=False):
         "gender": np.random.choice(["M", "F"]),
         "cooldown": np.random.uniform(5.0, 15.0),
         "hunt_target_id": None,
+        "goal": None,
     }
     animal["vel"][1] = 0.0
     speed = BASE_SPEED[species]
     animal["vel"] = (animal["vel"] / (np.linalg.norm(animal["vel"]) + 1e-5)) * speed
 
+    animal["heading"] = animal["vel"] / (np.linalg.norm(animal["vel"]) + 1e-5)
+
     if is_child:
-        art.local.scale = [0.4, 0.4, 0.4]
+        child_scale = base_scale * 0.4
+        art.local.scale = [child_scale, child_scale, child_scale]
 
     art.agent_idx = animal["id"]
     state["animals"].append(animal)
@@ -305,21 +424,6 @@ for _ in range(10):
     rx = np.random.uniform(-250.0, 250.0)
     rz = np.random.uniform(-250.0, 250.0)
     spawn_animal("elephant", np.array([rx, 0.0, rz]))
-
-
-# Project 3D to Screen Coordinates
-def world_to_screen(world_pos, camera, screen_size):
-    p4 = np.array([world_pos[0], world_pos[1], world_pos[2], 1.0])
-    v = camera.view_matrix
-    p = camera.projection_matrix
-    clip = p @ (v @ p4)
-    if clip[3] == 0:
-        return np.array([0.0, 0.0])
-    ndc = clip[:3] / clip[3]
-    w, h = screen_size
-    screen_x = (ndc[0] + 1.0) * 0.5 * w
-    screen_y = (1.0 - ndc[1]) * 0.5 * h
-    return np.array([screen_x, screen_y])
 
 
 # UI Redesign - Info Panel (Height expanded to 280 to hold two-column status)
@@ -391,7 +495,9 @@ btn_deer = ui.TextButton2D(
 def select_closest_animal_by_species(species):
     candidates = [a for a in state["animals"] if a["species"] == species]
     if len(candidates) > 0:
-        target = candidates[0]
+        target = min(
+            candidates, key=lambda a: np.linalg.norm(a["pos"] - state["cam_pos"])
+        )
         state["selected_animal"] = target["id"]
         print(f"Selected Species Snapping focus to animal ID #{target['id']}")
 
@@ -582,6 +688,7 @@ btn_reset = ui.TextButton2D(
     label="RESET ALL FACTORS",
     size=(250, 25),
     position=(20, current_y),
+    font_size=14,
     states=btn_states_reset,
 )
 control_panel.add_element(0, btn_reset, (20, current_y))
@@ -789,11 +896,34 @@ build_species_tab(1, "lion")
 build_species_tab(2, "elephant")
 build_species_tab(3, "deer")
 
+
+def on_tab_change(panel):
+    """
+    Schedule a layout so the newly shown tab's text is positioned correctly.
+
+    Parameters
+    ----------
+    panel : TabUI
+        The panel whose tab changed, required by the callback signature.
+    """
+    state["layout_due"] = [state["clock"], state["clock"] + 0.3]
+
+
+control_panel.on_change = on_tab_change
+
 scene.add(control_panel)
 
 
 # Click selection logic
 def on_click(event):
+    """
+    Select the clicked animal, or clear the selection on the ground or lake.
+
+    Parameters
+    ----------
+    event : PointerEvent
+        The pointer press.
+    """
     target = event.target
     if hasattr(target, "agent_idx"):
         state["selected_animal"] = target.agent_idx
@@ -813,13 +943,31 @@ def on_key_up(event):
 
 
 # Drag input handlers for free look
+def is_ui_target(target):
+    """
+    Return whether an event target belongs to the 2D UI overlay.
+
+    Parameters
+    ----------
+    target : WorldObject or None
+        The target of a pointer event.
+
+    Returns
+    -------
+    bool
+        True when the target is part of the UI overlay.
+    """
+    while target is not None:
+        if target is scene.ui_scene:
+            return True
+        target = getattr(target, "parent", None)
+    return False
+
+
 def on_pointer_down(event):
     if event.button == 1:
-        if (
-            not hasattr(event.target, "agent_idx")
-            and event.target is not control_panel
-            and event.target is not info_panel
-        ):
+        # Dragging a slider must not also swing the camera
+        if not hasattr(event.target, "agent_idx") and not is_ui_target(event.target):
             state["is_dragging_cam"] = True
             state["last_mouse"] = (event.x, event.y)
 
@@ -845,27 +993,79 @@ def on_pointer_up(event):
 
 # Main simulation loop callback
 def sim_tick(showm):
-    global pos, vel
-    dt = 0.16 * state["sim_speed"]
+    """
+    Advance the simulation by the real time since the previous tick.
 
+    Parameters
+    ----------
+    showm : ShowManager
+        The show manager running the simulation.
+    """
+    now = perf_counter()
+    last_tick = state["last_tick"]
+    real_dt = 1.0 / 60.0 if last_tick is None else min(now - last_tick, 0.1)
+    state["last_tick"] = now
+    advance_simulation(
+        showm.screens[0].camera, tuple(showm.renderer.logical_size), real_dt
+    )
+    showm.render()
+
+
+def choose_goal(animal):
+    """
+    Choose which need an animal works on.
+
+    An animal keeps its goal until that need is met, so it does not turn back
+    halfway between the lake and its food. It switches early only when the other
+    need becomes urgent.
+
+    Parameters
+    ----------
+    animal : dict
+        The animal, with its ``hunger``, ``thirst`` and current ``goal``.
+
+    Returns
+    -------
+    str or None
+        ``"food"``, ``"water"``, or None when the animal has nothing to do.
+    """
+    level = {"food": animal["hunger"], "water": animal["thirst"]}
+    goal = animal["goal"]
+    if goal is not None:
+        other = "water" if goal == "food" else "food"
+        if level[other] >= NEED_URGENT and level[goal] < NEED_URGENT:
+            return other
+        if level[goal] > NEED_MET:
+            return goal
+    due = [need for need in level if level[need] > NEED_START[need]]
+    if not due:
+        return None
+    return max(due, key=lambda need: level[need])
+
+
+def step_ecosystem(dt):
+    """
+    Advance every animal by one fixed simulation step.
+
+    Parameters
+    ----------
+    dt : float
+        Simulated time covered by this step.
+    """
     animals = state["animals"]
-    state["screen_size"] = showm.renderer.logical_size
-
-    # Position TabUI dynamically relative to window size on the right side
-    tx_pos = state["screen_size"][0] - 335.0
-    ty_pos = 15.0
-    control_panel.set_position((tx_pos, ty_pos))
 
     # 1. Animal Needs & Aging Update loop
     for a in animals:
-        d_lake = np.linalg.norm(a["pos"])
-        in_water = d_lake <= LAKE_RADIUS
+        # An animal killed in the previous step must not heal before it is removed
+        if a["health"] <= 0.0:
+            continue
+        in_water = np.hypot(a["pos"][0], a["pos"][2]) <= LAKE_RADIUS
 
         sp = a["species"]
         a["age"] += dt * 0.008 * state["global_age_factor"] * state[f"{sp}_age_factor"]
 
-        h_rate = 0.8 if sp == "lion" else 1.6
-        t_rate = 1.2 if sp == "lion" else 2.2
+        h_rate = HUNGER_RATE[sp]
+        t_rate = THIRST_RATE[sp]
 
         # Quench thirst if in water, otherwise build up thirst
         if in_water:
@@ -883,29 +1083,29 @@ def sim_tick(showm):
             dt * h_rate * state["global_hunger_factor"] * state[f"{sp}_hunger_factor"]
         )
 
+        a["hunger"] = min(a["hunger"], 100.0)
+        a["thirst"] = min(a["thirst"], 100.0)
+
         # Update mating cooldown
         if a["cooldown"] > 0.0:
-            a["cooldown"] -= dt
+            a["cooldown"] = max(0.0, a["cooldown"] - dt)
 
         # Growth scaling for children
         if a["is_child"]:
-            scale = 0.4 + min(0.6, a["age"] * 0.05)
+            scale = ANIMAL_SCALE[sp] * (0.4 + min(0.6, a["age"] * 0.05))
             a["actor"].local.scale = [scale, scale, scale]
             if a["age"] > 12.0:
                 a["is_child"] = False
 
         # Apply starvation/dehydration damage
         if a["hunger"] >= 100.0 or a["thirst"] >= 100.0:
-            a["health"] -= dt * 4.0
+            a["health"] -= dt * STARVATION_DAMAGE
         else:
             a["health"] = min(MAX_HEALTH[sp], a["health"] + dt * 1.5)
 
     # Filter dead animals
     dead_list = []
     alive_list = []
-    num_lions = 0
-    num_elephants = 0
-    num_deers = 0
 
     for a in animals:
         limit_age = MAX_AGE[a["species"]]
@@ -913,12 +1113,6 @@ def sim_tick(showm):
             dead_list.append(a)
         else:
             alive_list.append(a)
-            if a["species"] == "lion":
-                num_lions += 1
-            elif a["species"] == "elephant":
-                num_elephants += 1
-            else:
-                num_deers += 1
 
     # Remove dead actors
     for a in dead_list:
@@ -929,15 +1123,50 @@ def sim_tick(showm):
     state["animals"] = alive_list
     animals = state["animals"]
 
-    # Limit population explosion
-    if len(animals) > 200:
-        for a in animals:
-            a["cooldown"] = 12.0
-
     # 2. Ecosystem Behaviors, Steer Forces & Movement
     new_spawns = []
 
-    for a in animals:
+    # One shared ground-plane distance table replaces per-animal scans of every animal
+    positions = np.array([a["pos"] for a in animals], dtype=np.float64).reshape(-1, 3)
+    positions[:, 1] = 0.0
+    velocities = np.array([a["vel"] for a in animals], dtype=np.float64).reshape(-1, 3)
+    offsets = positions[:, None, :] - positions[None, :, :]  # offsets[i, j] = i - j
+    distances = np.sqrt(np.sum(offsets**2, axis=-1))
+    species_index = {
+        name: np.array(
+            [i for i, a in enumerate(animals) if a["species"] == name], dtype=int
+        )
+        for name in ANIMAL_MODELS
+    }
+    index_by_id = {a["id"]: i for i, a in enumerate(animals)}
+
+    def nearest(i, candidates):
+        """
+        Return the candidate closest to an animal and its distance.
+
+        Parameters
+        ----------
+        i : int
+            Index of the animal.
+        candidates : ndarray
+            Indices of the animals to search.
+
+        Returns
+        -------
+        tuple
+            The closest candidate index and its distance, or None and infinity
+            when there are no candidates.
+        """
+        candidates = candidates[[animals[j]["health"] > 0.0 for j in candidates]]
+        if candidates.size == 0:
+            return None, np.inf
+        best = candidates[np.argmin(distances[i, candidates])]
+        return best, distances[i, best]
+
+    for i, a in enumerate(animals):
+        # Animals killed earlier in this step neither move nor breed
+        if a["health"] <= 0.0:
+            continue
         sp = a["species"]
         # Base movement speed scaled by speed factors
         current_max_speed = (
@@ -951,46 +1180,35 @@ def sim_tick(showm):
             current_max_speed *= 0.6
             run_speed_val *= 0.6
 
-        # Determine priorities
-        is_thirsty = a["thirst"] > 45.0
-        is_hungry = a["hunger"] > 40.0
+        a["goal"] = choose_goal(a)
+        seek_water = a["goal"] == "water"
+        seek_food = a["goal"] == "food"
 
         # Species Grouping / Flocking dynamics
-        same_species = [
-            other
-            for other in animals
-            if other["species"] == sp and other["id"] != a["id"]
-        ]
+        same_species = species_index[sp]
+        same_species = same_species[same_species != i]
 
         flock_cohesion = np.zeros(3)
         flock_alignment = np.zeros(3)
         flock_separation = np.zeros(3)
 
-        if len(same_species) > 0:
-            positions = np.array([other["pos"] for other in same_species])
-            velocities = np.array([other["vel"] for other in same_species])
-            diffs = a["pos"] - positions
-            dists_sq = np.sum(diffs**2, axis=-1)
-
-            # Neighbor masks
-            neigh_mask = dists_sq < 60.0**2
+        if same_species.size > 0:
+            diffs = offsets[i, same_species]
+            dists_sq = distances[i, same_species] ** 2
+            neighbors = same_species[dists_sq < 60.0**2]
             sep_mask = dists_sq < 12.0**2
 
-            n_neighbors = np.sum(neigh_mask)
-            n_sep = np.sum(sep_mask)
+            if neighbors.size > 0:
+                flock_cohesion = positions[neighbors].mean(axis=0) - positions[i]
+                flock_alignment = velocities[neighbors].mean(axis=0) - a["vel"]
 
-            if n_neighbors > 0:
-                avg_pos = np.mean(positions[neigh_mask], axis=0)
-                flock_cohesion = avg_pos - a["pos"]
-                flock_alignment = np.mean(velocities[neigh_mask], axis=0) - a["vel"]
-
-            if n_sep > 0:
+            if np.any(sep_mask):
                 flock_separation = np.sum(
                     diffs[sep_mask] / (dists_sq[sep_mask][:, None] + 1e-5), axis=0
                 )
 
         flock_weight = 1.0
-        if is_thirsty or is_hungry:
+        if a["goal"] is not None:
             flock_weight = 0.1
 
         coeffs = GROUP_COEFFS[sp]
@@ -1002,167 +1220,167 @@ def sim_tick(showm):
         ]
 
         # Lake Seeking (Thirst)
-        if is_thirsty:
-            to_lake = LAKE_CENTER - a["pos"]
-            d_lake = np.linalg.norm(to_lake)
+        if seek_water:
+            d_lake = np.linalg.norm(positions[i])
             if d_lake > LAKE_RADIUS:
-                steer += (to_lake / (d_lake + 1e-5)) * 2.8
+                steer -= (positions[i] / (d_lake + 1e-5)) * 2.8
 
         # Grazing (Deers and Elephants feeding on vegetation patches)
-        if sp in ["deer", "elephant"] and is_hungry:
-            best_patch = veg_patches[0]
-            min_d = np.linalg.norm(a["pos"] - best_patch)
-            for vp in veg_patches[1:]:
-                dist = np.linalg.norm(a["pos"] - vp)
-                if dist < min_d:
-                    min_d = dist
-                    best_patch = vp
-
-            to_patch = best_patch - a["pos"]
-            to_patch[1] = 0.0
-            steer += (to_patch / (min_d + 1e-5)) * 2.2
+        if sp in ["deer", "elephant"] and seek_food:
+            to_patches = VEG_PATCH_CENTERS - positions[i]
+            patch_dists = np.linalg.norm(to_patches, axis=1)
+            closest_patch = np.argmin(patch_dists)
+            min_d = patch_dists[closest_patch]
+            steer += (to_patches[closest_patch] / (min_d + 1e-5)) * 2.2
             if min_d < 25.0:
                 a["hunger"] = max(0.0, a["hunger"] - dt * 15.0)
 
+        # Young animals feed from any adult of their species close by
+        if a["is_child"]:
+            near = same_species[distances[i, same_species] < NURSING_RANGE]
+            if any(
+                not animals[j]["is_child"] and animals[j]["health"] > 0.0 for j in near
+            ):
+                a["hunger"] = max(0.0, a["hunger"] - dt * 15.0)
+            elif sp == "lion" and seek_food:
+                # Cubs cannot hunt, so a hungry cub goes back to the pride
+                adults = same_species[
+                    [not animals[j]["is_child"] for j in same_species]
+                ]
+                adult, dist = nearest(i, adults)
+                if adult is not None:
+                    steer -= (offsets[i, adult] / (dist + 1e-5)) * 2.2
+
         # Hunting state & pack coordination (Lions targeting Deers)
-        if sp == "lion" and is_hungry:
-            target_deer = None
-            min_d = 9999.0
+        a_target = None
+        own = index_by_id.get(a["hunt_target_id"])
+        if (
+            sp == "lion"
+            and own is not None
+            and animals[own]["species"] == "deer"
+            and animals[own]["health"] > 0.0
+            and distances[i, own] < LION_FINISH_RANGE
+        ):
+            # A lion close to its prey finishes the kill even once fed
+            a_target = own
+        elif sp == "lion" and seek_food and not a["is_child"]:
+            # Follow the first nearby packmate that is already hunting live prey
+            for j in same_species[distances[i, same_species] < 40.0]:
+                candidate = index_by_id.get(animals[j]["hunt_target_id"])
+                if (
+                    candidate is not None
+                    and animals[candidate]["species"] == "deer"
+                    and animals[candidate]["health"] > 0.0
+                ):
+                    a_target = candidate
+                    break
 
-            pack_target_deer = None
-            pack_members = [
-                other
-                for other in same_species
-                if np.linalg.norm(other["pos"] - a["pos"]) < 40.0
-                and other["hunt_target_id"] is not None
-            ]
+            if a_target is None:
+                a_target, _ = nearest(i, species_index["deer"])
 
-            if len(pack_members) > 0:
-                shared_id = pack_members[0]["hunt_target_id"]
-                for target in animals:
-                    if target["id"] == shared_id and target["species"] == "deer":
-                        pack_target_deer = target
-                        min_d = np.linalg.norm(a["pos"] - target["pos"])
-                        break
+        if a_target is not None:
+            target_deer = animals[a_target]
+            min_d = distances[i, a_target]
+            a["hunt_target_id"] = target_deer["id"]
+            current_max_speed = run_speed_val
+            steer -= (offsets[i, a_target] / (min_d + 1e-5)) * 3.8
 
-            if pack_target_deer is not None:
-                target_deer = pack_target_deer
-            else:
-                for target in animals:
-                    if target["species"] == "deer":
-                        dist = np.linalg.norm(a["pos"] - target["pos"])
-                        if dist < min_d:
-                            min_d = dist
-                            target_deer = target
-
-            if target_deer is not None:
-                a["hunt_target_id"] = target_deer["id"]
-                current_max_speed = run_speed_val
-                to_prey = target_deer["pos"] - a["pos"]
-                to_prey[1] = 0.0
-                steer += (to_prey / (min_d + 1e-5)) * 3.8
-
-                # Attack/Deal damage over time
-                if min_d < 3.5:
-                    damage = (
-                        dt
-                        * 45.0
-                        * state["global_hunting_factor"]
-                        * state["lion_hunting_factor"]
-                    )
-                    target_deer["health"] -= damage
-                    # Reduce hunger while eating
-                    a["hunger"] = max(0.0, a["hunger"] - damage * 1.5)
-                    if target_deer["health"] <= 0.0:
-                        a["hunger"] = 0.0
-                        a["hunt_target_id"] = None
-            else:
-                a["hunt_target_id"] = None
+            # Attack/Deal damage over time
+            if min_d < 3.5:
+                damage = (
+                    dt
+                    * 45.0
+                    * state["global_hunting_factor"]
+                    * state["lion_hunting_factor"]
+                )
+                target_deer["health"] -= damage
+                # Reduce hunger while eating
+                a["hunger"] = max(0.0, a["hunger"] - damage * 1.5)
+                if target_deer["health"] <= 0.0:
+                    # The pride shares the kill with every lion on the hunt
+                    pride = same_species[distances[i, same_species] < LION_FINISH_RANGE]
+                    for j in pride:
+                        if animals[j]["hunt_target_id"] == target_deer["id"]:
+                            animals[j]["hunger"] = 0.0
+                            animals[j]["hunt_target_id"] = None
+                    a["hunger"] = 0.0
+                    a["hunt_target_id"] = None
         else:
             a["hunt_target_id"] = None
 
         # Predator Avoidance (Deers running from Lions)
         if sp == "deer":
-            closest_lion = None
-            min_d = 9999.0
-            for target in animals:
-                if target["species"] == "lion":
-                    dist = np.linalg.norm(target["pos"] - a["pos"])
-                    if dist < min_d:
-                        min_d = dist
-                        closest_lion = target
-
-            if closest_lion is not None and min_d < 45.0:
+            closest_lion, min_d = nearest(i, species_index["lion"])
+            if closest_lion is not None and min_d < DEER_FLEE_RANGE:
                 current_max_speed = run_speed_val
-                to_pred = closest_lion["pos"] - a["pos"]
-                to_pred[1] = 0.0
-                steer -= (to_pred / (min_d + 1e-5)) * 3.8
+                steer += (offsets[i, closest_lion] / (min_d + 1e-5)) * 3.8
 
         # Lions avoid Elephants
         if sp == "lion":
-            for target in animals:
-                if target["species"] == "elephant":
-                    dist = np.linalg.norm(target["pos"] - a["pos"])
-                    if dist < 28.0:
-                        current_max_speed = run_speed_val
-                        steer -= (target["pos"] - a["pos"]) / (dist + 1e-5) * 3.8
+            close = species_index["elephant"]
+            # A healthy lion on a hunt braves elephants, a wounded one keeps away
+            bold = a_target is not None and a["health"] > 0.6 * MAX_HEALTH["lion"]
+            flee_range = LION_HUNT_FLEE_RANGE if bold else LION_FLEE_RANGE
+            close = close[distances[i, close] < flee_range]
+            if close.size > 0:
+                current_max_speed = run_speed_val
+                steer += (
+                    np.sum(
+                        offsets[i, close] / (distances[i, close][:, None] + 1e-5),
+                        axis=0,
+                    )
+                    * 3.8
+                )
 
         # Elephant Family Defense & Retaliation against Lions
-        if sp == "elephant":
-            is_rage = False
-            target_lion = None
-            if not a["is_child"]:
-                for lion in animals:
-                    if lion["species"] == "lion":
-                        dist_lion = np.linalg.norm(lion["pos"] - a["pos"])
-                        if dist_lion < 35.0:
-                            is_rage = True
-                            target_lion = lion
-                            break
-
-            if is_rage and target_lion is not None:
+        if sp == "elephant" and not a["is_child"]:
+            lions = species_index["lion"]
+            adult_lions = lions[[not animals[j]["is_child"] for j in lions]]
+            target_lion, dist = nearest(i, adult_lions)
+            if target_lion is not None and dist < ELEPHANT_CHARGE_RANGE:
                 current_max_speed = run_speed_val
-                to_lion = target_lion["pos"] - a["pos"]
-                to_lion[1] = 0.0
-                dist = np.linalg.norm(to_lion)
-                steer += (to_lion / (dist + 1e-5)) * 4.2
+                steer -= (offsets[i, target_lion] / (dist + 1e-5)) * 4.2
                 if dist < 4.5:
-                    target_lion["health"] -= dt * 90.0
+                    animals[target_lion]["health"] -= dt * ELEPHANT_DAMAGE
 
-        is_satiated = (not is_hungry) and (not is_thirsty)
+        is_satiated = a["goal"] is None and a_target is None
         if is_satiated:
             current_max_speed *= 0.3  # chill out / wander slowly
 
         # Breeding Logic
-        if is_satiated and a["cooldown"] <= 0.0 and not a["is_child"]:
-            for partner in animals:
+        if (
+            is_satiated
+            and a["cooldown"] <= 0.0
+            and not a["is_child"]
+            and len(animals) + len(new_spawns) < MAX_POPULATION
+            and species_index[sp].size + sum(s == sp for s, _ in new_spawns)
+            < SPECIES_LIMIT[sp]
+        ):
+            for j in same_species[distances[i, same_species] < 12.0]:
+                partner = animals[j]
                 if (
-                    partner["species"] == sp
-                    and partner["id"] != a["id"]
-                    and partner["gender"] != a["gender"]
+                    partner["gender"] != a["gender"]
+                    and partner["health"] > 0.0
                     and partner["cooldown"] <= 0.0
                     and not partner["is_child"]
                 ):
-                    dist = np.linalg.norm(a["pos"] - partner["pos"])
-                    if dist < 12.0:
-                        cooldown_val = 35.0 / (
-                            state["global_mating_factor"] * state[f"{sp}_mating_factor"]
-                            + 1e-5
-                        )
-                        a["cooldown"] = cooldown_val
-                        partner["cooldown"] = cooldown_val
-                        mid_pos = (a["pos"] + partner["pos"]) * 0.5
-                        mid_pos[1] = 0.0
-                        new_spawns.append((sp, mid_pos))
-                        break
+                    cooldown_val = 35.0 / (
+                        state["global_mating_factor"] * state[f"{sp}_mating_factor"]
+                        + 1e-5
+                    )
+                    a["cooldown"] = cooldown_val
+                    partner["cooldown"] = cooldown_val
+                    new_spawns.append((sp, (positions[i] + positions[j]) * 0.5))
+                    break
 
         # Map Boundaries Constraint
-        dist_from_origin = np.linalg.norm(a["pos"])
+        dist_from_origin = np.linalg.norm(positions[i])
         if dist_from_origin > 280.0:
-            steer -= (a["pos"] / (dist_from_origin + 1e-5)) * 3.5
+            steer -= (positions[i] / (dist_from_origin + 1e-5)) * 3.5
 
         # Update velocity & limit speed
         a["vel"] += steer * dt * 22.0
+        a["vel"][1] = 0.0  # Animals steer on the ground plane only
         speed = np.linalg.norm(a["vel"])
         if speed > current_max_speed:
             a["vel"] = (a["vel"] / speed) * current_max_speed
@@ -1173,47 +1391,90 @@ def sim_tick(showm):
         a["pos"] += a["vel"] * dt
 
         # Hard Boundary constraint: keep inside boundary radius of 290
-        d_origin = np.linalg.norm(a["pos"])
+        d_origin = np.hypot(a["pos"][0], a["pos"][2])
         if d_origin > 290.0:
-            a["pos"] = (a["pos"] / (d_origin + 1e-5)) * 290.0
-            a["vel"] = -(a["pos"] / 290.0) * np.linalg.norm(a["vel"])
+            inward = np.array([-a["pos"][0], 0.0, -a["pos"][2]]) / d_origin
+            a["pos"][0] *= 290.0 / d_origin
+            a["pos"][2] *= 290.0 / d_origin
+            a["vel"] = (inward * np.linalg.norm(a["vel"])).astype(np.float32)
 
         # Project animal pos dynamically to follow terrain elevation changes
-        h_offset = 0.6 if sp == "lion" else 0.5
-        if sp == "elephant":
-            h_offset = 1.0
-        a["pos"][1] = get_terrain_height(a["pos"][0], a["pos"][2]) + h_offset
+        a["pos"][1] = get_terrain_height(a["pos"][0], a["pos"][2])
 
-        # Update actor transforms
-        a["actor"].local.position = a["pos"]
-        h = a["vel"] / (np.linalg.norm(a["vel"]) + 1e-5)
-        angle = np.arctan2(h[0], h[2])
-        s = np.sin(angle / 2.0)
-        c = np.cos(angle / 2.0)
-        a["actor"].local.rotation = [0.0, s, 0.0, c]
+        speed = np.linalg.norm(a["vel"])
+        if speed > 1e-3:
+            a["heading"] = a["vel"] / speed
 
     # Spawn new babies
     for species, position in new_spawns:
         spawn_animal(species, position, is_child=True)
 
+
+def advance_simulation(camera, screen_size, real_dt):
+    """
+    Advance the ecosystem, the UI and the camera by one step.
+
+    Parameters
+    ----------
+    camera : Camera
+        The camera to move.
+    screen_size : tuple of float
+        Logical window size used to lay out the UI.
+    real_dt : float
+        Real time covered by this step in seconds.
+    """
+    state["clock"] += real_dt
+    now = state["clock"]
+
+    # FURY reframes the camera on resize, so restore where this demo left it
+    camera.local.position = state["cam_pos"]
+
+    # Laying out the UI is expensive, so never do it every frame. Text sizes are only
+    # known once drawn, so repeat it shortly after startup or a window resize.
+    if screen_size != state["screen_size"]:
+        state["screen_size"] = screen_size
+        state["layout_due"] = [now, now + 0.3, now + 1.0]
+    if state["layout_due"] and now >= state["layout_due"][0]:
+        state["layout_due"].pop(0)
+        info_panel.set_position((15, 15))
+        control_panel.set_position((screen_size[0] - 335.0, 15.0))
+
+    # Large steps let animals jump past each other, so split the time into small
+    # steps. A slow machine runs the ecosystem slower rather than less accurately.
+    sim_time = real_dt * SIM_TIME_SCALE * state["sim_speed"]
+    steps = max(1, int(np.ceil(sim_time / MAX_SIM_STEP - 1e-9)))
+    steps = min(steps, MAX_SIM_STEPS_PER_FRAME)
+    for _ in range(steps):
+        step_ecosystem(min(sim_time / steps, MAX_SIM_STEP))
+    animals = state["animals"]
+    # Only the last sub-step is drawn, so move the actors once per frame
+    for a in animals:
+        a["actor"].local.position = a["pos"]
+        angle = np.arctan2(a["heading"][0], a["heading"][2])
+        a["actor"].local.rotation = [0.0, np.sin(angle / 2.0), 0.0, np.cos(angle / 2.0)]
+    num_lions = sum(a["species"] == "lion" for a in animals)
+    num_elephants = sum(a["species"] == "elephant" for a in animals)
+    num_deers = len(animals) - num_lions - num_elephants
+
     # 3. UI Status updates
-    lbl_legend.message = (
-        f"Lions: {num_lions} | Elephants: {num_elephants} | Deers: {num_deers}"
-    )
+    # Text layout is costly and unreadable at frame rate, so refresh 5 times a second
+    refresh_labels = now >= state["next_label_update"]
+    if refresh_labels:
+        state["next_label_update"] = now + 0.2
+        lbl_legend.message = (
+            f"Lions: {num_lions} | Elephants: {num_elephants} | Deers: {num_deers}"
+        )
 
     selected = state["selected_animal"]
-    camera = showm.screens[0].camera
 
-    # Update highlighting
-    if selected is not None:
-        for a in animals:
-            if a["id"] == selected:
-                a["actor"].color = ANIMAL_COLOR[a["species"]]
-            else:
-                a["actor"].color = tuple(np.array(ANIMAL_COLOR[a["species"]]) * 0.3)
-    else:
-        for a in animals:
-            a["actor"].color = ANIMAL_COLOR[a["species"]]
+    # Hover the selection marker above the selected animal
+    selection_marker.visible = False
+    for a in animals:
+        if a["id"] == selected:
+            top = ANIMAL_HEIGHT[a["species"]] * a["actor"].local.scale[1] + 3.0
+            selection_marker.local.position = a["pos"] + np.array([0.0, top, 0.0])
+            selection_marker.visible = True
+            break
 
     # 4. Camera Control (Focus vs Free look Fly mode)
     if selected is not None:
@@ -1231,61 +1492,61 @@ def sim_tick(showm):
             elif selected_a["species"] == "lion":
                 type_txt = "Cub" if selected_a["is_child"] else "Adult"
 
-            # Display stats on details card
             # Display stats on details card (Two columns)
-            lbl_animal_info_left.message = (
-                f"Species: {selected_a['species'].upper()}\n"
-                f"Class: {type_txt}\n"
-                f"Sex: {gender_txt}\n"
-                f"Health: {selected_a['health']:.1f}"
-            )
-            lbl_animal_info_right.message = (
-                f"Hunger: {selected_a['hunger']:.1f}%\n"
-                f"Thirst: {selected_a['thirst']:.1f}%\n"
-                f"Age: {selected_a['age']:.1f}\n"
-                f"CD: {selected_a['cooldown']:.1f}s"
-            )
+            if refresh_labels:
+                lbl_animal_info_left.message = (
+                    f"Species: {selected_a['species'].upper()}\n"
+                    f"Class: {type_txt}\n"
+                    f"Sex: {gender_txt}\n"
+                    f"Health: {selected_a['health']:.1f}"
+                )
+                lbl_animal_info_right.message = (
+                    f"Hunger: {selected_a['hunger']:.1f}%\n"
+                    f"Thirst: {selected_a['thirst']:.1f}%\n"
+                    f"Age: {selected_a['age']:.1f}\n"
+                    f"CD: {selected_a['cooldown']:.1f}s"
+                )
 
             # Chase camera positioning
             b_pos = selected_a["pos"]
-            b_vel = selected_a["vel"]
-            spd = np.linalg.norm(b_vel)
-            h = b_vel / (spd + 1e-5)
+            h = selected_a["heading"]
 
             target_cam_pos = b_pos - h * 25.0 + np.array([0.0, 12.0, 0.0])
+            follow = 1.0 - np.exp(-6.0 * real_dt)  # Same feel at any frame rate
             camera.local.position = (
-                camera.local.position + (target_cam_pos - camera.local.position) * 0.1
+                camera.local.position
+                + (target_cam_pos - camera.local.position) * follow
             )
             camera.look_at(b_pos + h * 4.0)
 
             # Update camera look rotation states to match
             diff = b_pos - camera.local.position
-            state["cam_yaw"] = np.arctan2(diff[0], diff[2])
+            # Free-look forward is (-sin yaw, -cos yaw) on the ground plane
+            state["cam_yaw"] = np.arctan2(-diff[0], -diff[2])
             state["cam_pitch"] = np.arcsin(
                 np.clip(diff[1] / (np.linalg.norm(diff) + 1e-5), -0.99, 0.99)
             )
         else:
             state["selected_animal"] = None
+    else:
+        if refresh_labels:
             lbl_animal_info_left.message = "Click an animal\nto monitor."
             lbl_animal_info_right.message = ""
-    else:
-        lbl_animal_info_left.message = "Click an animal\nto monitor."
-        lbl_animal_info_right.message = ""
 
         keys = state["keys"]
 
         # Keyboard Camera Rotation
         if "arrowleft" in keys or "left" in keys:
-            state["cam_yaw"] += 1.5 * dt
+            state["cam_yaw"] += 1.5 * real_dt
         if "arrowright" in keys or "right" in keys:
-            state["cam_yaw"] -= 1.5 * dt
+            state["cam_yaw"] -= 1.5 * real_dt
         if "arrowup" in keys or "up" in keys:
             state["cam_pitch"] = np.clip(
-                state["cam_pitch"] + 1.5 * dt, -np.pi / 2.2, np.pi / 2.2
+                state["cam_pitch"] + 1.5 * real_dt, -np.pi / 2.2, np.pi / 2.2
             )
         if "arrowdown" in keys or "down" in keys:
             state["cam_pitch"] = np.clip(
-                state["cam_pitch"] - 1.5 * dt, -np.pi / 2.2, np.pi / 2.2
+                state["cam_pitch"] - 1.5 * real_dt, -np.pi / 2.2, np.pi / 2.2
             )
 
         # Counterstrike style WASD fly camera mode
@@ -1296,7 +1557,7 @@ def sim_tick(showm):
         fwd = rotate_vector(camera.local.rotation, np.array([0.0, 0.0, -1.0]))
         right = rotate_vector(camera.local.rotation, np.array([1.0, 0.0, 0.0]))
 
-        fly_speed = 70.0
+        fly_speed = 150.0
         move = np.zeros(3)
 
         if "w" in keys:
@@ -1314,15 +1575,34 @@ def sim_tick(showm):
 
         if np.any(move):
             move_dir = move / np.linalg.norm(move)
-            camera.local.position = camera.local.position + move_dir * fly_speed * dt
+            camera.local.position = (
+                camera.local.position + move_dir * fly_speed * real_dt
+            )
 
     # Enforce camera does not move below ground
     cx, cy, cz = camera.local.position
     cam_terrain_h = get_terrain_height(cx, cz)
     cy_new = max(cy, cam_terrain_h + 5.0)
     camera.local.position = np.array([cx, cy_new, cz])
+    state["cam_pos"] = np.array(camera.local.position)
 
-    showm.render()
+
+def place_initial_camera(camera):
+    """
+    Place the camera above the map, looking at the lake.
+
+    Parameters
+    ----------
+    camera : Camera
+        The camera to place.
+    """
+    camera.local.position = (0.0, 170.0, 240.0)
+    state["cam_pos"] = np.array(camera.local.position)
+    state["cam_yaw"] = 0.0
+    state["cam_pitch"] = -np.radians(40.0)
+    qy = axis_angle_to_quat(np.array([0, 1, 0]), np.degrees(state["cam_yaw"]))
+    qx = axis_angle_to_quat(np.array([1, 0, 0]), np.degrees(state["cam_pitch"]))
+    camera.local.rotation = quat_mult(qy, qx)
 
 
 if __name__ == "__main__":
@@ -1341,16 +1621,7 @@ if __name__ == "__main__":
     show_manager.renderer.add_event_handler(on_pointer_move, EventType.POINTER_MOVE)
     show_manager.renderer.add_event_handler(on_pointer_up, EventType.POINTER_UP)
 
-    # Initial camera placement
-    camera = show_manager.screens[0].camera
-    camera.local.position = (0.0, 200.0, -250.0)
-
-    # Set initial camera look rotation
-    state["cam_yaw"] = 0.0
-    state["cam_pitch"] = -np.radians(40.0)
-    qy = axis_angle_to_quat(np.array([0, 1, 0]), np.degrees(state["cam_yaw"]))
-    qx = axis_angle_to_quat(np.array([1, 0, 0]), np.degrees(state["cam_pitch"]))
-    camera.local.rotation = quat_mult(qy, qx)
+    place_initial_camera(show_manager.screens[0].camera)
 
     # Ensure UI elements always render on top
     disable_depth_testing(scene.ui_scene)
