@@ -101,12 +101,12 @@ tree.add_content(
 tree.add_content(
     "LineSlider", ui.LineSlider2D(length=200, orientation="vertical"), coords=(40, 0)
 )
-tree.add_content("LineDoubleSlider", ui.LineDoubleSlider2D(length=200), coords=(0, 10))
+tree.add_content("LineDoubleSlider", ui.LineDoubleSlider2D(length=200), coords=(0, 30))
 tree.add_content("RingSlider", ui.RingSlider2D())
 tree.add_content(
     "RangeSlider",
     ui.RangeSlider(range_slider_center=(0, 60), value_slider_center=(0, 0), length=200),
-    coords=(0, 10),
+    coords=(0, 30),
 )
 tree.add_content("SpinBox", ui.SpinBox(min_val=0, max_val=10, initial_val=5))
 tree.add_content("PlaybackPanel", ui.PlaybackPanel(width=400))
