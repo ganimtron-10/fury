@@ -1,13 +1,18 @@
 """Test UI themes."""
 
 import gc
+from hashlib import sha256
+import json
+import logging
+import os
 
 import numpy as np
 import numpy.testing as npt
 import pytest
 
 from fury import io, ui, window
-from fury.data import fetch_viz_icons, read_viz_icons
+from fury.data import FetcherError, fetch_viz_icons, read_viz_icons
+from fury.data.fetcher import UI_THEME_SHA256
 from fury.ui.helpers import Anchor
 from fury.ui.tests._helpers import click, send_pointer
 
@@ -2571,3 +2576,321 @@ def test_panel_relays_out_slider_and_checkbox_after_density_change():
     npt.assert_array_equal(slider.get_position(), fresh_slider.get_position())
     npt.assert_array_equal(checkbox.get_position(), fresh_checkbox.get_position())
     npt.assert_array_equal(_render_scene(panel), _render_scene(fresh))
+
+
+def write_json(path, data):
+    """
+    Write a mapping as a JSON file.
+
+    Parameters
+    ----------
+    path : pathlib.Path
+        Destination file.
+    data : object
+        Value to write.
+
+    Returns
+    -------
+    pathlib.Path
+        The written file.
+    """
+    path.write_text(json.dumps(data), encoding="utf-8")
+    return path
+
+
+def test_to_dict_records_the_format_version(tmp_path):
+    """Saved themes record the theme format version first."""
+    data = red_panel_theme().to_dict()
+    assert list(data) == ["format_version", "name", "density", "items"]
+    assert data["format_version"] == ui.theme.THEME_FORMAT_VERSION == 1
+
+    path = tmp_path / "red.json"
+    red_panel_theme().save(path)
+    assert json.loads(path.read_text())["format_version"] == 1
+
+
+def test_theme_files_without_format_version_load_as_version_one(tmp_path):
+    """Files written before the format version was recorded still load."""
+    path = write_json(
+        tmp_path / "old.json",
+        {"name": "old", "items": {"Panel2D": {"color": [1, 0, 0]}}},
+    )
+
+    theme = ui.Theme.load(path)
+
+    assert theme.name == "old"
+    assert theme.get(ui.Panel2D, "color") == [1, 0, 0]
+
+
+@pytest.mark.parametrize(
+    "data, message",
+    [
+        ({"format_version": 2, "items": {}}, "format_version 2 is newer.*Update FURY"),
+        ({"format_version": 0}, "positive integer, not 0"),
+        ({"format_version": "1"}, "positive integer, not '1'"),
+        ({"format_version": True}, "positive integer, not True"),
+        ({"density": "tiny"}, "Unknown density 'tiny'.*compact"),
+        ({"density": ["compact"]}, r"density must be a string, not \['compact'\]"),
+        ({"name": 3}, "name must be a string"),
+        ({"items": []}, "items must be a JSON object, not list"),
+        ({"items": {"Panel2D": [1, 0, 0]}}, "items of 'Panel2D' must be a JSON"),
+        ([1, 2], "must be a JSON object, not list"),
+    ],
+)
+def test_invalid_theme_data_raises(data, message, tmp_path):
+    """Invalid theme mappings raise a ValueError, naming the file when loaded."""
+    with pytest.raises(ValueError, match=message):
+        ui.Theme.from_dict(data)
+
+    path = write_json(tmp_path / "bad.json", data)
+    with pytest.raises(ValueError, match="Cannot load a theme from .*bad.json"):
+        ui.Theme.load(path)
+    with pytest.raises(ValueError, match=message):
+        ui.load_theme(path)
+
+
+def test_invalid_json_raises_naming_the_file(tmp_path):
+    """A file that is not JSON raises a ValueError naming the file."""
+    path = tmp_path / "broken.json"
+    path.write_text('{"name": "broken",', encoding="utf-8")
+
+    with pytest.raises(ValueError, match="Cannot load a theme from .*broken.json"):
+        ui.load_theme(str(path))
+
+
+@pytest.mark.parametrize("as_path", [str, os.fspath, lambda path: path])
+def test_load_theme_from_a_file_round_trips(as_path, tmp_path):
+    """load_theme reads a saved file back, with classic as default base."""
+    theme = ui.builtin_theme("ember").derive(
+        name="square_ember", items={"Panel2D": {"corner_radius": 0}}
+    )
+    path = tmp_path / "square_ember.json"
+    theme.save(path)
+
+    loaded = ui.load_theme(as_path(path))
+
+    assert loaded.name == "square_ember"
+    assert loaded.base.name == "classic"
+    assert ui.theme._comparable_items(loaded) == ui.theme._comparable_items(theme)
+    with ui.theme_scope(loaded):
+        panel = ui.Panel2D(size=(50, 50))
+    npt.assert_array_equal(panel.background.corner_radius, 0)
+
+
+def test_load_theme_takes_missing_items_from_base(tmp_path):
+    """Items the file lacks come from classic, or from the given base."""
+    path = write_json(
+        tmp_path / "partial.json", {"items": {"Panel2D": {"opacity": 0.5}}}
+    )
+
+    loaded = ui.load_theme(path)
+    based = ui.load_theme(path, base="graphite")
+
+    assert loaded.get(ui.Panel2D, "opacity") == 0.5
+    assert loaded.get(ui.TextBlock2D, "font_size") == ui.builtin_theme("classic").get(
+        ui.TextBlock2D, "font_size"
+    )
+    assert based.get(ui.Panel2D, "opacity") == 0.5
+    assert based.get(ui.Panel2D, "color") == "#1C1D20"
+
+
+def test_load_theme_by_name_from_a_folder(tmp_path):
+    """With folder=, the theme is read from <folder>/<name>.json."""
+    ui.builtin_theme("graphite").derive(
+        name="mint", items={"Panel2D": {"color": "#00FF88"}}
+    ).save(tmp_path / "mint.json")
+    ui.builtin_theme("frost").save(tmp_path / "graphite.json")
+
+    mint = ui.load_theme("mint", folder=tmp_path)
+    shadowed = ui.load_theme("graphite", folder=str(tmp_path))
+
+    assert mint.name == "mint"
+    assert mint.get(ui.Panel2D, "color") == "#00FF88"
+    assert shadowed.name == "frost"
+    with pytest.raises(FileNotFoundError, match="No theme 'ocean'.*graphite, mint"):
+        ui.load_theme("ocean", folder=tmp_path)
+
+
+def test_load_theme_returns_builtin_themes(caplog):
+    """Built-in names return a fresh built-in theme and warn about ignored base."""
+    theme = ui.load_theme("hairline")
+
+    assert theme.name == "hairline"
+    assert theme.base is None
+    assert ui.theme._comparable_items(theme) == ui.theme._comparable_items(
+        ui.builtin_theme("hairline")
+    )
+    assert "ignores" not in caplog.text
+
+    with caplog.at_level(logging.WARNING):
+        ui.load_theme("ember", base="graphite", sha256="0" * 64)
+    assert "ignores base, sha256" in caplog.text
+
+
+def test_load_theme_unknown_name_lists_themes():
+    """An unknown name lists built-in and downloadable themes."""
+    with pytest.raises(ValueError) as error:
+        ui.load_theme("ocean")
+
+    message = str(error.value)
+    assert message.startswith("Unknown theme 'ocean'.")
+    for name in ui.theme_names() + ui.theme_names(downloadable=True):
+        assert name in message
+    with pytest.raises(FileNotFoundError):
+        ui.load_theme("ocean.json")
+
+
+def test_downloadable_theme_names_are_not_builtin():
+    """Downloadable themes are listed separately from built-in ones."""
+    downloadable = ui.theme_names(downloadable=True)
+
+    assert downloadable == list(UI_THEME_SHA256)
+    assert "slate" in downloadable
+    assert not set(downloadable) & set(ui.theme_names())
+
+
+def test_unknown_top_level_keys_warn_and_load(tmp_path, caplog):
+    """Unknown top-level keys are logged and ignored; the theme still loads."""
+    path = write_json(
+        tmp_path / "extra.json",
+        {"name": "extra", "author": "me", "items": {"Panel2D": {"opacity": 0.5}}},
+    )
+
+    with caplog.at_level(logging.WARNING):
+        theme = ui.load_theme(path)
+
+    assert "Ignoring unknown theme keys: 'author'" in caplog.text
+    assert theme.name == "extra"
+    assert theme.get(ui.Panel2D, "opacity") == 0.5
+
+
+@pytest.mark.parametrize("name", ["mint", "mint.json", "mint.JSON"])
+def test_load_theme_from_a_folder_strips_the_json_extension(name, tmp_path):
+    """With folder=, a name with a .json extension in any case finds the file."""
+    ui.builtin_theme("graphite").derive(name="mint").save(tmp_path / "mint.json")
+
+    assert ui.load_theme(name, folder=tmp_path).name == "mint"
+
+
+@pytest.mark.parametrize("make_theme", [lambda path: path, str])
+def test_load_theme_rejects_paths_with_a_folder(make_theme, tmp_path):
+    """With folder=, a path instead of a name raises a ValueError."""
+    path = tmp_path / "mint.json"
+    ui.builtin_theme("graphite").derive(name="mint").save(path)
+
+    with pytest.raises(ValueError, match="With folder=, pass the name"):
+        ui.load_theme(make_theme(path), folder=tmp_path)
+
+
+@pytest.mark.parametrize("name", ["", ".json", "C:foo"])
+def test_load_theme_rejects_names_that_are_not_plain_in_a_folder(name, tmp_path):
+    """With folder=, an empty name or one with a drive or colon is rejected."""
+    with pytest.raises(ValueError, match="Invalid UI theme name"):
+        ui.load_theme(name, folder=tmp_path)
+
+
+def test_load_theme_rejects_parent_folder_names_in_a_folder(tmp_path):
+    """With folder=, a name that climbs out of the folder is rejected."""
+    with pytest.raises(ValueError, match="With folder=, pass the name"):
+        ui.load_theme("../x", folder=tmp_path)
+
+
+def test_load_theme_reports_a_missing_folder(tmp_path):
+    """A folder that does not exist raises FileNotFoundError naming it."""
+    missing = tmp_path / "no_such_folder"
+
+    with pytest.raises(FileNotFoundError, match="Theme folder .*no_such_folder"):
+        ui.load_theme("mint", folder=missing)
+
+
+def test_load_theme_path_with_uppercase_extension(tmp_path):
+    """A string ending in .JSON is read as a path, not a theme name."""
+    path = tmp_path / "Mint.JSON"
+    ui.builtin_theme("graphite").derive(name="mint").save(path)
+
+    assert ui.load_theme(str(path)).name == "mint"
+
+
+def test_load_theme_path_without_extension_needs_a_separator(tmp_path):
+    """A file without .json loads by path once it contains a separator."""
+    ui.builtin_theme("graphite").derive(name="mint").save(tmp_path / "my.theme")
+
+    assert ui.load_theme(str(tmp_path / "my.theme")).name == "mint"
+    with pytest.raises(ValueError, match=r"contain a separator \(e\.g\. \./my"):
+        ui.load_theme("my.theme")
+
+
+@pytest.mark.parametrize("use_folder", [False, True])
+def test_load_theme_warns_about_ignored_download_options(use_folder, tmp_path, caplog):
+    """url, sha256 and cache_folder are reported as ignored for local files."""
+    path = tmp_path / "mint.json"
+    ui.builtin_theme("graphite").derive(name="mint").save(path)
+    theme, folder = ("mint", tmp_path) if use_folder else (path, None)
+
+    with caplog.at_level(logging.WARNING):
+        loaded = ui.load_theme(
+            theme,
+            folder=folder,
+            url="http://127.0.0.1:1/",
+            sha256="0" * 64,
+            cache_folder=tmp_path,
+        )
+
+    assert loaded.name == "mint"
+    assert "ignores url, sha256, cache_folder" in caplog.text
+
+
+def test_load_theme_downloads_and_caches(local_http_server, tmp_path):
+    """A theme is downloaded from url once, then loaded from the cache."""
+    theme = ui.builtin_theme("graphite").derive(
+        name="test_download", items={"Panel2D": {"color": "#123456"}}
+    )
+    served = local_http_server.folder / "test_download.json"
+    theme.save(served)
+    checksum = sha256(served.read_bytes()).hexdigest()
+    cache = tmp_path / "cache"
+
+    loaded = ui.load_theme(
+        "test_download", url=local_http_server.url, sha256=checksum, cache_folder=cache
+    )
+    served.unlink()
+    again = ui.load_theme(
+        "test_download", url=local_http_server.url, sha256=checksum, cache_folder=cache
+    )
+
+    assert local_http_server.requested_paths == ["/test_download.json"]
+    assert (cache / "test_download.json").is_file()
+    for result in (loaded, again):
+        assert result.get(ui.Panel2D, "color") == "#123456"
+        assert ui.theme._comparable_items(result) == ui.theme._comparable_items(theme)
+
+
+def test_load_theme_rejects_a_download_with_the_wrong_checksum(
+    local_http_server, tmp_path
+):
+    """A download that does not match its checksum raises and is deleted."""
+    ui.builtin_theme("ember").save(local_http_server.folder / "test_download.json")
+    cache = tmp_path / "cache"
+
+    with pytest.raises(FetcherError, match="expected sha"):
+        ui.load_theme(
+            "test_download",
+            url=local_http_server.url,
+            sha256="0" * 64,
+            cache_folder=cache,
+        )
+    assert not (cache / "test_download.json").exists()
+
+
+def test_load_theme_reports_a_failed_download(local_http_server, tmp_path):
+    """A theme missing on the server raises FetcherError, not a bare URLError."""
+    cache = tmp_path / "cache"
+
+    with pytest.raises(FetcherError, match="Could not download UI themes"):
+        ui.load_theme(
+            "test_download",
+            url=local_http_server.url,
+            sha256="0" * 64,
+            cache_folder=cache,
+        )
+    assert not (cache / "test_download.json").exists()

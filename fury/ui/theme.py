@@ -3,11 +3,23 @@
 from contextlib import contextmanager
 import copy
 import json
+import logging
 import numbers
+import os
 
 import numpy as np
 
+from fury.data.fetcher import (
+    UI_THEMES_DATA_URL,
+    UI_THEME_SHA256,
+    _check_ui_theme_name,
+    fetch_ui_themes,
+)
 from fury.ui.context import UIContext
+
+THEME_FORMAT_VERSION = 1
+
+_THEME_KEYS = ("format_version", "name", "density", "items")
 
 
 class Theme:
@@ -206,8 +218,8 @@ class Theme:
         Returns
         -------
         dict
-            Mapping with the theme ``name``, its ``density`` and its
-            ``items``.
+            Mapping with the ``format_version`` of the theme format, the
+            theme ``name``, its ``density`` and its ``items``.
         """
         chain = []
         theme = self
@@ -220,6 +232,7 @@ class Theme:
             for type_name, type_items in theme._items.items():
                 items.setdefault(type_name, {}).update(type_items)
         return {
+            "format_version": THEME_FORMAT_VERSION,
             "name": self.name,
             "density": self.density,
             "items": copy.deepcopy(items),
@@ -233,8 +246,11 @@ class Theme:
         Parameters
         ----------
         data : dict
-            Mapping with an optional ``name``, an optional ``density`` and the
-            ``items``.
+            Mapping with an optional ``format_version``, an optional ``name``,
+            an optional ``density`` and the ``items``, a mapping of UI class
+            name to a mapping of item name to value. A mapping without a
+            ``format_version``, written before FURY recorded one, is read as
+            version 1.
         base : Theme, optional
             Theme consulted for items the mapping does not define.
 
@@ -243,7 +259,16 @@ class Theme:
         Theme
             The new theme. Without a ``density`` in ``data``, it uses the
             density of ``base``.
+
+        Raises
+        ------
+        ValueError
+            If ``data`` is not a mapping, has a ``format_version`` newer than
+            ``THEME_FORMAT_VERSION`` or not a positive integer, an unknown
+            ``density``, or ``items`` that are not a mapping of mappings.
+            Other keys than those above are ignored with a warning.
         """
+        _check_theme_data(data)
         return cls(
             name=data.get("name", "custom"),
             items=data.get("items"),
@@ -279,9 +304,19 @@ class Theme:
         -------
         Theme
             The loaded theme.
+
+        Raises
+        ------
+        ValueError
+            If the file is not valid JSON or not a valid theme; see
+            :meth:`from_dict`.
         """
         with open(path, encoding="utf-8") as stream:
-            return cls.from_dict(json.load(stream), base=base)
+            try:
+                return cls.from_dict(json.load(stream), base=base)
+            except ValueError as error:
+                msg = f"Cannot load a theme from {os.fspath(path)!r}: {error}"
+                raise ValueError(msg) from error
 
     def __repr__(self):
         """
@@ -293,6 +328,68 @@ class Theme:
             Description with the theme name.
         """
         return f"Theme(name={self.name!r})"
+
+
+def _check_theme_data(data):
+    """
+    Check that a mapping read from a theme file can make a theme.
+
+    Parameters
+    ----------
+    data : object
+        Mapping read from a theme file.
+
+    Raises
+    ------
+    ValueError
+        If ``data`` is not a mapping, has a ``format_version`` this FURY
+        cannot read, a ``name`` or ``density`` that is not a string, or
+        ``items`` that are
+        not a mapping of UI class name to a mapping of items. Unknown keys
+        are logged as a warning, so a file with extra keys still loads.
+    """
+    if not isinstance(data, dict):
+        msg = f"A theme must be a JSON object, not {type(data).__name__}."
+        raise ValueError(msg)
+    unknown = [key for key in data if key not in _THEME_KEYS]
+    if unknown:
+        logging.warning(
+            "Ignoring unknown theme keys: %s. Known keys: %s.",
+            ", ".join(map(repr, unknown)),
+            ", ".join(_THEME_KEYS),
+        )
+
+    version = data.get("format_version", 1)
+    if isinstance(version, bool) or not isinstance(version, int) or version < 1:
+        msg = f"Theme format_version must be a positive integer, not {version!r}."
+        raise ValueError(msg)
+    if version > THEME_FORMAT_VERSION:
+        msg = (
+            f"Theme format_version {version} is newer than the version this "
+            f"FURY reads ({THEME_FORMAT_VERSION}). Update FURY to load it."
+        )
+        raise ValueError(msg)
+
+    density = data.get("density")
+    if density is not None and not isinstance(density, str):
+        msg = f"Theme density must be a string, not {density!r}."
+        raise ValueError(msg)
+    if not isinstance(data.get("name", ""), str):
+        msg = f"Theme name must be a string, not {data['name']!r}."
+        raise ValueError(msg)
+    items = data.get("items")
+    if items is None:
+        return
+    if not isinstance(items, dict):
+        msg = f"Theme items must be a JSON object, not {type(items).__name__}."
+        raise ValueError(msg)
+    for type_name, type_items in items.items():
+        if not isinstance(type_items, dict):
+            msg = (
+                f"Theme items of {type_name!r} must be a JSON object of item "
+                f"names and values, not {type(type_items).__name__}."
+            )
+            raise ValueError(msg)
 
 
 def _type_name(type_name):
@@ -1118,15 +1215,24 @@ BUILTIN_THEMES = {
 }
 
 
-def theme_names():
+def theme_names(*, downloadable=False):
     """
-    Get the names of the built-in themes.
+    Get the names of the built-in or downloadable themes.
+
+    Parameters
+    ----------
+    downloadable : bool, optional
+        False lists the built-in themes. True lists the themes that
+        :func:`load_theme` downloads from the FURY data repository instead.
 
     Returns
     -------
     list of str
-        Names accepted by :func:`builtin_theme` and :func:`set_theme`.
+        Names accepted by :func:`builtin_theme` and :func:`set_theme`, or by
+        :func:`load_theme` when ``downloadable`` is True.
     """
+    if downloadable:
+        return list(UI_THEME_SHA256)
     return list(BUILTIN_THEMES)
 
 
@@ -1154,6 +1260,242 @@ def builtin_theme(name):
         msg = f"Unknown theme {name!r}. Available themes: {available}."
         raise ValueError(msg)
     return Theme(name=name, items=BUILTIN_THEMES[name]())
+
+
+def load_theme(
+    theme, *, base=None, folder=None, url=None, sha256=None, cache_folder=None
+):
+    """
+    Load a theme from a file, a folder of theme files, or the FURY data.
+
+    ``theme`` is looked up in this order:
+
+    1. With a ``folder``, the file ``<folder>/<theme>.json``.
+    2. A path: an ``os.PathLike``, or a string that ends with ``.json`` (in
+       any case) or contains a path separator, such as ``./my.theme``.
+    3. The name of a built-in theme, see :func:`theme_names`.
+    4. The name of a downloadable theme, see
+       ``theme_names(downloadable=True)``. The file is downloaded once from
+       the ``ui_themes`` folder of the FURY data repository, checked against
+       its SHA-256 checksum and kept in ``cache_folder`` for later calls.
+       Downloading needs the theme files to be published in that folder of
+       the FURY data repository.
+
+    Parameters
+    ----------
+    theme : str or os.PathLike
+        Name of the theme, or path of a JSON file written by
+        :meth:`Theme.save`. With a ``folder``, a name, with or without the
+        ``.json`` extension.
+    base : Theme or str, optional
+        Theme, or name of a built-in theme, consulted for items the file does
+        not define. None uses the ``"classic"`` theme, so a file written by
+        an older FURY keeps working when new items are added. Ignored, with a
+        warning, for a built-in theme.
+    folder : str or os.PathLike, optional
+        Folder of theme files named ``<name>.json``. When given, ``theme`` is
+        read from this folder and nothing is downloaded.
+    url : str, optional
+        Address of the folder to download ``theme`` from instead of the FURY
+        data repository, for example a mirror. Passed to
+        :func:`fury.data.fetch_ui_themes` as ``base_url``. Ignored, with a
+        warning, when nothing is downloaded.
+    sha256 : str, optional
+        SHA-256 checksum of ``<url>/<theme>.json``, to download a theme that
+        FURY does not list. None uses the checksum FURY lists for ``theme``.
+        Ignored, with a warning, when nothing is downloaded.
+    cache_folder : str or os.PathLike, optional
+        Folder that keeps downloaded themes. None uses
+        ``$FURY_HOME/ui_themes``, by default ``~/.fury/ui_themes``. Passed to
+        :func:`fury.data.fetch_ui_themes` as ``folder``. Ignored, with a
+        warning, when nothing is downloaded.
+
+    Returns
+    -------
+    Theme
+        The loaded theme. Pass it to :func:`set_theme` or
+        :func:`theme_scope` to use it.
+
+    Raises
+    ------
+    ValueError
+        If ``theme`` is neither a path, a built-in theme, a downloadable theme
+        nor given a ``sha256``; if it is a path while a ``folder`` is given;
+        or if the file is not a valid theme, see :meth:`Theme.from_dict`.
+    FileNotFoundError
+        If the file, the ``folder`` or ``<folder>/<theme>.json`` does not
+        exist.
+    fury.data.FetcherError
+        If the download fails or the file does not match its checksum.
+    """
+    source = os.fspath(theme)
+    is_path = isinstance(theme, os.PathLike) or _looks_like_path(source)
+    download_options = {"url": url, "sha256": sha256, "cache_folder": cache_folder}
+
+    if folder is not None:
+        path = _theme_file_in(folder, theme)
+        _warn_ignored(source, "reads a theme folder", download_options)
+        return Theme.load(path, base=_base_theme(base))
+    if is_path:
+        _warn_ignored(source, "reads a theme file", download_options)
+        return Theme.load(source, base=_base_theme(base))
+    if source in BUILTIN_THEMES:
+        _warn_ignored(
+            source, "returns the built-in theme", {"base": base, **download_options}
+        )
+        return builtin_theme(source)
+
+    if sha256 is not None:
+        checksums = {source: sha256}
+    elif source in UI_THEME_SHA256:
+        checksums = UI_THEME_SHA256
+    else:
+        msg = (
+            f"Unknown theme {source!r}. Built-in themes: "
+            f"{', '.join(BUILTIN_THEMES)}. Downloadable themes: "
+            f"{', '.join(UI_THEME_SHA256)}. To load a theme file, pass its "
+            "path: a path must end in .json or contain a separator (e.g. "
+            "./my.theme). For a folder of theme files, pass folder=."
+        )
+        raise ValueError(msg)
+    _, download_folder = fetch_ui_themes(
+        [source],
+        base_url=url or UI_THEMES_DATA_URL,
+        folder=None if cache_folder is None else os.fspath(cache_folder),
+        sha256=checksums,
+    )
+    return Theme.load(
+        os.path.join(download_folder, f"{source}.json"), base=_base_theme(base)
+    )
+
+
+def _base_theme(base):
+    """
+    Get the base theme of a loaded theme.
+
+    Parameters
+    ----------
+    base : Theme, str or None
+        Base passed to :func:`load_theme`.
+
+    Returns
+    -------
+    Theme
+        ``base`` as a theme, or the classic theme for None.
+    """
+    return builtin_theme("classic") if base is None else _as_theme(base)
+
+
+def _theme_file_in(folder, theme):
+    """
+    Get the path of a theme file in a folder of theme files.
+
+    Parameters
+    ----------
+    folder : str or os.PathLike
+        Folder of theme files named ``<name>.json``.
+    theme : str or os.PathLike
+        Name of the theme, with or without the ``.json`` extension.
+
+    Returns
+    -------
+    str
+        Path of ``<folder>/<name>.json``.
+
+    Raises
+    ------
+    ValueError
+        If ``theme`` is an ``os.PathLike``, contains a path separator, or is
+        not a plain file name.
+    FileNotFoundError
+        If the folder or the file does not exist. The message for a missing
+        file lists the themes in the folder.
+    """
+    name = os.fspath(theme)
+    if isinstance(theme, os.PathLike) or _has_separator(name):
+        msg = (
+            f"With folder=, pass the name of a theme in the folder, not the "
+            f"path {name!r}. To load a file by path, leave out folder=."
+        )
+        raise ValueError(msg)
+    if name.lower().endswith(".json"):
+        name = name[: -len(".json")]
+    _check_ui_theme_name(name)
+    if not os.path.isdir(folder):
+        msg = f"Theme folder {os.fspath(folder)!r} does not exist."
+        raise FileNotFoundError(msg)
+
+    path = os.path.join(folder, f"{name}.json")
+    if os.path.isfile(path):
+        return path
+    names = sorted(
+        entry[: -len(".json")]
+        for entry in os.listdir(folder)
+        if entry.lower().endswith(".json")
+    )
+    msg = (
+        f"No theme {name!r} in {os.fspath(folder)!r}. Themes there: "
+        f"{', '.join(names) or 'none'}."
+    )
+    raise FileNotFoundError(msg)
+
+
+def _has_separator(source):
+    """
+    Tell whether a string contains a path separator.
+
+    Parameters
+    ----------
+    source : str
+        The string.
+
+    Returns
+    -------
+    bool
+        True if it contains ``/`` or the separators of this system.
+    """
+    separators = {os.sep, "/"} | ({os.altsep} if os.altsep else set())
+    return any(sep in source for sep in separators)
+
+
+def _looks_like_path(source):
+    """
+    Tell whether a theme argument is a file path rather than a theme name.
+
+    Parameters
+    ----------
+    source : str
+        Theme argument of :func:`load_theme`.
+
+    Returns
+    -------
+    bool
+        True if it ends with ``.json``, in any case, or contains a path
+        separator.
+    """
+    return source.lower().endswith(".json") or _has_separator(source)
+
+
+def _warn_ignored(theme, action, options):
+    """
+    Warn about :func:`load_theme` options that do not apply.
+
+    Parameters
+    ----------
+    theme : str
+        Theme argument of :func:`load_theme`.
+    action : str
+        What :func:`load_theme` does instead, such as ``"reads a theme
+        file"``.
+    options : dict
+        Values of the options that do not apply, by option name. Options
+        that are None were not given and are not reported.
+    """
+    ignored = [option for option, value in options.items() if value is not None]
+    if ignored:
+        logging.warning(
+            "load_theme(%r) %s and ignores %s.", theme, action, ", ".join(ignored)
+        )
 
 
 def _as_theme(theme):
