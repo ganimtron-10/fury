@@ -3529,6 +3529,113 @@ def test_ui_tree2d_resize_updates_viewport_and_scrollbar(expanded_tree):
     npt.assert_equal(tree.view_offset, tree.base_node.child_height)
 
 
+def test_combobox2d_menu_opens_below_its_position(ui_scene):
+    """The ComboBox2D panel starts at the combo box's own position."""
+    _, scene = ui_scene
+    combobox = ui.ComboBox2D(items=["A", "B", "C"], position=(30, 30), size=(200, 150))
+    scene.add(combobox)
+
+    npt.assert_array_equal(combobox.panel.get_position(), (30, 30))
+
+
+def test_range_slider_set_position_moves_sub_sliders():
+    """Moving a RangeSlider moves both of its sliders by the same amount."""
+    slider = ui.RangeSlider(
+        range_slider_center=(0, 60), value_slider_center=(0, 0), length=200
+    )
+    range_start = slider.range_slider.get_position().copy()
+    value_start = slider.value_slider.get_position().copy()
+    origin = slider.get_position().copy()
+
+    slider.set_position((150, 220))
+
+    shift = np.array((150, 220)) - origin
+    npt.assert_array_equal(slider.range_slider.get_position(), range_start + shift)
+    npt.assert_array_equal(slider.value_slider.get_position(), value_start + shift)
+
+
+@pytest.mark.parametrize(
+    "justification, vertical_justification",
+    [("left", "top"), ("center", "middle"), ("right", "bottom")],
+)
+def test_textblock2d_text_stays_inside_its_box(
+    ui_scene, justification, vertical_justification
+):
+    """Justified text is drawn inside its bounding box on the matching side."""
+    show_manager, scene = ui_scene
+    position, size = (60, 60), (240, 120)
+    text = ui.TextBlock2D(
+        text="Tree",
+        position=position,
+        size=size,
+        font_size=20,
+        color=(1, 1, 1),
+        bg_color=(0, 0, 0),
+        justification=justification,
+        vertical_justification=vertical_justification,
+    )
+    scene.add(text)
+
+    image = _render(show_manager)
+    rows, columns = np.nonzero(image[..., :3].max(axis=-1) > 128)
+
+    assert rows.size > 0
+    assert columns.min() >= position[0] and columns.max() < position[0] + size[0]
+    assert rows.min() >= position[1] and rows.max() < position[1] + size[1]
+    horizontal = (columns.mean() - position[0]) / size[0]
+    vertical = (rows.mean() - position[1]) / size[1]
+    expected = {"left": 0.0, "center": 0.5, "right": 1.0}[justification]
+    expected_vertical = {"top": 0.0, "middle": 0.5, "bottom": 1.0}[
+        vertical_justification
+    ]
+    assert abs(horizontal - expected) < 0.35
+    assert abs(vertical - expected_vertical) < 0.35
+
+
+def test_textblock2d_background_forwards_drag(ui_scene):
+    """Dragging the background of a TextBlock2D reaches its drag callback."""
+    show_manager, scene = ui_scene
+    text = ui.TextBlock2D(
+        text="Drag", position=(60, 60), size=(200, 60), bg_color=(0.2, 0.2, 0.2)
+    )
+    scene.add(text)
+    drags = []
+    text.on_left_mouse_button_dragged = lambda event: drags.append((event.x, event.y))
+
+    _drag_from(show_manager, (250, 110), (270, 130))
+
+    npt.assert_equal(drags, [(270, 130)])
+
+
+def test_line_double_slider_2d_layers_follow_z_order():
+    """Handles and labels of a LineDoubleSlider2D stay above its track."""
+    slider = ui.LineDoubleSlider2D(length=100)
+
+    slider.z_order = 4
+    slider.set_position((10, 10))
+
+    npt.assert_equal(slider.track.z_order, 4)
+    npt.assert_equal([handle.z_order for handle in slider.handles], [5, 5])
+    npt.assert_equal([text.z_order for text in slider.texts], [6, 6])
+
+
+def test_listbox2d_empty_slot_click_and_size(ui_scene):
+    """Empty ListBox2D slots keep their size and ignore clicks."""
+    show_manager, scene = ui_scene
+    listbox = ui.ListBox2D(values=["One"], size=(150, 150))
+    scene.add(listbox)
+    empty_slot = listbox.slots[-1]
+    selections = []
+    listbox.on_change = lambda: selections.append(list(listbox.selected))
+
+    npt.assert_array_equal(empty_slot.size, (listbox.slot_width, listbox.slot_height))
+    empty_slot.set_visibility(True)
+    _click_at(show_manager, *_center(empty_slot))
+
+    npt.assert_equal(listbox.selected, [])
+    npt.assert_equal(selections, [])
+
+
 def _click_event():
     """Build a real left-button pointer-down event for triggering handlers."""
     return window.PointerEvent(
