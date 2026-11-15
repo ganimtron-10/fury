@@ -1,6 +1,7 @@
 """Test UI Workbench and Playground module."""
 
 import numpy.testing as npt
+import pytest
 
 from fury import ui, window
 from fury.ui.workbench import UIWorkbench, UIWorkbenchItem
@@ -326,6 +327,62 @@ def test_workbench_sync_is_stable_and_prunes():
     assert workbench.find_item_by_ui(title) is not None
 
 
+def test_workbench_sync_restores_callbacks_on_removed_subtree():
+    """Test removing and re-adding a subtree binds events to fresh items."""
+    from fury.ui.workbench import HANDLER_NAMES, walk_ui
+
+    scene, panel, _title, _slider, _disk = _build_scene()
+    components = list(walk_ui(panel))
+    originals = [
+        {name: getattr(component, name) for name in HANDLER_NAMES}
+        for component in components
+    ]
+    workbench = UIWorkbench(scene=scene)
+    old_item = workbench.find_item_by_ui(panel)
+    panel.background.on_left_mouse_button_pressed(_FakeEvent(100, 100))
+    assert workbench.selected_item is old_item
+
+    scene.remove(panel)
+    workbench.sync()
+
+    assert workbench.selected_item is None
+    assert workbench.hit_item is None
+    for component, handlers in zip(components, originals, strict=True):
+        assert workbench.find_item_by_ui(component) is None
+        for name, handler in handlers.items():
+            assert getattr(component, name) is handler
+
+    scene.add(panel)
+    workbench.sync()
+    new_item = workbench.find_item_by_ui(panel)
+    assert new_item is not old_item
+    old_event_count = old_item.event_counts["on_hover"]
+    panel.on_hover(_FakeEvent(100, 100))
+    assert new_item.event_counts["on_hover"] == 1
+    assert old_item.event_counts["on_hover"] == old_event_count
+    panel.background.on_left_mouse_button_pressed(_FakeEvent(100, 100))
+    assert workbench.selected_item is new_item
+
+
+def test_workbench_sync_preserves_replacement_callback_on_removal():
+    """Test pruning leaves a user replacement callback intact."""
+    scene = window.Scene()
+    rect = ui.Rectangle2D()
+    scene.add(rect)
+    workbench = UIWorkbench(scene=scene)
+    events = []
+    replacement = events.append
+    rect.on_hover = replacement
+
+    scene.remove(rect)
+    workbench.sync()
+
+    assert rect.on_hover is replacement
+    event = _FakeEvent(10, 10)
+    rect.on_hover(event)
+    assert events == [event]
+
+
 def test_workbench_universal_drag_targets():
     """Test only components without a drag of their own become draggable."""
     scene, panel, title, slider, disk = _build_scene()
@@ -529,10 +586,16 @@ def test_workbench_parenting_rejects_cycles():
 
 def test_workbench_unregister_removes_subtree():
     """Test deleting a container also forgets everything it contains."""
+    from fury.ui.workbench import walk_ui
+
     scene, panel, title, slider, _disk = _build_scene()
     workbench = UIWorkbench(scene=scene)
 
     panel_item = workbench.find_item_by_ui(panel)
+    subtree_actors = {
+        actor for component in walk_ui(panel) for actor in component.actors
+    }
+    remaining_actors = set(scene.ui_scene.children) - subtree_actors
     workbench.unregister(panel_item)
 
     assert workbench.find_item_by_ui(panel) is None
@@ -540,6 +603,100 @@ def test_workbench_unregister_removes_subtree():
     assert workbench.find_item_by_ui(slider) is None
     assert panel not in scene.ui_elements
     assert workbench.selected_item is None
+    assert set(scene.ui_scene.children) == remaining_actors
+    assert title in panel._children
+    assert slider in panel._children
+
+    # Deleting from the scene must not dismantle the reusable widget.
+    scene.add(panel)
+    workbench.sync()
+    assert workbench.find_item_by_ui(title).parent.ui is panel
+    assert workbench.find_item_by_ui(panel.background).is_internal
+
+
+@pytest.mark.parametrize("same_scene", [False, True])
+def test_workbench_set_scene_releases_old_hooks_and_outline(same_scene):
+    """Test scene changes release callbacks, drag state and outline actors."""
+    old_scene, panel, _title, _slider, disk = _build_scene()
+    original = disk.on_hover
+    workbench = UIWorkbench(scene=old_scene)
+    disk.on_left_mouse_button_pressed(_FakeEvent(600, 200))
+    workbench.update_outline()
+    outline_actors = [bar.actors[0] for bar in workbench._outline]
+    old_item = workbench.find_item_by_ui(disk)
+    assert workbench._dragging is old_item
+
+    new_scene = old_scene if same_scene else window.Scene()
+    workbench.set_scene(new_scene)
+
+    assert workbench._dragging is None
+    assert workbench.hit_item is None
+    assert workbench.selected_item is None
+    assert not any(actor in old_scene.ui_scene.children for actor in outline_actors)
+    if not same_scene:
+        assert disk.on_hover is original
+        new_scene.add(disk)
+        workbench.sync()
+    item = workbench.find_item_by_ui(disk)
+    disk.on_hover(_FakeEvent(600, 200))
+    assert item.event_counts["on_hover"] == 1
+    assert old_item.event_counts["on_hover"] == 0
+    workbench.select(item)
+    workbench.update_outline()
+    assert all(
+        bar.actors[0] in new_scene.ui_scene.children for bar in workbench._outline
+    )
+    assert panel in old_scene.ui_elements
+
+
+@pytest.mark.parametrize("destination", ["self", "descendant", "non_container"])
+def test_workbench_invalid_reparent_preserves_hierarchy(destination):
+    """Test rejected reparenting leaves the original parent and actors intact."""
+    scene = window.Scene()
+    outer = ui.Panel2D(size=(400, 400))
+    inner = ui.Panel2D(size=(200, 200))
+    child = ui.Panel2D(size=(50, 50))
+    rect = ui.Rectangle2D()
+    inner.add_element(child, (10, 10))
+    outer.add_element(inner, (20, 20))
+    scene.add(outer, rect)
+    workbench = UIWorkbench(scene=scene)
+    item = workbench.find_item_by_ui(inner)
+    parent = item.parent
+    target_ui = {"self": inner, "descendant": child, "non_container": rect}[destination]
+    before = set(scene.ui_scene.children)
+    position = item.get_position().copy()
+
+    assert not workbench.reparent_element(item, workbench.find_item_by_ui(target_ui))
+
+    assert item.parent is parent
+    assert inner in outer._children
+    assert inner not in scene.ui_elements
+    assert set(scene.ui_scene.children) == before
+    npt.assert_array_equal(item.get_position(), position)
+
+
+@pytest.mark.parametrize("operation", ["parent", "unparent", "delete"])
+def test_workbench_internal_parts_cannot_be_detached(operation):
+    """Test hierarchy actions preserve a widget's internal structure."""
+    scene, panel, _title, slider, _disk = _build_scene()
+    workbench = UIWorkbench(scene=scene)
+    item = workbench.find_item_by_ui(slider.handle)
+    parent = item.parent
+    before = set(scene.ui_scene.children)
+    if operation == "parent":
+        assert not workbench.parent_element(item, workbench.find_item_by_ui(panel))
+    elif operation == "unparent":
+        assert not workbench.unparent_element(item)
+    else:
+        workbench.unregister(item)
+    workbench.sync()
+
+    assert workbench.find_item_by_ui(slider.handle) is item
+    assert item.parent is parent
+    assert slider.handle not in scene.ui_elements
+    assert slider.handle not in panel._children
+    assert set(scene.ui_scene.children) == before
 
 
 def test_workbench_create_playback_and_range_widgets():
@@ -556,3 +713,37 @@ def test_workbench_create_playback_and_range_widgets():
 
     assert workbench.create_element("NotAWidget") is None
     assert "Unknown element type" in workbench.status_message
+
+
+def test_workbench_tabs_render_headlessly(monkeypatch, tmp_path):
+    """Test all inspector widget paths and tabs in a real ImGui context."""
+    imgui = pytest.importorskip("imgui_bundle").imgui
+    context = imgui.create_context()
+    try:
+        io = imgui.get_io()
+        io.set_ini_filename(str(tmp_path / "imgui.ini"))
+        io.display_size = imgui.ImVec2(1400, 820)
+        io.delta_time = 1 / 60
+        io.backend_flags |= imgui.BackendFlags_.renderer_has_textures
+        monkeypatch.setattr(imgui, "collapsing_header", lambda *args, **kwargs: True)
+        workbench = UIWorkbench(scene=window.Scene())
+        for kind in workbench.create_types:
+            assert workbench.create_element(kind) is not None, kind
+
+        for item in list(workbench.items.values()):
+            workbench.select(item)
+            imgui.new_frame()
+            imgui.begin("Workbench test")
+            workbench._render_inspector_tab()
+            workbench._render_hierarchy_operations()
+            imgui.end()
+            imgui.render()
+
+        for tab in ("hierarchy", "builder", "fuzzy", "monitor"):
+            imgui.new_frame()
+            imgui.begin("Workbench test")
+            getattr(workbench, f"_render_{tab}_tab")()
+            imgui.end()
+            imgui.render()
+    finally:
+        imgui.destroy_context(context)

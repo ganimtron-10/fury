@@ -850,6 +850,13 @@ class UIWorkbench:
         scene : Scene
             The scene the workbench should inspect.
         """
+        for item in list(self.items.values()):
+            self._forget(item)
+        if self.scene is not None:
+            for bar in self._outline:
+                remove_ui_from_scene(self.scene.ui_scene, bar)
+        self._outline.clear()
+        self._outline_attached = False
         self.scene = scene
         self._by_ui.clear()
         self.items.clear()
@@ -1014,13 +1021,14 @@ class UIWorkbench:
 
     def _forget(self, item) -> None:
         """
-        Drop a node from the workbench bookkeeping.
+        Restore a node's callbacks and drop it from the workbench bookkeeping.
 
         Parameters
         ----------
         item : UIWorkbenchItem
             The node to forget.
         """
+        self._remove_hooks(item)
         key = id(item.ui)
         self.items.pop(item.id, None)
         if self._by_ui.get(key) is item:
@@ -1319,8 +1327,15 @@ class UIWorkbench:
         remove_from_scene : bool, optional
             When True, the component is also detached from the scene.
         """
-        for child in list(item.children):
-            self.unregister(child, remove_from_scene=False)
+        if item.is_internal:
+            self.status_message = "Cannot delete a widget's internal part"
+            return
+
+        # Remove actors while the complete component hierarchy is still intact.
+        if remove_from_scene and self.scene is not None:
+            if item.ui in self.scene.ui_elements:
+                self.scene.ui_elements.remove(item.ui)
+            remove_ui_from_scene(self.scene.ui_scene, item.ui)
 
         parent = item.parent
         if parent is not None:
@@ -1334,16 +1349,12 @@ class UIWorkbench:
         elif item in self.root_items:
             self.root_items.remove(item)
 
-        if remove_from_scene and self.scene is not None:
-            if item.ui in self.scene.ui_elements:
-                self.scene.ui_elements.remove(item.ui)
-            try:
-                remove_ui_from_scene(self.scene.ui_scene, item.ui)
-            except Exception:
-                pass
-
-        self._remove_hooks(item)
-        self._forget(item)
+        # Forget inspector nodes without dismantling the widget's own children.
+        pending = [item]
+        while pending:
+            node = pending.pop()
+            pending.extend(node.children)
+            self._forget(node)
 
     # ------------------------------------------------------------------
     # Hierarchy operations
@@ -1370,6 +1381,9 @@ class UIWorkbench:
         bool
             True when the component was parented.
         """
+        if child_item.is_internal or parent_item.is_internal:
+            self.status_message = "Cannot reparent a widget's internal part"
+            return False
         if child_item is parent_item or child_item in parent_item.children:
             return False
         if not isinstance(parent_item.ui, Panel2D):
@@ -1420,6 +1434,9 @@ class UIWorkbench:
         bool
             True when the component was detached.
         """
+        if child_item.is_internal:
+            self.status_message = "Cannot unparent a widget's internal part"
+            return False
         old_parent = child_item.parent
         if old_parent is None:
             return False
@@ -1473,10 +1490,6 @@ class UIWorkbench:
         bool
             True when the component was moved.
         """
-        abs_pos = child_item.get_position()
-        self.unparent_element(child_item)
-        if offset is None:
-            offset = abs_pos - new_parent_item.get_position()
         return self.parent_element(
             child_item, new_parent_item, offset=offset, anchor=anchor
         )
@@ -2517,7 +2530,9 @@ class UIWorkbench:
         imgui.separator()
         if imgui.menu_item("Duplicate", "", False, not item.is_internal)[0]:
             self.duplicate_element(item)
-        if imgui.menu_item("Unparent", "", False, item.parent is not None)[0]:
+        if imgui.menu_item(
+            "Unparent", "", False, item.parent is not None and not item.is_internal
+        )[0]:
             self.unparent_element(item)
         if imgui.menu_item("Delete", "", False, not item.is_internal)[0]:
             self.unregister(item)
@@ -2559,6 +2574,8 @@ class UIWorkbench:
             self._label(f"Selected: {item.path}")
             self._muted(f"{item.type_name}  |  role: {item.role}  |  id: {item.id}")
 
+            if item.is_internal:
+                imgui.begin_disabled()
             targets = self._panel_targets(exclude=item)
             if targets:
                 names = [target.name for target in targets]
@@ -2584,6 +2601,8 @@ class UIWorkbench:
             imgui.same_line()
             if imgui.button("Delete"):
                 self.unregister(item)
+            if item.is_internal:
+                imgui.end_disabled()
 
         imgui.separator()
         self._heading((0.95, 0.6, 0.25, 1.0), "Merge into a new panel")
