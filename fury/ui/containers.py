@@ -22,14 +22,17 @@ class Panel2D(UI):
         Size (width, height) in pixels of the panel.
     position : (float, float)
         Absolute coordinates (x, y) of the top-left corner of the panel.
-    color : str, tuple, list or ndarray
+    color : str, tuple, list or ndarray, optional
         A hex string ("#FF0000"), RGB(A) in [0, 1], or RGB(A) in [0, 255].
-    opacity : float
+        Defaults to the theme item of the same name.
+    opacity : float, optional
         Must take values in [0, 1].
+        Defaults to the theme item of the same name.
     align : [left, right]
         Alignment of the panel with respect to the overall screen.
     border_color : str, tuple, list or ndarray, optional
         Border color, same formats as ``color``.
+        Defaults to the theme item of the same name.
     border_width : float, optional
         Width of the border.
     has_border : bool, optional
@@ -46,10 +49,10 @@ class Panel2D(UI):
         size,
         *,
         position=(0, 0),
-        color=(0.1, 0.1, 0.1),
-        opacity=0.7,
+        color=None,
+        opacity=None,
         align="left",
-        border_color=(1, 1, 1),
+        border_color=None,
         border_width=0,
         has_border=False,
     ):
@@ -62,7 +65,7 @@ class Panel2D(UI):
             "bottom": (0.0, 1.0),
         }
         self.has_border = has_border
-        self._border_color = border_color
+        self._border_color = self._theme_value("border_color", border_color)
         self._border_width = border_width
         super(Panel2D, self).__init__(position=position)
         self.set_layout(
@@ -70,8 +73,8 @@ class Panel2D(UI):
         )
         self.resize(size)
         self.alignment = align
-        self.color = color
-        self.opacity = opacity
+        self.color = self._theme_value("color", color)
+        self.opacity = self._theme_value("opacity", opacity)
         self._drag_offset = None
 
     def _setup(self):
@@ -729,6 +732,7 @@ class TabPanel2D(UI):
     color : str, tuple, list or ndarray, optional
         Tab header background color. A hex string ("#FF0000"), RGB(A) in
         [0, 1], or RGB(A) in [0, 255].
+        Defaults to the theme item of the same name.
     content_size : (int, int), optional
         Width and height in pixels of the content panel. If None, ``size`` is
         used.
@@ -754,12 +758,13 @@ class TabPanel2D(UI):
         position=(0, 0),
         size=(100, 100),
         title="New Tab",
-        color=(0.5, 0.5, 0.5),
+        color=None,
         content_size=None,
         content_visible=False,
         content_panel=None,
     ):
         """Initialize the tab panel."""
+        color = self._theme_value("color", color)
         self.content_panel = content_panel or Panel2D(size=content_size or size)
         self.content_panel.set_visibility(content_visible)
         self.panel_size = size
@@ -775,7 +780,7 @@ class TabPanel2D(UI):
         self.text_block = TextBlock2D(
             text="",
             size=self._text_size,
-            color=(0, 0, 0),
+            color=self._theme_value("text_color"),
             bg_color=None,
             justification="center",
             vertical_justification="middle",
@@ -1045,10 +1050,13 @@ class TabUI(UI):
     active_color : str, tuple, list or ndarray, optional
         Color of the active tab header. A hex string ("#FF0000"), RGB(A) in
         [0, 1], or RGB(A) in [0, 255].
+        Defaults to the theme item of the same name.
     inactive_color : str, tuple, list or ndarray, optional
         Color of inactive tab headers, same formats as ``active_color``.
+        Defaults to the theme item of the same name.
     font_size : int, optional
         Font size used by tab titles.
+        Defaults to the theme item of the same name.
     draggable : bool, optional
         If True, the tab UI can be dragged from tab headers or content panel
         backgrounds.
@@ -1090,14 +1098,17 @@ class TabUI(UI):
         position=(0, 0),
         size=(100, 100),
         tab_titles=None,
-        active_color=(1, 1, 1),
-        inactive_color=(0.5, 0.5, 0.5),
-        font_size=18,
+        active_color=None,
+        inactive_color=None,
+        font_size=None,
         draggable=False,
         startup_tab_id=None,
         tab_bar_pos="top",
     ):
         """Initialize the tab UI."""
+        active_color = self._theme_value("active_color", active_color)
+        inactive_color = self._theme_value("inactive_color", inactive_color)
+        font_size = self._theme_value("font_size", font_size)
         if tab_titles is not None:
             if not isinstance(tab_titles, list) or not all(
                 isinstance(title, str) for title in tab_titles
@@ -2089,7 +2100,9 @@ class ImageContainer2D(Rectangle2D):
         """
         self._img_path = img_path
 
-        super(ImageContainer2D, self).__init__(size=size, position=position)
+        super(ImageContainer2D, self).__init__(
+            size=size, position=position, color=(1, 1, 1)
+        )
 
         if isinstance(img_path, np.ndarray):
             self.img = img_path

@@ -24,6 +24,7 @@ from fury.ui.helpers import (
     get_anchor_to_multiplier,
 )
 from fury.ui.layout import LayoutNode, compute_sizes, place
+from fury.ui.theme import get_theme, theme_scope
 
 _TEXT_FIT_TOLERANCE = 1
 
@@ -115,7 +116,10 @@ class UI(object, metaclass=abc.ABCMeta):
         self._layout_applied_size = None
         self._hover_needs_sync = False
 
-        self._setup()  # Setup needed actors and sub UI components.
+        if getattr(self, "_theme", None) is None:
+            self._theme = get_theme()
+        with theme_scope(self._theme):
+            self._setup()
         self.set_position(position, x_anchor, y_anchor)
 
         self.left_button_state = "released"
@@ -144,6 +148,41 @@ class UI(object, metaclass=abc.ABCMeta):
         self.on_focus = lambda event: None
         self.on_blur = lambda event: None
         self.on_wheel = lambda event: None
+
+    @property
+    def theme(self):
+        """
+        Get the theme this UI component was created with.
+
+        Returns
+        -------
+        Theme
+            The theme from :func:`fury.ui.theme_scope` or
+            :func:`fury.ui.set_theme` at creation time.
+        """
+        return self._theme
+
+    def _theme_value(self, item, value=None):
+        """
+        Get a value, or the theme item for this component if it is None.
+
+        Parameters
+        ----------
+        item : str
+            Name of the theme item.
+        value : object, optional
+            Value given by the caller. Used as is unless it is None.
+
+        Returns
+        -------
+        object
+            ``value``, or the theme item.
+        """
+        if value is not None:
+            return value
+        if getattr(self, "_theme", None) is None:
+            self._theme = get_theme()
+        return self._theme.get(type(self), item)
 
     def _reset_interaction_state(self) -> None:
         """
@@ -782,18 +821,17 @@ class Rectangle2D(UI):
         The size of the rectangle (width, height) in pixels.
     position : (float, float)
         Coordinates (x, y) of the top-left corner of the rectangle.
-    color : str, tuple, list or ndarray
+    color : str, tuple, list or ndarray, optional
         A hex string ("#FF0000"), RGB(A) in [0, 1], or RGB(A) in [0, 255].
+        Defaults to the theme item of the same name.
     opacity : float
         Must take values in [0, 1].
     """
 
-    def __init__(
-        self, *, size=(100, 100), position=(0, 0), color=(1, 1, 1), opacity=1.0
-    ):
+    def __init__(self, *, size=(100, 100), position=(0, 0), color=None, opacity=1.0):
         """Initialize a rectangle."""
         super(Rectangle2D, self).__init__(position=position)
-        self.color = color
+        self.color = self._theme_value("color", color)
         self.opacity = opacity
         self.resize(size)
 
@@ -966,8 +1004,9 @@ class RoundedRectangle2D(UI):
         The size of the rectangle (width, height) in pixels.
     position : (float, float)
         Coordinates (x, y) of the lower-left corner of the rectangle.
-    color : str, tuple, list or ndarray
+    color : str, tuple, list or ndarray, optional
         A hex string ("#FF0000"), RGB(A) in [0, 1], or RGB(A) in [0, 255].
+        Defaults to the theme item of the same name.
     corner_radius : float
         Radius of the rounded corners in pixels.
     opacity : float
@@ -979,14 +1018,14 @@ class RoundedRectangle2D(UI):
         *,
         size=(100, 100),
         position=(0, 0),
-        color=(1, 1, 1),
+        color=None,
         corner_radius=10.0,
         opacity=1.0,
     ):
         """Initialize a rounded rectangle."""
         super(RoundedRectangle2D, self).__init__(position=position)
 
-        self.color = color
+        self.color = self._theme_value("color", color)
         self.opacity = opacity
         self.corner_radius = corner_radius
         self.resize(size)
@@ -1192,6 +1231,7 @@ class Disk2D(UI):
         Coordinates (x, y) of the center of the disk.
     color : str, tuple, list or ndarray, optional
         A hex string ("#FF0000"), RGB(A) in [0, 1], or RGB(A) in [0, 255].
+        Defaults to the theme item of the same name.
     opacity : float, optional
         Must take values in [0, 1].
     """
@@ -1202,7 +1242,7 @@ class Disk2D(UI):
         *,
         inner_radius=0,
         center=(0, 0),
-        color=(1, 1, 1),
+        color=None,
         opacity=1.0,
     ):
         """Initialize a 2D Disk."""
@@ -1214,7 +1254,7 @@ class Disk2D(UI):
             position=center, x_anchor=Anchor.CENTER, y_anchor=Anchor.CENTER
         )
 
-        self.color = color
+        self.color = self._theme_value("color", color)
         self.opacity = opacity
 
     def _setup(self):
@@ -1385,8 +1425,10 @@ class TextBlock2D(UI):
         The initial text message.
     font_size : int, optional
         Size of the text font.
+        Defaults to the theme item of the same name.
     font_family : str, optional
         The font family name.
+        Defaults to the theme item of the same name.
     justification : str, optional
         Horizontal alignment ("left", "center", "right").
     vertical_justification : str, optional
@@ -1400,6 +1442,7 @@ class TextBlock2D(UI):
     color : str, tuple, list or ndarray, optional
         Text color. A hex string ("#FF0000"), RGB(A) in [0, 1], or RGB(A) in
         [0, 255].
+        Defaults to the theme item of the same name.
     bg_color : str, tuple, list or ndarray, optional
         Background color, same formats as ``color``. If None, no background
         is drawn.
@@ -1413,14 +1456,14 @@ class TextBlock2D(UI):
         self,
         *,
         text="Text Block",
-        font_size=18,
-        font_family="Arial",
+        font_size=None,
+        font_family=None,
         justification="left",
         vertical_justification="top",
         bold=False,
         italic=False,
         size=None,
-        color=(1, 1, 1),
+        color=None,
         bg_color=None,
         position=(0, 0),
         dynamic_bbox=False,
@@ -1441,13 +1484,13 @@ class TextBlock2D(UI):
         self._vertical_justification = vertical_justification
         super(TextBlock2D, self).__init__(position=position)
         self.have_bg = bool(bg_color)
-        self.color = color
+        self.color = self._theme_value("color", color)
         self.background_color = bg_color
-        self.font_family = font_family
+        self.font_family = self._theme_value("font_family", font_family)
         self.bold = bold
         self.italic = italic
         self.message = text
-        self.font_size = font_size
+        self.font_size = self._theme_value("font_size", font_size)
 
         self.update_bounding_box()
 
@@ -2410,6 +2453,7 @@ class Slider2D(UI):
         The side length for square-shaped handles.
     font_size : int, optional
         The font size for the value label.
+        Defaults to the theme item of the same name.
     text_template : str or callable, optional
         A formatting string or callable for the label.
     shape : str, optional
@@ -2428,7 +2472,7 @@ class Slider2D(UI):
         handle_inner_radius=0,
         handle_outer_radius=10,
         handle_side=20,
-        font_size=16,
+        font_size=None,
         text_template="{value:.1f} ({ratio:.0%})",
         shape="disk",
         z_order=0,
@@ -2454,6 +2498,7 @@ class Slider2D(UI):
             The side length for square-shaped handles.
         font_size : int, optional
             The font size for the value label.
+            Defaults to the theme item of the same name.
         text_template : str or callable, optional
             A formatting string or callable for the label.
         shape : str, optional
@@ -2461,8 +2506,9 @@ class Slider2D(UI):
         z_order : int, optional
             The stacking priority.
         """
-        self.default_color = (1, 1, 1)
-        self.active_color = (0, 0, 1)
+        font_size = self._theme_value("font_size", font_size)
+        self.default_color = self._theme_value("handle_color")
+        self.active_color = self._theme_value("handle_active_color")
         self._value = initial_value
         range_val = max_value - min_value
         self._ratio = (initial_value - min_value) / range_val if range_val != 0 else 0

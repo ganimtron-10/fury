@@ -53,6 +53,7 @@ from fury.ui.core import (
 )
 from fury.ui.helpers import clip_overflow
 from fury.ui.layout import Align, Direction, grow, percent
+from fury.ui.theme import theme_scope
 
 TWO_PI = 2.0 * np.pi
 
@@ -123,13 +124,17 @@ class Loader2D(UI):
 
     def _setup(self):
         """Create the overlay, message, and three arc meshes."""
-        self.overlay = Rectangle2D(size=self._dims, color=(0, 0, 0), opacity=0.5)
+        self.overlay = Rectangle2D(
+            size=self._dims,
+            color=self._theme_value("overlay_color"),
+            opacity=self._theme_value("overlay_opacity"),
+        )
         self.text = TextBlock2D(
             text=self._message,
-            font_size=18,
+            font_size=self._theme_value("font_size"),
             size=(1, 1),
             justification="center",
-            color=(1, 1, 1),
+            color=self._theme_value("text_color"),
         )
         self._children.extend((self.overlay, self.text))
         self.arcs = []
@@ -376,15 +381,18 @@ class TextButton2D(Button2D):
     ----------
     label : str
         The default text to display on the button.
-    states : dict
-        Configuration for visual states. Supports mapping keys to RGB
-        tuples or dictionaries containing 'text' and 'color' keys.
+    states : dict, optional
+        Configuration for visual states. Supports mapping keys to colors
+        (hex strings or RGB tuples) or dictionaries containing 'text' and
+        'color' keys. Defaults to the theme item of the same name, which
+        replaces the whole mapping rather than single states.
     position : (float, float)
         Absolute coordinates (x, y) for placement.
     size : (int, int)
         Width and height in pixels for the button background.
-    font_size : int
+    font_size : int, optional
         Size of the text font.
+        Defaults to the theme item of the same name.
     is_toggle : bool, optional
         If True, the button behaves as a toggle switch.
     """
@@ -395,19 +403,15 @@ class TextButton2D(Button2D):
         states=None,
         position=(0, 0),
         size=(100, 40),
-        font_size=25,
+        font_size=None,
         is_toggle=False,
     ):
         """Initialize the text button instance."""
+        font_size = self._theme_value("font_size", font_size)
         self.default_label = label
         self.font_size = font_size
 
-        self.states = states or {
-            "default": (1, 1, 1),
-            "hover": (0.9, 0.9, 0.9),
-            "pressed": (0.5, 0.5, 0.5),
-            "disabled": (0.2, 0.2, 0.2),
-        }
+        self.states = states or self._theme_value("states")
 
         super().__init__(position=position, size=size, is_toggle=is_toggle)
 
@@ -420,8 +424,8 @@ class TextButton2D(Button2D):
         """
         self.child = TextBlock2D(
             text=self.default_label,
-            color=(0, 0, 0),
-            bg_color=(1, 1, 1),
+            color=self._theme_value("text_color"),
+            bg_color=self._theme_value("bg_color"),
             font_size=self.font_size,
             size=self._dims,
             justification="center",
@@ -444,7 +448,7 @@ class TextButton2D(Button2D):
         target_color = (1, 1, 1)
         target_text = self.default_label
 
-        if isinstance(data, (tuple, list, np.ndarray)):
+        if isinstance(data, (str, tuple, list, np.ndarray)):
             target_color = data
         elif isinstance(data, dict):
             target_color = data.get("color", target_color)
@@ -482,6 +486,7 @@ class LineSlider2D(Slider2D):
         The side length for square-shaped handles.
     font_size : int, optional
         The font size for the value label.
+        Defaults to the theme item of the same name.
     orientation : str, optional
         The slider orientation: "horizontal" or "vertical".
     text_template : str, optional
@@ -504,7 +509,7 @@ class LineSlider2D(Slider2D):
         inner_radius=0,
         outer_radius=10,
         handle_side=20,
-        font_size=16,
+        font_size=None,
         orientation="horizontal",
         text_template="{value:.1f} ({ratio:.0%})",
         shape="disk",
@@ -540,7 +545,7 @@ class LineSlider2D(Slider2D):
             else (self._line_width, self._length)
         )
         self.track = Rectangle2D(size=track_size)
-        self.track.color = (1, 0, 0)
+        self.track.color = self._theme_value("track_color")
         self.track.z_order = self.z_order
 
         self.handle.color = self.default_color
@@ -710,16 +715,16 @@ class PlaybackPanel(UI):
         """
         self.panel = Panel2D(
             size=(220, 45),
-            color=(1, 1, 1),
+            color=self._theme_value("panel_color"),
             has_border=True,
-            border_color=(0, 0.3, 0),
+            border_color=self._theme_value("border_color"),
             border_width=2,
         )
 
         self.time_text = TextBlock2D(
             text="00:00.00",
             font_size=16,
-            color=(1, 1, 1),
+            color=self._theme_value("time_color"),
             justification="left",
             vertical_justification="middle",
             dynamic_bbox=True,
@@ -727,7 +732,7 @@ class PlaybackPanel(UI):
         self.speed_text = TextBlock2D(
             text="1x",
             font_size=21,
-            color=(0.2, 0.2, 0.2),
+            color=self._theme_value("speed_color"),
             bold=True,
             justification="center",
             vertical_justification="middle",
@@ -767,7 +772,7 @@ class PlaybackPanel(UI):
             shape="disk",
             outer_radius=10,
         )
-        self._progress_bar.track.color = (1, 0, 0)
+        self._progress_bar.track.color = self._theme_value("progress_color")
 
         self.panel.add_element(self._play_pause_btn, (10, 10))
         self.panel.add_element(self._stop_btn, (45, 10))
@@ -1082,10 +1087,13 @@ class TextBox2D(UI):
         (x, y) in pixels.
     color : str, tuple, list or ndarray, optional
         A hex string ("#FF0000"), RGB(A) in [0, 1], or RGB(A) in [0, 255].
+        Defaults to the theme item of the same name.
     font_size : int, optional
         Size of the text font.
+        Defaults to the theme item of the same name.
     font_family : str, optional
         Currently only supports Arial.
+        Defaults to the theme item of the same name.
     justification : str, optional
         Left, right, or center.
     bold : bool, optional
@@ -1122,9 +1130,9 @@ class TextBox2D(UI):
         *,
         text="Enter Text",
         position=(100, 10),
-        color=(0, 0, 0),
-        font_size=18,
-        font_family="Arial",
+        color=None,
+        font_size=None,
+        font_family=None,
         justification="left",
         bold=False,
         italic=False,
@@ -1146,10 +1154,13 @@ class TextBox2D(UI):
             (x, y) in pixels.
         color : str, tuple, list or ndarray, optional
             A hex string ("#FF0000"), RGB(A) in [0, 1], or RGB(A) in [0, 255].
+            Defaults to the theme item of the same name.
         font_size : int, optional
             Size of the text font.
+            Defaults to the theme item of the same name.
         font_family : str, optional
             Currently only supports Arial.
+            Defaults to the theme item of the same name.
         justification : str, optional
             Left, right, or center.
         bold : bool, optional
@@ -1161,6 +1172,9 @@ class TextBox2D(UI):
         z_order : int, optional
             Rendering order of the widget.
         """
+        color = self._theme_value("color", color)
+        font_size = self._theme_value("font_size", font_size)
+        font_family = self._theme_value("font_family", font_family)
         self._width = width
         self._height = height
         self._max_height = height
@@ -1230,7 +1244,7 @@ class TextBox2D(UI):
         self.text.bold = self._bold
         self.text.italic = self._italic
         self.text.shadow = self._shadow
-        self.text.background_color = (1, 1, 1)
+        self.text.background_color = self._theme_value("bg_color")
 
         self._children.append(self.text)
 
@@ -1710,6 +1724,7 @@ class LineDoubleSlider2D(UI):
         Length of the square handles (when shape is 'square').
     font_size : int, optional
         Size of the text font displaying the values.
+        Defaults to the theme item of the same name.
     text_template : str or callable, optional
         Template for the text displaying the values. Can use {value} and {ratio}.
     orientation : str, optional
@@ -1732,18 +1747,19 @@ class LineDoubleSlider2D(UI):
         inner_radius=0,
         outer_radius=10,
         handle_side=20,
-        font_size=16,
+        font_size=None,
         text_template="{value:.1f}",
         orientation="horizontal",
         shape="disk",
         z_order=0,
     ):
+        font_size = self._theme_value("font_size", font_size)
         self.orientation = orientation.lower().strip()
         self._length = length
         self._line_width = line_width
 
-        self.default_color = (1, 1, 1)
-        self.active_color = (0, 0, 1)
+        self.default_color = self._theme_value("handle_color")
+        self.active_color = self._theme_value("handle_active_color")
 
         if min_value >= max_value:
             raise ValueError(
@@ -1780,7 +1796,7 @@ class LineDoubleSlider2D(UI):
             else (self._line_width, self._length)
         )
         self.track = Rectangle2D(size=track_size)
-        self.track.color = (1, 0, 0)
+        self.track.color = self._theme_value("track_color")
         self.track.z_order = self.z_order
 
         for _ in range(2):
@@ -2168,6 +2184,7 @@ class RingSlider2D(Slider2D):
         The side length of the square handle when shape="square".
     font_size : int, optional
         Size of the text to display alongside the slider (pt).
+        Defaults to the theme item of the same name.
     text_template : str or callable, optional
         If str, text template can contain one or multiple of the
         replacement fields: `{value:}`, `{ratio:}`, `{angle:}`.
@@ -2207,7 +2224,7 @@ class RingSlider2D(Slider2D):
         handle_inner_radius=0,
         handle_outer_radius=10,
         handle_side=20,
-        font_size=16,
+        font_size=None,
         text_template="{ratio:.0%}",
         shape="disk",
         z_order=0,
@@ -2237,6 +2254,7 @@ class RingSlider2D(Slider2D):
             The side length of the square handle when shape="square".
         font_size : int, optional
             Size of the text to display alongside the slider (pt).
+            Defaults to the theme item of the same name.
         text_template : str or callable, optional
             If str, text template can contain one or multiple of the
             replacement fields: `{value:}`, `{ratio:}`, `{angle:}`.
@@ -2280,7 +2298,7 @@ class RingSlider2D(Slider2D):
             outer_radius=self._track_outer_radius,
             inner_radius=self._track_inner_radius,
         )
-        self.track.color = (1, 0, 0)
+        self.track.color = self._theme_value("track_color")
         self.track.z_order = self.z_order
 
         self.handle.color = self.default_color
@@ -2404,6 +2422,7 @@ class RangeSlider(UI):
         Maximum value for the range slider.
     font_size : int, optional
         Size of the text font displaying the values.
+        Defaults to the theme item of the same name.
     range_precision : int, optional
         Number of decimal places to show on the range slider text.
     orientation : str, optional
@@ -2426,12 +2445,13 @@ class RangeSlider(UI):
         length=200,
         min_value=0,
         max_value=100,
-        font_size=16,
+        font_size=None,
         range_precision=1,
         orientation="horizontal",
         value_precision=2,
         shape="disk",
     ):
+        font_size = self._theme_value("font_size", font_size)
         self.min_value = min_value
         self.max_value = max_value
         self.inner_radius = inner_radius
@@ -2620,11 +2640,14 @@ class ButtonGroup(UI):
         Spacing in pixels between two adjacent options.
     font_size : int, optional
         Font size of the labels in pixels.
+        Defaults to the theme item of the same name.
     font_family : str, optional
         Font family of the labels. Currently only supports "Arial".
+        Defaults to the theme item of the same name.
     text_color : str, tuple, list or ndarray, optional
         Color of the label text. Accepts a hex string ("#FF0000"), RGB(A) in
         [0, 1], or RGB(A) in [0, 255].
+        Defaults to the theme item of the same name.
     position : (float, float), optional
         Absolute coordinates (x, y) of the top-left corner of this component.
     z_order : int, optional
@@ -2647,13 +2670,16 @@ class ButtonGroup(UI):
         button_states=None,
         orientation="vertical",
         gap=10,
-        font_size=18,
-        font_family="Arial",
-        text_color=(1, 1, 1),
+        font_size=None,
+        font_family=None,
+        text_color=None,
         position=(0, 0),
         z_order=0,
     ):
         """Init class instance."""
+        font_size = self._theme_value("font_size", font_size)
+        font_family = self._theme_value("font_family", font_family)
+        text_color = self._theme_value("text_color", text_color)
         if orientation not in ("vertical", "horizontal"):
             raise ValueError(
                 f"orientation should be 'vertical' or 'horizontal', "
@@ -2899,11 +2925,14 @@ class Checkbox(ButtonGroup):
         Spacing in pixels between two adjacent options.
     font_size : int, optional
         Font size of the labels in pixels.
+        Defaults to the theme item of the same name.
     font_family : str, optional
         Font family of the labels. Currently only supports "Arial".
+        Defaults to the theme item of the same name.
     text_color : str, tuple, list or ndarray, optional
         Color of the label text. Accepts a hex string ("#FF0000"), RGB(A) in
         [0, 1], or RGB(A) in [0, 255].
+        Defaults to the theme item of the same name.
     position : (float, float), optional
         Absolute coordinates (x, y) of the top-left corner of this component.
     z_order : int, optional
@@ -2918,9 +2947,9 @@ class Checkbox(ButtonGroup):
         checked_labels=(),
         orientation="vertical",
         gap=10,
-        font_size=18,
-        font_family="Arial",
-        text_color=(1, 1, 1),
+        font_size=None,
+        font_family=None,
+        text_color=None,
         position=(0, 0),
         z_order=0,
     ):
@@ -2959,11 +2988,14 @@ class RadioButton(ButtonGroup):
         Spacing in pixels between two adjacent options.
     font_size : int, optional
         Font size of the labels in pixels.
+        Defaults to the theme item of the same name.
     font_family : str, optional
         Font family of the labels. Currently only supports "Arial".
+        Defaults to the theme item of the same name.
     text_color : str, tuple, list or ndarray, optional
         Color of the label text. Accepts a hex string ("#FF0000"), RGB(A) in
         [0, 1], or RGB(A) in [0, 255].
+        Defaults to the theme item of the same name.
     position : (float, float), optional
         Absolute coordinates (x, y) of the top-left corner of this component.
     z_order : int, optional
@@ -2983,9 +3015,9 @@ class RadioButton(ButtonGroup):
         checked_labels=(),
         orientation="vertical",
         gap=10,
-        font_size=18,
-        font_family="Arial",
-        text_color=(1, 1, 1),
+        font_size=None,
+        font_family=None,
+        text_color=None,
         position=(0, 0),
         z_order=0,
     ):
@@ -3066,24 +3098,32 @@ class ComboBox2D(UI):
         Color of the selected text to be displayed. All color parameters
         accept a hex string ("#FF0000"), RGB(A) in [0, 1], or RGB(A) in
         [0, 255].
+        Defaults to the theme item of the same name.
     selection_bg_color : str, tuple, list or ndarray, optional
         Background color of the selection text.
+        Defaults to the theme item of the same name.
     menu_text_color : str, tuple, list or ndarray, optional
         Color of the options displayed in drop down menu.
+        Defaults to the theme item of the same name.
     selected_color : str, tuple, list or ndarray, optional
         Background color of the selected option in drop down menu.
+        Defaults to the theme item of the same name.
     unselected_color : str, tuple, list or ndarray, optional
         Background color of the unselected option in drop down menu.
+        Defaults to the theme item of the same name.
     scroll_bar_active_color : str, tuple, list or ndarray, optional
         Color of the scrollbar when in active use.
+        Defaults to the theme item of the same name.
     scroll_bar_inactive_color : str, tuple, list or ndarray, optional
         Color of the scrollbar when inactive.
+        Defaults to the theme item of the same name.
     menu_opacity : float, optional
         Opacity of the drop down menu background.
     reverse_scrolling : bool, optional
         If True, scrolling up will move the list of files down.
     font_size : int, optional
         The font size of selected text in pixels.
+        Defaults to the theme item of the same name.
     line_spacing : float, optional
         Distance between drop down menu's items in pixels.
     z_order : int, optional
@@ -3107,20 +3147,34 @@ class ComboBox2D(UI):
         size=(300, 200),
         placeholder="Choose selection...",
         draggable=True,
-        selection_text_color=(0, 0, 0),
-        selection_bg_color=(1, 1, 1),
-        menu_text_color=(0.2, 0.2, 0.2),
-        selected_color=(0.9, 0.6, 0.6),
-        unselected_color=(0.6, 0.6, 0.6),
-        scroll_bar_active_color=(0.6, 0.2, 0.2),
-        scroll_bar_inactive_color=(0.9, 0.0, 0.0),
+        selection_text_color=None,
+        selection_bg_color=None,
+        menu_text_color=None,
+        selected_color=None,
+        unselected_color=None,
+        scroll_bar_active_color=None,
+        scroll_bar_inactive_color=None,
         menu_opacity=1.0,
         reverse_scrolling=False,
-        font_size=20,
+        font_size=None,
         line_spacing=1.4,
         z_order=0,
     ):
         """Init class instance."""
+        selection_text_color = self._theme_value(
+            "selection_text_color", selection_text_color
+        )
+        selection_bg_color = self._theme_value("selection_bg_color", selection_bg_color)
+        menu_text_color = self._theme_value("menu_text_color", menu_text_color)
+        selected_color = self._theme_value("selected_color", selected_color)
+        unselected_color = self._theme_value("unselected_color", unselected_color)
+        scroll_bar_active_color = self._theme_value(
+            "scroll_bar_active_color", scroll_bar_active_color
+        )
+        scroll_bar_inactive_color = self._theme_value(
+            "scroll_bar_inactive_color", scroll_bar_inactive_color
+        )
+        font_size = self._theme_value("font_size", font_size)
         if items is None:
             items = []
 
@@ -3472,19 +3526,25 @@ class ListBox2D(UI):
         If True, scrolling up will move the list of files down.
     font_size : int, optional
         The font size in pixels.
+        Defaults to the theme item of the same name.
     line_spacing : float, optional
         Distance between listbox's items in pixels.
     text_color : str, tuple, list or ndarray, optional
         Color of the text. All color parameters accept a hex string
         ("#FF0000"), RGB(A) in [0, 1], or RGB(A) in [0, 255].
+        Defaults to the theme item of the same name.
     selected_color : str, tuple, list or ndarray, optional
         Background color of selected item.
+        Defaults to the theme item of the same name.
     unselected_color : str, tuple, list or ndarray, optional
         Background color of unselected item.
+        Defaults to the theme item of the same name.
     scroll_bar_active_color : str, tuple, list or ndarray, optional
         Color of active scroll bar.
+        Defaults to the theme item of the same name.
     scroll_bar_inactive_color : str, tuple, list or ndarray, optional
         Color of inactive scroll bar.
+        Defaults to the theme item of the same name.
     background_opacity : float, optional
         Opacity of the background.
 
@@ -3502,16 +3562,26 @@ class ListBox2D(UI):
         size=(100, 300),
         multiselection=True,
         reverse_scrolling=False,
-        font_size=20,
+        font_size=None,
         line_spacing=1.4,
-        text_color=(0.2, 0.2, 0.2),
-        selected_color=(0.9, 0.6, 0.6),
-        unselected_color=(0.6, 0.6, 0.6),
-        scroll_bar_active_color=(0.6, 0.2, 0.2),
-        scroll_bar_inactive_color=(0.9, 0.0, 0.0),
+        text_color=None,
+        selected_color=None,
+        unselected_color=None,
+        scroll_bar_active_color=None,
+        scroll_bar_inactive_color=None,
         background_opacity=1.0,
     ):
         """Init class instance."""
+        font_size = self._theme_value("font_size", font_size)
+        text_color = self._theme_value("text_color", text_color)
+        selected_color = self._theme_value("selected_color", selected_color)
+        unselected_color = self._theme_value("unselected_color", unselected_color)
+        scroll_bar_active_color = self._theme_value(
+            "scroll_bar_active_color", scroll_bar_active_color
+        )
+        scroll_bar_inactive_color = self._theme_value(
+            "scroll_bar_inactive_color", scroll_bar_inactive_color
+        )
         self.view_offset = 0
         self.slots = []
         self.selected = []
@@ -3564,7 +3634,7 @@ class ListBox2D(UI):
         self.nb_slots = int((size[1] - 2 * self.padding) // max(1, self.slot_height))
 
         # This panel facilitates adding slots at the right position.
-        self.panel = Panel2D(size=size, color=(1, 1, 1))
+        self.panel = Panel2D(size=size, color=self._theme_value("panel_color"))
 
         # Add a scroll bar
         denom = len(self.values) if len(self.values) > 0 else 1
@@ -3641,14 +3711,15 @@ class ListBox2D(UI):
             font_size = self.font_size
 
             for _ in range(self.nb_slots - len(self.slots)):
-                item = ListBoxItem2D(
-                    on_select=self.select,
-                    size=(self.slot_width, self.slot_height),
-                    text_color=self.text_color,
-                    selected_color=self.selected_color,
-                    unselected_color=self.unselected_color,
-                    background_opacity=self.background_opacity,
-                )
+                with theme_scope(self.theme):
+                    item = ListBoxItem2D(
+                        on_select=self.select,
+                        size=(self.slot_width, self.slot_height),
+                        text_color=self.text_color,
+                        selected_color=self.selected_color,
+                        unselected_color=self.unselected_color,
+                        background_opacity=self.background_opacity,
+                    )
                 item.textblock.font_size = font_size
                 item.background.actor.add_event_handler(
                     self.wheel_callback, EventType.WHEEL
@@ -3929,10 +4000,13 @@ class ListBoxItem2D(UI):
     text_color : str, tuple, list or ndarray, optional
         Text color. All color parameters accept a hex string ("#FF0000"),
         RGB(A) in [0, 1], or RGB(A) in [0, 255].
+        Defaults to the theme item of the same name.
     selected_color : str, tuple, list or ndarray, optional
         Selected background color.
+        Defaults to the theme item of the same name.
     unselected_color : str, tuple, list or ndarray, optional
         Unselected background color.
+        Defaults to the theme item of the same name.
     background_opacity : float, optional
         Opacity.
     """
@@ -3942,9 +4016,9 @@ class ListBoxItem2D(UI):
         on_select,
         size,
         *,
-        text_color=(1.0, 0.0, 0.0),
-        selected_color=(0.4, 0.4, 0.4),
-        unselected_color=(0.9, 0.9, 0.9),
+        text_color=None,
+        selected_color=None,
+        unselected_color=None,
         background_opacity=1.0,
     ):
         """
@@ -3956,12 +4030,18 @@ class ListBoxItem2D(UI):
             Callback invoked when the item is clicked.
         size : tuple of 2 ints
             The size of the listbox item.
-        text_color : str, tuple, list or ndarray
-        unselected_color : str, tuple, list or ndarray
-        selected_color : str, tuple, list or ndarray
+        text_color : str, tuple, list or ndarray, optional
+            Defaults to the theme item of the same name.
+        unselected_color : str, tuple, list or ndarray, optional
+            Defaults to the theme item of the same name.
+        selected_color : str, tuple, list or ndarray, optional
+            Defaults to the theme item of the same name.
         background_opacity : float
 
         """
+        text_color = self._theme_value("text_color", text_color)
+        selected_color = self._theme_value("selected_color", selected_color)
+        unselected_color = self._theme_value("unselected_color", unselected_color)
         self._item_size = size
         super(ListBoxItem2D, self).__init__()
         self._element = None
@@ -4125,6 +4205,7 @@ class TreeNode2D(UI):
         Space taken by each sub-node vertically.
     color : list of 3 floats, optional
         Background color of current node.
+        Defaults to the theme item of the same name.
     opacity : float, optional
         Background opacity of the current node.
     expandable : bool, optional
@@ -4133,6 +4214,7 @@ class TreeNode2D(UI):
         Whether the current node is expanded or not.
     selected_color : list of 3 floats, optional
         Color of the selected node.
+        Defaults to the theme item of the same name.
     auto_resize : bool, optional
         If the node should automatically resize to fit its content.
     multiselect : bool, optional
@@ -4169,11 +4251,11 @@ class TreeNode2D(UI):
         indent=20,
         child_indent=10,
         child_height=25,
-        color=(0, 0, 0),
+        color=None,
         opacity=0.8,
         expandable=True,
         expanded=False,
-        selected_color=(0.8, 0.3, 0.3),
+        selected_color=None,
         auto_resize=True,
         multiselect=True,
         button_position="start",
@@ -4182,6 +4264,8 @@ class TreeNode2D(UI):
         """
         Initialize the UI element.
         """
+        color = self._theme_value("color", color)
+        selected_color = self._theme_value("selected_color", selected_color)
         self.button_position = button_position
         self._initial_children = children or []
         self.node_icons = {
@@ -5059,6 +5143,7 @@ class Tree2D(UI):
         Space taken by each node vertically.
     color : list of 3 floats, optional
         Background color of the Tree2D.
+        Defaults to the theme item of the same name.
     opacity : float, optional
         Background opacity of the Tree2D.
     indent : int, optional
@@ -5073,8 +5158,10 @@ class Tree2D(UI):
         Path/URl to the icon placed next to the label for selected state.
     scroll_bar_inactive_color : list of 3 floats, optional
         Color of the scroll bar when inactive.
+        Defaults to the theme item of the same name.
     scroll_bar_active_color : list of 3 floats, optional
         Color of the scroll bar when actively dragged.
+        Defaults to the theme item of the same name.
     z_order : int, optional
         Stacking order of the Tree2D.
 
@@ -5108,20 +5195,27 @@ class Tree2D(UI):
         position=(0, 0),
         size=(300, 300),
         node_height=25,
-        color=(0, 0, 0),
+        color=None,
         opacity=0.8,
         indent=25,
         multiselect=True,
         button_position="start",
         icon=None,
         selected_icon=None,
-        scroll_bar_inactive_color=(0.6, 0.2, 0.2),
-        scroll_bar_active_color=(0.9, 0.0, 0.0),
+        scroll_bar_inactive_color=None,
+        scroll_bar_active_color=None,
         z_order=0,
     ):
         """
         Initialize the UI element.
         """
+        color = self._theme_value("color", color)
+        scroll_bar_inactive_color = self._theme_value(
+            "scroll_bar_inactive_color", scroll_bar_inactive_color
+        )
+        scroll_bar_active_color = self._theme_value(
+            "scroll_bar_active_color", scroll_bar_active_color
+        )
         self.structure = structure
         self.tree_name = tree_name
         self.indent = indent
@@ -5416,38 +5510,41 @@ class Tree2D(UI):
         structure : list of dicts
             [{'node': ['child', 'child']}, .....].
         """
-        for obj in structure:
-            parent_label = list(obj.keys())[0]
-            child_labels = list(obj.values())[0]
+        with theme_scope(self.theme):
+            for obj in structure:
+                parent_label = list(obj.keys())[0]
+                child_labels = list(obj.values())[0]
 
-            if parent_label in self.nodes_dict.keys():
-                parent_node = self.nodes_dict[parent_label]
-            else:
-                parent_node = TreeNode2D(
-                    label=parent_label,
-                    multiselect=self.multiselect,
-                    button_position=self.button_position,
-                    icon=self.icon,
-                    selected_icon=self.selected_icon,
-                )
+                if parent_label in self.nodes_dict.keys():
+                    parent_node = self.nodes_dict[parent_label]
+                else:
+                    parent_node = TreeNode2D(
+                        label=parent_label,
+                        multiselect=self.multiselect,
+                        button_position=self.button_position,
+                        icon=self.icon,
+                        selected_icon=self.selected_icon,
+                    )
 
-                self._nodes.append(parent_node)
-                self._nodes_dict[parent_label] = parent_node
+                    self._nodes.append(parent_node)
+                    self._nodes_dict[parent_label] = parent_node
 
-            child_nodes = [
-                TreeNode2D(
-                    label=child_label,
-                    multiselect=self.multiselect,
-                    button_position=self.button_position,
-                    icon=self.icon,
-                    selected_icon=self.selected_icon,
-                )
-                for child_label in child_labels
-            ]
+                child_nodes = [
+                    TreeNode2D(
+                        label=child_label,
+                        multiselect=self.multiselect,
+                        button_position=self.button_position,
+                        icon=self.icon,
+                        selected_icon=self.selected_icon,
+                    )
+                    for child_label in child_labels
+                ]
 
-            for child_node, child_label in zip(child_nodes, child_labels, strict=True):
-                self._nodes_dict[child_label] = child_node
-                parent_node.add_node(child_node)
+                for child_node, child_label in zip(
+                    child_nodes, child_labels, strict=True
+                ):
+                    self._nodes_dict[child_label] = child_node
+                    parent_node.add_node(child_node)
 
     def resize(self, size):
         """
@@ -5550,6 +5647,7 @@ class FileMenu2D(UI):
         If True, scrolling up will move the list of files down.
     font_size : int, optional
         The font size in pixels.
+        Defaults to the theme item of the same name.
     line_spacing : float, optional
         Distance between listbox's items in pixels.
 
@@ -5568,10 +5666,11 @@ class FileMenu2D(UI):
         size=(100, 300),
         multiselection=True,
         reverse_scrolling=False,
-        font_size=20,
+        font_size=None,
         line_spacing=1.4,
     ):
         """Init class instance."""
+        font_size = self._theme_value("font_size", font_size)
         self.font_size = font_size
         self.multiselection = multiselection
         self.reverse_scrolling = reverse_scrolling
@@ -5728,9 +5827,9 @@ class FileMenu2D(UI):
             if list_idx >= len(self.directory_contents):
                 continue
             if self.directory_contents[list_idx][1] == "directory":
-                slot.textblock.color = (0, 0.6, 0)
+                slot.textblock.color = self._theme_value("directory_color")
             elif self.directory_contents[list_idx][1] == "file":
-                slot.textblock.color = (0, 0, 0.7)
+                slot.textblock.color = self._theme_value("file_color")
 
     def directory_click_callback(self):
         """Move into the selected entry if it is a directory."""
@@ -6300,14 +6399,18 @@ class Card2D(UI):
     bg_color : str, tuple, list or ndarray, optional
         Background color of the card. A hex string ("#FF0000"), RGB(A) in
         [0, 1], or RGB(A) in [0, 255].
+        Defaults to the theme item of the same name.
     bg_opacity : float, optional
         Background opacity. Must be in [0, 1].
     title_color : str, tuple, list or ndarray, optional
         Title text color, same formats as ``bg_color``.
+        Defaults to the theme item of the same name.
     body_color : str, tuple, list or ndarray, optional
         Body text color, same formats as ``bg_color``.
+        Defaults to the theme item of the same name.
     border_color : str, tuple, list or ndarray, optional
         Border color, same formats as ``bg_color``.
+        Defaults to the theme item of the same name.
     border_width : int, optional
         Width of the border in pixels.
     maintain_aspect : bool, optional
@@ -6338,16 +6441,20 @@ class Card2D(UI):
         position=(0, 0),
         size=(400, 400),
         image_scale=0.5,
-        bg_color=(0.5, 0.5, 0.5),
+        bg_color=None,
         bg_opacity=1,
-        title_color=(0.0, 0.0, 0.0),
-        body_color=(0.0, 0.0, 0.0),
-        border_color=(1.0, 1.0, 1.0),
+        title_color=None,
+        body_color=None,
+        border_color=None,
         border_width=0,
         maintain_aspect=False,
         z_order=0,
     ):
         """Initialize the Card2D instance."""
+        bg_color = self._theme_value("bg_color", bg_color)
+        title_color = self._theme_value("title_color", title_color)
+        body_color = self._theme_value("body_color", body_color)
+        border_color = self._theme_value("border_color", border_color)
         self._drag_offset = None
         self.image_path = image_path
         self._extension = get_extension(self.image_path)
@@ -6674,6 +6781,7 @@ class SpinBox(UI):
         Gap in pixels around and between the textbox and the buttons.
     panel_color : (float, float, float), optional
         Panel color of SpinBox.
+        Defaults to the theme item of the same name.
     min_val : int or float, optional
         Minimum value of SpinBox.
     max_val : int or float, optional
@@ -6708,7 +6816,7 @@ class SpinBox(UI):
         position=(350, 400),
         size=(160, 40),
         padding=4,
-        panel_color=(1, 1, 1),
+        panel_color=None,
         min_val=0,
         max_val=100,
         initial_val=50,
@@ -6718,6 +6826,7 @@ class SpinBox(UI):
         max_line=2,
     ):
         """Initialize the SpinBox instance."""
+        panel_color = self._theme_value("panel_color", panel_color)
         self.panel_size = size
         self.padding = padding
         self.panel_color = panel_color
