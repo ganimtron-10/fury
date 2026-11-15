@@ -23,7 +23,6 @@ __all__ = [
 ]
 
 
-import inspect
 import logging
 from numbers import Number
 from string import printable
@@ -3957,12 +3956,14 @@ def _handles_wheel(ui_element):
     Returns
     -------
     bool
-        True if the element overrides the wheel handling of ``UI`` or has a
-        method bound as its wheel callback, like ``ListBox2D`` and
-        ``TextBox2D``.
+        True if the element overrides the wheel handling of ``UI``, like
+        ``ListBox2D``, or has a wheel callback other than the default one
+        ``UI`` sets, like ``TextBox2D`` or a callback set by the user.
     """
     overrides_wheel = type(ui_element).wheel_callback is not UI.wheel_callback
-    return overrides_wheel or inspect.ismethod(ui_element.on_wheel)
+    default_callback = "UI.__init__.<locals>.<lambda>"
+    has_callback = getattr(ui_element.on_wheel, "__qualname__", "") != default_callback
+    return overrides_wheel or has_callback
 
 
 def _load_icon(icon):
@@ -4019,7 +4020,8 @@ class TreeNode2D(UI):
     opacity : float, optional
         Background opacity of the title row.
     expandable : bool, optional
-        Whether the node can be expanded and collapsed.
+        Whether the node can be expanded and collapsed. A node that is not
+        expandable keeps the ``expanded`` state it is given.
     expanded : bool, optional
         Whether the node starts expanded.
     selected_color : list of 3 floats, optional
@@ -4373,7 +4375,8 @@ class TreeNode2D(UI):
         """Show the button and icon only when they apply and the row is shown."""
         has_content = bool(self._child_nodes)
         self.button.set_visibility(self._visible and self._expandable and has_content)
-        self.label_image.set_visibility(self._visible and self.has_icon)
+        shows_icon = self._current_icon() is not None
+        self.label_image.set_visibility(self._visible and shows_icon)
 
     def _attach_to_scene(self, ui_element):
         """
@@ -4406,6 +4409,14 @@ class TreeNode2D(UI):
         ----------
         node : TreeNode2D
             Node element that is to be added.
+
+        Raises
+        ------
+        TypeError
+            If ``node`` is not a TreeNode2D.
+        ValueError
+            If this node holds UI elements, already holds ``node``, or is
+            inside ``node``.
         """
         if not isinstance(node, TreeNode2D):
             raise TypeError("node must be a TreeNode2D instance.")
@@ -4430,7 +4441,7 @@ class TreeNode2D(UI):
         node.on_wheel = lambda event: self.on_wheel(event)
 
         child_width = self.title_panel.size[0] - self.right_margin - self._content_x()
-        node.resize((max(child_width, 1), node.children_size() + node.child_height))
+        node.resize((max(child_width, 1), node._fitted_height()))
         self.content_panel.add_element(
             node, (self._content_x(), self.children_size() - node.size[1])
         )
@@ -4455,11 +4466,20 @@ class TreeNode2D(UI):
             top-left corner of the indented content area. The content area
             grows to fit the element.
 
+        Raises
+        ------
+        TypeError
+            If ``element`` is a TreeNode2D; use ``add_node`` instead.
+        ValueError
+            If this node holds child nodes, or ``coords`` are not two whole
+            pixel values.
+
         Notes
         -----
         Wheel events over the element and the elements inside it are passed
         to the node, so they scroll a Tree2D holding it. Elements that react
-        to wheel events themselves, like ``ListBox2D``, keep their handling.
+        to wheel events themselves, like ``ListBox2D``, or that already have
+        a wheel callback, keep their handling.
         """
         if isinstance(element, TreeNode2D):
             raise TypeError("Use add_node to add a TreeNode2D.")
@@ -4505,12 +4525,7 @@ class TreeNode2D(UI):
             if not isinstance(child, TreeNode2D):
                 continue
             if recursive:
-                child.resize(
-                    (
-                        width - self._content_x(),
-                        child.children_size() + child.child_height,
-                    )
-                )
+                child.resize((width - self._content_x(), child._fitted_height()))
             child_offset = (self._content_x(), current_y)
             if not np.array_equal(offsets[id(child)], child_offset):
                 self.content_panel.update_element(child, child_offset)
@@ -4563,6 +4578,10 @@ class TreeNode2D(UI):
         width : int
             Width available to the label, in pixels.
         """
+        fit_key = (self._label, width, self.child_height)
+        if getattr(self, "_label_fit", None) == fit_key:
+            return
+        self._label_fit = fit_key
 
         def fits(text):
             """
@@ -4702,9 +4721,9 @@ class TreeNode2D(UI):
         Returns
         -------
         bool
-            True if an icon is set.
+            True if an icon or a selected icon is set.
         """
-        return self._icon_images["unselected"] is not None
+        return any(image is not None for image in self._icon_images.values())
 
     @property
     def color(self):
@@ -5022,13 +5041,27 @@ class TreeNode2D(UI):
         self._update_title_visibility()
         self._layout_title(self.title_panel.size[0] - self.right_margin)
 
+    def _current_icon(self):
+        """
+        Return the icon image matching the selection state.
+
+        Returns
+        -------
+        ndarray or None
+            The selected icon while selected, when set, and the icon
+            otherwise.
+        """
+        if self._selected and self._icon_images["selected"] is not None:
+            return self._icon_images["selected"]
+        return self._icon_images["unselected"]
+
     def _show_icon(self):
         """Display the icon matching the selection state."""
-        image = self._icon_images["unselected"]
-        if self._selected and self._icon_images["selected"] is not None:
-            image = self._icon_images["selected"]
+        image = self._current_icon()
         if image is not None:
             self.label_image.set_img(image)
+        if hasattr(self, "button"):
+            self._update_title_visibility()
 
     @property
     def selected(self):
@@ -5771,6 +5804,13 @@ class Tree2D(UI):
             Offset in pixels of a UI element's top-left corner from the
             top-left corner of the node's indented content area. Not used for
             a TreeNode2D.
+
+        Raises
+        ------
+        KeyError
+            If no node has the label ``node``.
+        ValueError
+            If a label of the added nodes is already used in the tree.
         """
         target = self.get_node(node)
         if isinstance(content, TreeNode2D):

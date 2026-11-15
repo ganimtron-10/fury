@@ -3468,6 +3468,57 @@ def test_ui_tree2d_settings_apply_after_construction():
     npt.assert_array_almost_equal(node.color, (0, 0, 1))
 
 
+def test_ui_treenode2d_keeps_fixed_height_when_nested():
+    """A node with auto_resize off keeps its height inside another node."""
+    fixed = ui.TreeNode2D(
+        label="fixed", size=(200, 300), auto_resize=False, expanded=True
+    )
+    fixed.add_element(ui.Rectangle2D(size=(40, 40)))
+    parent = ui.TreeNode2D(label="parent", expanded=True)
+
+    parent.add_node(fixed)
+    parent.resize((250, 400))
+
+    npt.assert_equal(fixed.size[1], 300)
+    npt.assert_equal(parent.children_size(), 300)
+
+
+def test_ui_tree2d_keeps_user_wheel_callback_on_content(ui_scene):
+    """A wheel callback set on content before adding it keeps running."""
+    show_manager, scene = ui_scene
+    tree = ui.Tree2D(
+        structure=[{"Root": ["Box"] + [f"r{i}" for i in range(12)]}],
+        position=TREE_POSITION,
+        size=TREE_SIZE,
+    )
+    box = ui.Rectangle2D(size=(80, 40), color=(1, 0, 0))
+    wheel_events = []
+    box.on_wheel = lambda event: wheel_events.append(event.dy)
+    tree.add_content("Box", box)
+    scene.add(tree)
+    tree.get_node("Root").toggle_view()
+    tree.get_node("Box").toggle_view()
+
+    _wheel_at(show_manager, *_center(box), dy=100)
+
+    npt.assert_equal(wheel_events, [100])
+    npt.assert_equal(tree.view_offset, 0)
+
+
+def test_ui_treenode2d_selected_icon_without_icon():
+    """A selected icon alone shows while the node is selected."""
+    minus = read_viz_icons(fname="minus.png")
+    node = ui.TreeNode2D(label="x", selected_icon=minus)
+    assert not _shown(node.label_image)
+
+    node.selected = True
+
+    assert _shown(node.label_image)
+    npt.assert_array_equal(node.label_image.img, load_image(minus))
+    node.selected = False
+    assert not _shown(node.label_image)
+
+
 def test_ui_tree2d_click_selects_one_node_without_multiselect(ui_scene):
     """With multiselect off, a click deselects nodes in other branches too."""
     show_manager, scene = ui_scene
@@ -3566,6 +3617,8 @@ def test_ui_tree2d_icons_on_narrow_nodes(ui_scene):
     x_node.selected = True
     npt.assert_array_equal(x_node.label_image.img, load_image(minus))
     x_node.icon = None
+    assert _shown(x_node.label_image)
+    x_node.selected = False
     assert not _shown(x_node.label_image)
 
 

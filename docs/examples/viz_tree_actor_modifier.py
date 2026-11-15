@@ -141,7 +141,6 @@ def setup_actor_controls(actor_obj, name):
     for channel, slider in enumerate(color_sliders):
         tree.add_content(f"{name} color", slider, coords=(20 + 110 * channel, 10))
 
-    ###########################################################################
     # Show the actor only while its node is selected.
 
     # The control rows are not selectable, so clicking them opens them
