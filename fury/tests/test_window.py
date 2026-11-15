@@ -1831,8 +1831,9 @@ def test_loader_hover_recovery(blocking, pointer_location):
     try:
         image = _loader_draw(show_m)
         if pointer_location == "glyph":
-            dark = np.all(image[40:80, 50:170, :3] < 20, axis=-1)
-            rows, columns = np.nonzero(dark)
+            face = image[40:80, 50:170, :3].astype(int)
+            glyph = np.any(np.abs(face - (255, 0, 0)) > 60, axis=-1)
+            rows, columns = np.nonzero(glyph)
             assert columns.size > 0
             middle = columns.size // 2
             x, y = int(columns[middle]) + 50, int(rows[middle]) + 40

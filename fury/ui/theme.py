@@ -3,6 +3,8 @@
 from contextlib import contextmanager
 import copy
 import json
+import logging
+import os
 
 from fury.ui.context import UIContext
 
@@ -805,6 +807,9 @@ BUILTIN_THEMES = {
     "graphite_light": _graphite_light_items,
 }
 
+_DEFAULT_THEME = "graphite"
+_THEME_ENV_VAR = "FURY_UI_THEME"
+
 
 def builtin_theme(name):
     """
@@ -830,6 +835,34 @@ def builtin_theme(name):
         msg = f"Unknown theme {name!r}. Available themes: {available}."
         raise ValueError(msg)
     return Theme(name=name, items=BUILTIN_THEMES[name]())
+
+
+def _default_theme():
+    """
+    Create the global theme used before one is set.
+
+    The ``FURY_UI_THEME`` environment variable can name a built-in theme,
+    such as ``"classic"``, to use instead of Graphite. The name is not case
+    sensitive, and an empty value counts as unset. An unknown name logs a
+    warning and falls back to Graphite.
+
+    Returns
+    -------
+    Theme
+        The default theme.
+    """
+    value = os.environ.get(_THEME_ENV_VAR, "")
+    name = value.strip().lower()
+    if not name:
+        return builtin_theme(_DEFAULT_THEME)
+    if name not in BUILTIN_THEMES:
+        available = ", ".join(sorted(BUILTIN_THEMES))
+        logging.warning(
+            f"Ignoring {_THEME_ENV_VAR}={value!r}: unknown theme. "
+            f"Available themes: {available}. Using {_DEFAULT_THEME!r}."
+        )
+        return builtin_theme(_DEFAULT_THEME)
+    return builtin_theme(name)
 
 
 def _as_theme(theme):
@@ -884,13 +917,19 @@ def get_theme():
     """
     Get the theme a UI element created now would use.
 
+    Until :func:`set_theme` is called, the global theme is the built-in
+    ``"graphite"`` theme, or the built-in theme named by the
+    ``FURY_UI_THEME`` environment variable. Call ``set_theme("classic")``,
+    or set ``FURY_UI_THEME=classic``, for the look of FURY widgets before
+    themes existed.
+
     Returns
     -------
     Theme
         The innermost :func:`theme_scope` theme, or the global theme.
     """
     if UIContext.theme is None:
-        UIContext.theme = builtin_theme("classic")
+        UIContext.theme = _default_theme()
     return UIContext.current_theme()
 
 

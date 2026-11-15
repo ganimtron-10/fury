@@ -4,12 +4,14 @@ from os.path import join as pjoin
 
 import numpy as np
 import numpy.testing as npt
+import pytest
 
 from fury import ui, window
 from fury.data import DATA_DIR
 from fury.testing import VisualTest
 
 
+@pytest.mark.usefixtures("classic_theme")
 def test_panel2d_initialization_default():
     """Test Panel2D initialization and default property values."""
     panel = ui.Panel2D(size=(100, 100))
@@ -229,7 +231,9 @@ def test_tab_panel2d_properties_and_content():
     npt.assert_equal(tab_panel.title, "Tab 1")
     npt.assert_equal(tab_panel.title_bold, False)
     npt.assert_equal(tab_panel.title_italic, False)
-    npt.assert_equal(tab_panel.title_font_size, 18)
+    npt.assert_equal(
+        tab_panel.title_font_size, ui.get_theme().get(ui.TextBlock2D, "font_size")
+    )
     npt.assert_equal(tab_panel.actors, [])
     assert not tab_panel.content_panel.actors[0].visible
 
@@ -1002,6 +1006,7 @@ def test_panel_add_uses_layout_and_keeps_fixed_size():
 
 def test_panel_resize_reflows_children():
     panel = ui.Panel2D((200, 100))
+    panel.set_layout(padding=0)
     child = panel.add(_block(), width=ui.grow())
     panel.update_layout()
     npt.assert_array_equal(child.size[0], 200)
@@ -1041,6 +1046,7 @@ def test_panel_add_element_stays_manual():
 
 def test_panel_remove_element_leaves_the_layout():
     panel = ui.Panel2D((200, 100))
+    panel.set_layout(padding=0)
     a, b = panel.add(_block()), panel.add(_block())
     panel.update_layout()
     panel.remove_element(a)
@@ -1050,6 +1056,7 @@ def test_panel_remove_element_leaves_the_layout():
 
 def test_panel_border_insets_content():
     panel = ui.Panel2D((100, 100), has_border=True, border_width=4)
+    panel.set_layout(padding=0)
     child = panel.add(_block())
     panel.update_layout()
     npt.assert_array_equal(child.get_position(), (4, 4))
@@ -1238,6 +1245,7 @@ def test_widget_panels_ignore_theme_padding():
     assert combo.panel.layout_style.gap == 0
 
 
+@pytest.mark.usefixtures("classic_theme")
 def test_classic_panel_matches_flat_rectangle():
     """A classic panel draws the same pixels as a plain rectangle."""
     panel = ui.Panel2D(size=(120, 100), position=(40, 40))
@@ -1251,6 +1259,7 @@ def test_classic_panel_matches_flat_rectangle():
     )
 
 
+@pytest.mark.usefixtures("classic_theme")
 def test_classic_panel_ignores_border_width_without_has_border():
     """Like before themes, a border width alone draws no classic border."""
     panel = ui.Panel2D(size=(120, 100), position=(40, 40), border_width=4)

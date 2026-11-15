@@ -48,10 +48,24 @@ def settings_panel(title, position):
 
 
 ##############################################################################
-# The built-in ``classic`` theme is the global theme by default. It keeps the
-# original look of FURY widgets.
+# The built-in ``graphite`` theme is the global theme by default. Setting the
+# ``FURY_UI_THEME`` environment variable to the name of another built-in
+# theme changes that default; the first panel is labeled with its name.
 
-classic_panel = settings_panel("Classic", (15, 40))
+default_name = ui.get_theme().name.replace("_", " ").title()
+default_panel = settings_panel(default_name, (15, 15))
+
+##############################################################################
+# The built-in ``classic`` theme keeps the original look of FURY widgets.
+# ``theme_scope`` applies a theme only to elements created inside the
+# ``with`` block, like a temporary style in an immediate mode UI. Sub-widgets
+# built by a composite widget use the same theme. ``ui.set_theme("classic")``
+# would instead make it the global theme: elements created afterwards use it,
+# and existing elements that follow the global theme, such as the Graphite
+# panel above, are restyled.
+
+with ui.theme_scope("classic"):
+    classic_panel = settings_panel("Classic", (225, 15))
 
 ##############################################################################
 # Derive a theme to change only some items. Each item belongs to a UI class,
@@ -84,15 +98,10 @@ dark = ui.builtin_theme("classic").derive(
 )
 
 ##############################################################################
-# ``theme_scope`` applies a theme only to elements created inside the
-# ``with`` block, like a temporary style in an immediate mode UI. Sub-widgets
-# built by a composite widget use the same theme. ``ui.set_theme(dark)``
-# would instead make it the global theme: elements created afterwards use it,
-# and existing elements that follow the global theme, such as the classic
-# panel above, are restyled.
+# Use the derived theme for one more panel.
 
 with ui.theme_scope(dark):
-    dark_panel = settings_panel("Dark", (225, 40))
+    dark_panel = settings_panel("Dark", (15, 230))
 
 warm = dark.derive(
     name="warm",
@@ -112,7 +121,7 @@ warm = dark.derive(
     },
 )
 with ui.theme_scope(warm):
-    warm_panel = settings_panel("Warm", (435, 40))
+    warm_panel = settings_panel("Warm", (225, 230))
 
 ##############################################################################
 # ``Theme.save`` and ``Theme.load`` store a theme in a JSON file, which makes
@@ -122,7 +131,7 @@ with ui.theme_scope(warm):
 # Add the panels to a scene and show it.
 
 scene = Scene()
-scene.add(classic_panel, dark_panel, warm_panel)
+scene.add(default_panel, classic_panel, dark_panel, warm_panel)
 
-show_manager = ShowManager(scene=scene, size=(640, 300), title="FURY UI Themes Example")
+show_manager = ShowManager(scene=scene, size=(430, 445), title="FURY UI Themes Example")
 show_manager.start()

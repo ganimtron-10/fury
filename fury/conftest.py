@@ -28,3 +28,32 @@ def pytest_terminal_summary(terminalreporter, exitstatus, config):
             f"{len(have_warnings)} warnings were raised and "
             "treated as errors. \n"
         )
+
+
+@pytest.fixture(autouse=True)
+def reset_ui_theme():
+    """
+    Start and end every test with the built-in default UI theme.
+
+    The theme is set explicitly, so a theme set by one test does not leak
+    into the next, and results do not depend on ``FURY_UI_THEME``.
+    """
+    from fury.ui import UIContext, builtin_theme
+    from fury.ui.theme import _DEFAULT_THEME
+
+    UIContext.theme = builtin_theme(_DEFAULT_THEME)
+    yield
+    UIContext.theme = builtin_theme(_DEFAULT_THEME)
+
+
+@pytest.fixture
+def classic_theme():
+    """
+    Use the classic global UI theme, for tests of the classic look.
+
+    The theme is set without restyling elements left over from earlier
+    tests.
+    """
+    from fury.ui import UIContext, builtin_theme
+
+    UIContext.theme = builtin_theme("classic")

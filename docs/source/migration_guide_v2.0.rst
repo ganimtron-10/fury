@@ -532,6 +532,40 @@ consider an ImGui panel as a temporary substitute until they are ported.
 All other 0.12.x UI components have a PyGfx-backed equivalent listed
 above.
 
+**Default theme**: UI elements take their default colors, fonts, corner
+radii, borders, shadows and spacing from a theme (``fury.ui.Theme``). The
+default theme is ``"graphite"``: dark panels with a hairline border, rounded
+corners and a soft shadow, 13 px Noto Sans text, and 12 px padding with an
+8 px gap in panel layouts. Colors and sizes passed to a constructor still win
+over the theme.
+
+**Action**: to keep the earlier look (white text and buttons, red slider
+tracks, translucent square panels, larger Arial text (16–25 px), no padding),
+use the ``"classic"`` theme before creating UI elements:
+
+.. code-block:: python
+
+   from fury import ui
+
+   ui.set_theme("classic")
+
+or set the ``FURY_UI_THEME`` environment variable, which names the built-in
+theme used until ``ui.set_theme`` is called:
+
+.. code-block:: bash
+
+   FURY_UI_THEME=classic python my_script.py
+
+``ui.theme_scope("classic")`` applies the classic theme only to the elements
+created inside a ``with`` block. Elements created under Graphite and then
+switched with ``ui.set_theme("classic")`` get the classic colors and fonts,
+but keep the structural items read at creation: the ``LineSlider2D`` layout,
+line width, handle radius and header gap, the check box and radio button
+indicator and its button sizes, the ``PlaybackPanel`` border kind, and sizes
+derived from font sizes, such as list slot and text box heights (see
+:meth:`fury.ui.core.UI.apply_theme`). Create elements after ``set_theme``
+for an exact match.
+
 
 13. FPS Display and Control
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
