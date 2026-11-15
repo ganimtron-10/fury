@@ -3862,6 +3862,34 @@ class ListBoxItem2D(UI):
         self.background.resize(size)
 
 
+def _collect_ui_elements(ui_element):
+    """
+    Collect a UI element and all the elements inside it.
+
+    Parameters
+    ----------
+    ui_element : UI
+        The UI element to start from.
+
+    Returns
+    -------
+    list
+        The element and its descendants, each listed once.
+    """
+    elements = []
+    seen = set()
+    pending = [ui_element]
+    while pending:
+        element = pending.pop()
+        if id(element) in seen:
+            continue
+        seen.add(id(element))
+        elements.append(element)
+        pending.extend(element._children)
+        pending.extend(child for child, _ in getattr(element, "element_offsets", []))
+    return elements
+
+
 class TreeNode2D(UI):
     """
     Node/Leaf of a Tree2D UI.
@@ -4135,9 +4163,6 @@ class TreeNode2D(UI):
         """
         if not hasattr(self, "_wheel_callback"):
             return
-        if hasattr(ui_element, "actors"):
-            for actor in ui_element.actors:
-                actor.add_event_handler(self._wheel_callback, EventType.WHEEL)
         if hasattr(ui_element, "on_wheel"):
             ui_element.on_wheel = self._wheel_callback
         if hasattr(ui_element, "_children"):
@@ -4905,6 +4930,7 @@ class Tree2D(UI):
         self.view_offset = 0
         self.scroll_init_position = 0
         self.scroll_step_size = 0
+        self._last_wheel_event = None
 
         super(Tree2D, self).__init__(position=position, z_order=z_order)
 
@@ -4954,8 +4980,6 @@ class Tree2D(UI):
         self.scroll_bar.on_left_mouse_button_dragged = self.scroll_drag_callback
 
         self.scroll_bar.on_wheel = self.wheel_scroll
-        for actor in self.scroll_bar.actors:
-            actor.add_event_handler(self.wheel_scroll, EventType.WHEEL)
 
         self.base_node.on_resize_callback = self.update_scrollbar
         self.base_node.right_margin = sb_width
@@ -5001,20 +5025,7 @@ class Tree2D(UI):
             if node.has_icon:
                 node.label_image.on_wheel = self.wheel_scroll
             node.button.on_wheel = self.wheel_scroll
-
-            node.title_panel.background.actor.add_event_handler(
-                self.wheel_scroll, EventType.WHEEL
-            )
-            node.content_panel.background.actor.add_event_handler(
-                self.wheel_scroll, EventType.WHEEL
-            )
-            for text_actor in node.label_text.actors:
-                text_actor.add_event_handler(self.wheel_scroll, EventType.WHEEL)
-            if node.has_icon:
-                for img_actor in node.label_image.actors:
-                    img_actor.add_event_handler(self.wheel_scroll, EventType.WHEEL)
-            for btn_actor in node.button.actors:
-                btn_actor.add_event_handler(self.wheel_scroll, EventType.WHEEL)
+            node.button.child.on_wheel = self.wheel_scroll
 
             if node.parent is not None and node.parent != self.base_node:
                 node.set_visibility(False)
@@ -5061,6 +5072,42 @@ class Tree2D(UI):
         else:
             self.scroll_bar.set_position((scroll_x, track_y))
 
+        self._clip_to_viewport()
+
+    def _clip_to_viewport(self):
+        """
+        Hide the parts of the tree content outside the visible area.
+
+        Text is drawn in screen space, so the clipping test only sees its
+        anchor point. Its vertical planes are moved by the distance from the
+        anchor to the edges of the text block, which hides a label unless its
+        whole row is inside the visible area.
+        """
+        left, top = self.get_position()
+        width, height = self.content_size
+        canvas_height = UIContext.canvas_size[1]
+        canvas_top = canvas_height - top
+        canvas_bottom = canvas_top - height
+        clipping_planes = [
+            (1, 0, 0, left),
+            (-1, 0, 0, -(left + width)),
+            (0, 1, 0, canvas_bottom),
+            (0, -1, 0, -canvas_top),
+        ]
+        for element in _collect_ui_elements(self.base_node):
+            if isinstance(element, TextBlock2D):
+                anchor_y = element.actor.world.position[1]
+                block_top = canvas_height - element.get_position()[1]
+                block_bottom = block_top - element.size[1]
+                element.actor.material.clipping_planes = [
+                    *clipping_planes[:2],
+                    (0, 1, 0, canvas_bottom + anchor_y - block_bottom),
+                    (0, -1, 0, -(canvas_top - (block_top - anchor_y))),
+                ]
+                continue
+            for actor in element.actors:
+                actor.material.clipping_planes = clipping_planes
+
     def update_scrollbar(self):
         """Update scrollbar geometry and visibility."""
         visible_height = self.content_size[1] - self.base_node.child_height
@@ -5098,7 +5145,9 @@ class Tree2D(UI):
             The pygfx pointer event.
         """
         TreeNode2D.left_button_dragged(self.base_node, event)
-        self.set_position(self.base_node.get_position())
+        self.set_position(
+            self.base_node.get_position() + np.array([0, self.view_offset])
+        )
 
     def scroll_click_callback(self, event):
         """
@@ -5143,13 +5192,18 @@ class Tree2D(UI):
         """
         Handle mouse wheel scroll events.
 
-        Scrolls the tree view using the same step size as the scrollbar drag.
+        Scrolls the tree view by one row. A button registers handlers on its
+        image's actor as well as the image itself, so the same event can
+        arrive twice; it is applied only once.
 
         Parameters
         ----------
-        event : object
-            The pygfx event.
+        event : WheelEvent
+            The pygfx wheel event.
         """
+        if event is self._last_wheel_event:
+            return
+        self._last_wheel_event = event
         if self.scroll_step_size == 0:
             return
 
@@ -5168,9 +5222,9 @@ class Tree2D(UI):
         Returns
         -------
         (float, float)
-            Size of the component.
+            Size of the visible area, including the scroll bar.
         """
-        return self.base_node.size
+        return self.content_size
 
     def generate_tree(self, structure):
         """
@@ -5216,14 +5270,27 @@ class Tree2D(UI):
 
     def resize(self, size):
         """
-        Resize the Tree Node.
+        Resize the visible area of the Tree2D.
+
+        The scroll bar is added to the given width, and scrolling is turned
+        off when every row fits in the new height.
 
         Parameters
         ----------
         size : (int, int)
             New width and height in pixels.
         """
-        self.base_node.resize(size)
+        sb_width = int(size[0] / 30)
+        self.content_size = (size[0] + sb_width, size[1])
+        self.scroll_bar.resize((sb_width, self.scroll_bar.size[1]))
+        self.base_node.right_margin = sb_width
+        self.base_node.resize(
+            (
+                self.content_size[0],
+                self.base_node.children_size() + self.base_node.child_height,
+            )
+        )
+        self.update_scrollbar()
 
     def add_content(self, node, content, coords=(0.0, 0.0)):
         """
@@ -5248,6 +5315,7 @@ class Tree2D(UI):
             _node.add_element(content, coords)
 
         _node.set_visibility(False)
+        self.update_scrollbar()
 
     def select_node(self, node):
         """
