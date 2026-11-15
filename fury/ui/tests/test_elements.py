@@ -3566,6 +3566,69 @@ def test_ui_treenode2d_expandable_and_selected_icon_setters():
     assert node.selected_icon is None
 
 
+def test_ui_treenode2d_fixed_height_node_shrinks_back():
+    """A fixed-height node returns to its height when its content shrinks."""
+    fixed = ui.TreeNode2D(label="F", size=(200, 100), auto_resize=False, expanded=True)
+    child = ui.TreeNode2D(label="c")
+    child.add_element(ui.Rectangle2D(size=(40, 300)))
+    fixed.add_node(child)
+
+    child.toggle_view()
+    assert fixed.size[1] > 300
+    child.toggle_view()
+
+    npt.assert_equal(fixed.size[1], 100)
+
+
+def test_ui_tree2d_clips_wide_text_at_the_right_edge(ui_scene):
+    """Text wider than the tree is not drawn past its right edge."""
+    show_manager, scene = ui_scene
+    tree = ui.Tree2D(structure=[{"A": []}], position=TREE_POSITION, size=TREE_SIZE)
+    wide_text = ui.TextBlock2D(
+        text="A text much wider than the tree that holds it", size=(600, 30)
+    )
+    tree.add_content("A", wide_text)
+    scene.add(tree)
+    tree.get_node("A").toggle_view()
+
+    image = _render(show_manager)
+    right = TREE_POSITION[0] + TREE_SIZE[0]
+    assert not image[:, right + 1 :, :3].any()
+
+
+def test_ui_tree2d_add_node_adds_a_top_level_row():
+    """Tree2D.add_node adds a top-level node and checks its label."""
+    tree = ui.Tree2D(structure=[{"A": ["a1"]}])
+
+    tree.add_node(ui.TreeNode2D(label="B"))
+
+    npt.assert_equal([node.label for node in tree.nodes], ["A", "B"])
+    npt.assert_equal([node.label for node in tree.base_node.child_nodes], ["A", "B"])
+    assert tree.get_node("B").get_position()[1] > tree.get_node("A").get_position()[1]
+    with npt.assert_raises(ValueError):
+        tree.add_node(ui.TreeNode2D(label="a1"))
+
+
+def test_ui_tree2d_scroll_bar_follows_pointer_after_dragging_past_end(ui_scene):
+    """Dragging past the end and back keeps the handle under the pointer."""
+    show_manager, scene = ui_scene
+    tree = ui.Tree2D(
+        structure=[{"Root": [f"Child {i}" for i in range(15)]}],
+        position=TREE_POSITION,
+        size=TREE_SIZE,
+    )
+    scene.add(tree)
+    tree.get_node("Root").toggle_view()
+    x, y = _center(tree.scroll_bar)
+    target = _target_at(show_manager, x, y)
+
+    _pointer(show_manager, window.EventType.POINTER_DOWN, x, y, target)
+    _pointer(show_manager, window.EventType.POINTER_DRAG, x, y - 100, target)
+    _pointer(show_manager, window.EventType.POINTER_DRAG, x, y + 20, target)
+
+    npt.assert_allclose(_center(tree.scroll_bar)[1], y + 20, atol=1)
+
+
 def test_ui_tree2d_click_selects_one_node_without_multiselect(ui_scene):
     """With multiselect off, a click deselects nodes in other branches too."""
     show_manager, scene = ui_scene

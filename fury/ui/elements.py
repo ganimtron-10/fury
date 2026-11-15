@@ -4002,7 +4002,8 @@ class TreeNode2D(UI):
     position : (float, float), optional
         Absolute coordinates (x, y) of the top-left corner of the node.
     size : (int, int), optional
-        Width and height of the node in pixels.
+        Width and height of the node in pixels. With ``auto_resize`` the
+        height follows the content instead.
     indent : int, optional
         Indentation of the content, in pixels.
     child_indent : int, optional
@@ -4100,6 +4101,7 @@ class TreeNode2D(UI):
         self._label = label
         self._child_height = child_height
         self._initial_size = size
+        self._min_height = int(size[1])
         self._expandable = expandable
         self._expanded = expanded
         self._visible = True
@@ -4344,14 +4346,13 @@ class TreeNode2D(UI):
         -------
         int
             Height of the content plus the title row with ``auto_resize``.
-            Otherwise the current height, or more when the content needs it.
+            Otherwise the height the node was given, or more when the content
+            needs it.
         """
         content_height = self.children_size() + self.child_height
         if self._auto_resize:
             return content_height
-        return max(
-            self.title_panel.size[1] + self.content_panel.size[1], content_height
-        )
+        return max(self._min_height, content_height)
 
     def _fit_to_content(self):
         """Lay out the node again and report the change in height."""
@@ -4710,7 +4711,7 @@ class TreeNode2D(UI):
         list
             Child nodes, or the UI elements added to this node.
         """
-        return self._child_nodes
+        return list(self._child_nodes)
 
     @property
     def has_icon(self):
@@ -5007,6 +5008,18 @@ class TreeNode2D(UI):
         """
         return self._icon_paths["unselected"]
 
+    @icon.setter
+    def icon(self, icon):
+        """
+        Set the icon of the current node.
+
+        Parameters
+        ----------
+        icon : str or ndarray or None
+            Path, URL or image data of the icon. None removes the icon.
+        """
+        self.set_icon(icon)
+
     @property
     def selected_icon(self):
         """
@@ -5034,18 +5047,6 @@ class TreeNode2D(UI):
         self._icon_images["selected"] = _load_icon(selected_icon)
         self._show_icon()
         self._layout_title(self.title_panel.size[0] - self.right_margin)
-
-    @icon.setter
-    def icon(self, icon):
-        """
-        Set the icon of the current node.
-
-        Parameters
-        ----------
-        icon : str or ndarray or None
-            Path, URL or image data of the icon. None removes the icon.
-        """
-        self.set_icon(icon)
 
     def set_icon(self, icon, *, selected_icon=None):
         """
@@ -5515,9 +5516,9 @@ class Tree2D(UI):
         Hide the parts of UI elements outside a band of the tree.
 
         Text is drawn in screen space, so the clipping test only sees its
-        anchor point. Its vertical planes are moved by the distance from the
-        anchor to the edges of the text block, which hides a label unless its
-        whole row is inside the band.
+        anchor point. Its planes are moved by the distance from the anchor to
+        the edges of the text block, which hides a text block unless it is
+        entirely inside the band.
 
         Parameters
         ----------
@@ -5542,11 +5543,14 @@ class Tree2D(UI):
         ]
         for element in elements:
             if isinstance(element, TextBlock2D):
-                anchor_y = element.actor.world.position[1]
+                anchor_x, anchor_y = element.actor.world.position[:2]
+                block_left = element.get_position()[0]
+                block_right = block_left + element.size[0]
                 block_top = canvas_height - element.get_position()[1]
                 block_bottom = block_top - element.size[1]
                 element.actor.material.clipping_planes = [
-                    *clipping_planes[:2],
+                    (1, 0, 0, left + anchor_x - block_left),
+                    (-1, 0, 0, -(right - (block_right - anchor_x))),
                     (0, 1, 0, canvas_bottom + anchor_y - block_bottom),
                     (0, -1, 0, -(canvas_top - (block_top - anchor_y))),
                 ]
@@ -5646,12 +5650,15 @@ class Tree2D(UI):
         event : PointerEvent
             The pygfx pointer event.
         """
-        position_y = event.y
-        dy = position_y - self.scroll_init_position
-        self.scroll_init_position = position_y
-
-        self.view_offset += dy * self.scroll_step_size
+        if self.scroll_step_size == 0:
+            return
+        start_offset = self.view_offset
+        self.view_offset += (
+            event.y - self.scroll_init_position
+        ) * self.scroll_step_size
         self.update_scrollbar()
+        moved = (self.view_offset - start_offset) / self.scroll_step_size
+        self.scroll_init_position += moved
 
     def wheel_scroll(self, event):
         """
@@ -5817,6 +5824,24 @@ class Tree2D(UI):
         )
         self.update_scrollbar()
 
+    def add_node(self, node):
+        """
+        Add a top-level node to the tree.
+
+        Parameters
+        ----------
+        node : TreeNode2D
+            The node to add below the tree's title row.
+
+        Raises
+        ------
+        ValueError
+            If a label of the added nodes is already used in the tree.
+        """
+        self._check_labels(node)
+        self.base_node.add_node(node)
+        self._nodes.append(node)
+
     def add_content(self, node, content, *, coords=(0, 0)):
         """
         Add content to a specific node.
@@ -5894,7 +5919,7 @@ class Tree2D(UI):
         list
             List of nodes.
         """
-        return self._nodes
+        return list(self._nodes)
 
     @property
     def nodes_dict(self):
