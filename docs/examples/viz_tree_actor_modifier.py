@@ -5,32 +5,34 @@ Actor Modifier using a Tree UI
 
 This example shows how to create an actor modifier using a Tree UI.
 The parameters that will be modified are the colors, position, and
-rotation of the actors.
+rotation of the actors. Selecting an actor's node shows that actor.
 """
 
 ###############################################################################
 # Adding the imports
 
 import numpy as np
-from fury import ui, window, actor
+
+from fury import actor, ui, window
 
 ###############################################################################
 # Defining the UI Structure
+#
+# Node labels must be unique, so each actor gets its own position and color
+# nodes.
 
-structure = [
-    {"Cube": ["Translate", "Color"]},
-    {"Cylinder": ["Translate", "Color"]},
-    {"Cone": ["Translate", "Color"]},
-]
+actor_names = ["Cube", "Cylinder", "Cone"]
+structure = [{name: [f"{name} position", f"{name} color"]} for name in actor_names]
 
 ###############################################################################
 # Next, we instantiate the ``Tree2D`` object using the structure defined above.
+# With ``multiselect=False``, selecting one actor's node deselects the others.
 
 tree = ui.Tree2D(
     structure=structure,
     tree_name="Actor Modifier",
-    size=(500, 500),
-    position=(0, 0),
+    size=(460, 700),
+    position=(20, 20),
     color=(0.8, 0.4, 0.2),
     opacity=1,
     button_position="end",
@@ -39,151 +41,132 @@ tree = ui.Tree2D(
 
 ###############################################################################
 # Creating the Actors
+#
+# The actors share one center, and only the selected one is shown. Axes at the
+# origin of the scene show where the actors are.
 
-cube = actor.box(
-    centers=np.array([[10, 0, 0]]),
-    directions=np.array([[0, 1, 0]]),
-    colors=np.array([[0, 0, 1]]),
-    scales=np.array([[2, 2, 2]]),
-)
+center = np.array([4.0, 0.0, 0.0])
+initial_colors = {
+    "Cube": (0.0, 0.0, 1.0),
+    "Cylinder": (0.0, 1.0, 0.0),
+    "Cone": (1.0, 0.0, 0.0),
+}
 
-cylinder = actor.cylinder(
-    centers=np.array([[10, 0, 0]]),
-    directions=np.array([[0, 1, 0]]),
-    colors=np.array([[0, 1, 0]]),
-    radii=1.0,
-    height=2.0,
-)
+actors = {
+    "Cube": actor.box(
+        centers=np.zeros((1, 3)),
+        directions=np.array([[0, 1, 0]]),
+        colors=np.array([initial_colors["Cube"]]),
+        scales=np.array([[2, 2, 2]]),
+    ),
+    "Cylinder": actor.cylinder(
+        centers=np.zeros((1, 3)),
+        directions=np.array([[0, 1, 0]]),
+        colors=np.array([initial_colors["Cylinder"]]),
+        radii=1.0,
+        height=2.0,
+    ),
+    "Cone": actor.cone(
+        centers=np.zeros((1, 3)),
+        directions=np.array([[0, 1, 0]]),
+        colors=np.array([initial_colors["Cone"]]),
+        radii=1.0,
+        height=2.0,
+    ),
+}
 
-cone = actor.cone(
-    centers=np.array([[10, 0, 0]]),
-    directions=np.array([[0, 1, 0]]),
-    colors=np.array([[1, 0, 0]]),
-    radii=1.0,
-    height=2.0,
-)
+for actor_obj in actors.values():
+    actor_obj.local.position = center
+    actor_obj.visible = False
 
-cube.visible = False
-cylinder.visible = False
-cone.visible = False
+axes = actor.axes(scale=(4, 4, 4))
 
 ###############################################################################
 # Building the Slider Controls
+#
+# Each actor gets sliders for its position and rotation, and one slider per
+# color channel. The sliders start at the actor's current values.
 
 
-def setup_actor_controls(actor_obj, node_name):
-    # 1. Create the UI Sliders
+def setup_actor_controls(actor_obj, name):
+    color = list(initial_colors[name])
+    offset = [0.0, 0.0]
+
     ring_slider = ui.RingSlider2D(initial_value=0, text_template="{angle:5.1f}°")
+    slider_x = ui.LineSlider2D(
+        initial_value=0, min_value=-3, max_value=3, orientation="horizontal"
+    )
+    slider_y = ui.LineSlider2D(
+        initial_value=0, min_value=-3, max_value=3, orientation="vertical"
+    )
+    color_sliders = [
+        ui.LineSlider2D(
+            initial_value=value,
+            min_value=0,
+            max_value=1,
+            length=150,
+            orientation="vertical",
+        )
+        for value in color
+    ]
 
-    line_slider_x = ui.LineSlider2D(
-        initial_value=0, min_value=-10, max_value=10, orientation="horizontal"
-    )
-    line_slider_y = ui.LineSlider2D(
-        initial_value=0, min_value=-10, max_value=10, orientation="vertical"
-    )
-    line_slider_r = ui.LineSlider2D(
-        initial_value=0, min_value=0, max_value=1, orientation="vertical"
-    )
-    line_slider_g = ui.LineSlider2D(
-        initial_value=0, min_value=0, max_value=1, orientation="vertical"
-    )
-    line_slider_b = ui.LineSlider2D(
-        initial_value=0, min_value=0, max_value=1, orientation="vertical"
-    )
-
-    # To store the current state for this actor
-    class State:
-        x = 0.0
-        y = 0.0
-        r = 0.0
-        g = 0.0
-        b = 0.0
-
-    state = State()
-
-    # 2. Define the Callbacks
     def rotate(slider):
         actor_obj.local.euler_x = np.radians(slider.value)
 
-    def translate_x(slider):
-        state.x = slider.value
-        actor_obj.local.position = (state.x, state.y, 0)
+    def move(axis):
+        def callback(slider):
+            offset[axis] = slider.value
+            actor_obj.local.position = center + (offset[0], offset[1], 0)
 
-    def translate_y(slider):
-        state.y = slider.value
-        actor_obj.local.position = (state.x, state.y, 0)
+        return callback
 
-    def update_colors():
-        actor_obj.material.color_mode = "uniform"
-        actor_obj.material.color = (state.r, state.g, state.b, 1.0)
+    def change_color(channel):
+        def callback(slider):
+            color[channel] = slider.value
+            actor_obj.material.color_mode = "uniform"
+            actor_obj.material.color = (*color, 1.0)
 
-    def change_r(slider):
-        state.r = slider.value
-        update_colors()
+        return callback
 
-    def change_g(slider):
-        state.g = slider.value
-        update_colors()
-
-    def change_b(slider):
-        state.b = slider.value
-        update_colors()
-
-    # Attach the callbacks to the sliders
     ring_slider.on_change = rotate
-    line_slider_x.on_change = translate_x
-    line_slider_y.on_change = translate_y
-    line_slider_r.on_change = change_r
-    line_slider_g.on_change = change_g
-    line_slider_b.on_change = change_b
+    slider_x.on_change = move(0)
+    slider_y.on_change = move(1)
+    for channel, slider in enumerate(color_sliders):
+        slider.on_change = change_color(channel)
 
-    # 3. Add the sliders to the Tree2D
-    # We find the node corresponding to this actor, then locate its children
-    node = tree.select_node(node_name)
-    translate_node = node.select_child("Translate")
-    color_node = node.select_child("Color")
+    tree.add_content(f"{name} position", slider_x, coords=(0, 30))
+    tree.add_content(f"{name} position", slider_y, coords=(20, 80))
+    tree.add_content(f"{name} position", ring_slider, coords=(110, 80))
+    for channel, slider in enumerate(color_sliders):
+        tree.add_content(f"{name} color", slider, coords=(20 + 110 * channel, 10))
 
-    # Add the translation controls
-    translate_node.add_element(line_slider_x, coords=(0.1, 0.0))
-    translate_node.add_element(line_slider_y, coords=(0.1, 1.5))
-    translate_node.add_element(ring_slider, coords=(0.6, 1.5))
+    ###########################################################################
+    # Show the actor only while its node is selected.
 
-    # Add the color controls
-    color_node.add_element(line_slider_r, coords=(0.1, 0.0))
-    color_node.add_element(line_slider_g, coords=(0.4, 0.0))
-    color_node.add_element(line_slider_b, coords=(0.7, 0.0))
+    node = tree.get_node(name)
+    node.on_node_select = lambda node: setattr(actor_obj, "visible", True)
+    node.on_node_deselect = lambda node: setattr(actor_obj, "visible", False)
 
-    translate_node.set_visibility(node.expanded)
-    color_node.set_visibility(node.expanded)
 
-    # 4. Bind Actor Visibility Hooks
-    def visibility_on(tree_ui):
-        actor_obj.visible = True
-
-    def visibility_off(tree_ui):
-        actor_obj.visible = False
-
-    node.on_node_select = visibility_on
-    node.on_node_deselect = visibility_off
-
+for name, actor_obj in actors.items():
+    setup_actor_controls(actor_obj, name)
 
 ###############################################################################
-# Initializing the Setup
+# Start with the cube selected and its controls open.
 
-setup_actor_controls(cube, "Cube")
-setup_actor_controls(cylinder, "Cylinder")
-setup_actor_controls(cone, "Cone")
+tree.get_node("Cube").selected = True
+tree.get_node("Cube").toggle_view()
+tree.get_node("Cube position").toggle_view()
 
 ###############################################################################
-# Finally, we configure the scene and add both the `Tree2D` UI and our three
-# actors to it.
+# Finally, we configure the scene and add the ``Tree2D`` UI, the axes and our
+# three actors to it.
 
-current_size = (1000, 1000)
 scene = window.Scene()
-scene.add(tree, cube, cylinder, cone)
+scene.add(tree, axes, *actors.values())
 
 show_manager = window.ShowManager(
-    scene=scene, size=current_size, title="FURY Tree2D Example"
+    scene=scene, size=(1200, 800), title="FURY Tree2D Actor Modifier"
 )
 
 show_manager.start()
