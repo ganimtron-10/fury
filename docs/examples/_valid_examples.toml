@@ -62,6 +62,7 @@ position = 7
 enable = true
 files = [
     "viz_shapes.py",
+    "viz_box_style.py",
     "viz_panel.py",
     "viz_sliders.py",
     "viz_button.py",

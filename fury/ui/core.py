@@ -29,6 +29,26 @@ from fury.ui.theme import get_theme, theme_scope
 _TEXT_FIT_TOLERANCE = 1
 
 
+def _to_rgba(color):
+    """
+    Convert a color in any supported format to RGBA.
+
+    Parameters
+    ----------
+    color : str, tuple, list or ndarray
+        A hex string, RGB(A) in [0, 1], or RGB(A) in [0, 255].
+
+    Returns
+    -------
+    ndarray
+        RGBA color in [0, 1]. Opaque when no alpha was given.
+    """
+    color = normalize_colors(color)[0]
+    if color.shape[0] == 3:
+        color = np.append(color, 1.0)
+    return color.astype(float)
+
+
 class UI(object, metaclass=abc.ABCMeta):
     """
     An umbrella class for all UI elements.
@@ -373,11 +393,13 @@ class UI(object, metaclass=abc.ABCMeta):
             position of the actor.
         z_order : int
             The Z-order of the UI component.
-        sub_order : int, optional
+        sub_order : float, optional
             Ordering of this actor relative to other actors of the *same*
             component (and `z_order`). Higher values are drawn on top. This
             disambiguates coplanar actors, such as a text actor and its
             background, whose draw order would otherwise be undefined.
+            Negative values draw the actor below the other actors of the
+            same `z_order`.
         """
         canvas_size = UIContext.canvas_size
 
@@ -998,6 +1020,11 @@ class RoundedRectangle2D(UI):
     """
     A 2D rounded rectangle sub-classed from UI.
 
+    The box can have a border drawn inside its edge, a different radius for
+    each corner and a soft drop shadow. The shadow is drawn outside the box
+    but is not part of it: ``size``, ``position``, layout and picking only
+    cover the box itself.
+
     Parameters
     ----------
     size : (int, int)
@@ -1007,10 +1034,52 @@ class RoundedRectangle2D(UI):
     color : str, tuple, list or ndarray, optional
         A hex string ("#FF0000"), RGB(A) in [0, 1], or RGB(A) in [0, 255].
         Defaults to the theme item of the same name.
-    corner_radius : float
-        Radius of the rounded corners in pixels.
+        An alpha channel is ignored; use ``opacity`` to fade the box. The
+        border and shadow colors, in contrast, keep their alpha.
+    corner_radius : float or tuple of float
+        Radius of the rounded corners in pixels. A single value rounds every
+        corner. Four values give the top-left, top-right, bottom-right and
+        bottom-left radii. Radii are limited to half of the smaller side when
+        drawn.
     opacity : float
         Must take values in [0, 1].
+    border_color : str, tuple, list or ndarray
+        Border color as a hex string, RGB(A) in [0, 1], or RGB(A) in
+        [0, 255].
+    border_width : float
+        Width of the border in pixels, drawn inside the box edge. 0 draws no
+        border.
+    shadow_color : str, tuple, list or ndarray
+        Shadow color as a hex string, RGB(A) in [0, 1], or RGB(A) in
+        [0, 255]. The alpha channel sets the shadow strength.
+    shadow_offset : (float, float)
+        Shadow displacement (x, y) in pixels. Positive y moves the shadow
+        down.
+    shadow_blur : float
+        Blur radius of the shadow in pixels.
+    shadow_spread : float
+        Distance in pixels by which the shadow grows (positive) or shrinks
+        (negative) relative to the box.
+
+    Notes
+    -----
+    The shadow is drawn when ``shadow_blur``, ``shadow_spread`` or
+    ``shadow_offset`` is non-zero. With the defaults no shadow is drawn. Like
+    a CSS box shadow, it is not drawn under the box, so it does not show
+    through a translucent box. Only within the 1-2 pixels of anti-aliasing
+    at the box edge can a little shadow remain under a translucent box.
+
+    The blur is an approximation of a gaussian blur. It matches CSS for boxes
+    much larger than the blur, but gets darker than CSS when the blur is
+    large relative to the box. Shadows are drawn beneath all boxes of the
+    same ``z_order``, so a box never falls into the shadow of a neighbor at
+    its own ``z_order``; raise the ``z_order`` of a box to cast its shadow
+    over others.
+
+    Corner radii larger than half of the smaller side are drawn as half of
+    that side, so a small box keeps a proper rounded shape: a 10x10 box with
+    the default radius of 10 is drawn as a circle. Earlier versions drew a
+    distorted shape in that case.
     """
 
     def __init__(
@@ -1021,6 +1090,12 @@ class RoundedRectangle2D(UI):
         color=None,
         corner_radius=10.0,
         opacity=1.0,
+        border_color=(0, 0, 0),
+        border_width=0.0,
+        shadow_color=(0, 0, 0, 0.5),
+        shadow_offset=(0, 0),
+        shadow_blur=0.0,
+        shadow_spread=0.0,
     ):
         """Initialize a rounded rectangle."""
         super(RoundedRectangle2D, self).__init__(position=position)
@@ -1028,15 +1103,28 @@ class RoundedRectangle2D(UI):
         self.color = self._theme_value("color", color)
         self.opacity = opacity
         self.corner_radius = corner_radius
+        self.border_color = border_color
+        self.border_width = border_width
+        self.shadow_color = shadow_color
+        self.shadow_offset = shadow_offset
+        self.shadow_blur = shadow_blur
+        self.shadow_spread = shadow_spread
+        self._shadow_built = True
         self.resize(size)
 
     def _setup(self):
         """
         Set up this UI component.
 
-        Create the plane actor used internally.
+        Create the box actor and the non-pickable shadow actor drawn behind
+        it.
         """
-        geo = plane_geometry(width=1, height=1)
+        self._size = [1.0, 1.0]
+        self._corner_radius = 10.0
+        self._shadow_offset = np.zeros(2)
+        self._visible = True
+        self._shadow_built = False
+
         mat = RoundedRectangleMaterial(
             size=(100.0, 100.0),
             corner_radius=10.0,
@@ -1044,7 +1132,21 @@ class RoundedRectangle2D(UI):
             opacity=1.0,
             side="BOTH",
         )
-        self.actor = create_mesh(geometry=geo, material=mat)
+        self.actor = create_mesh(
+            geometry=plane_geometry(width=1, height=1), material=mat
+        )
+
+        shadow_mat = RoundedRectangleMaterial(
+            size=(100.0, 100.0),
+            corner_radius=10.0,
+            shadow=True,
+            opacity=1.0,
+            side="BOTH",
+        )
+        self.shadow_actor = create_mesh(
+            geometry=plane_geometry(width=1, height=1), material=shadow_mat
+        )
+        self.shadow_actor.visible = False
 
         self.handle_events(self.actor)
 
@@ -1055,9 +1157,10 @@ class RoundedRectangle2D(UI):
         Returns
         -------
         list
-            List of actors.
+            List of actors: the box, then its shadow. The shadow is drawn
+            behind the box through its lower render order.
         """
-        return [self.actor]
+        return [self.actor, self.shadow_actor]
 
     def _get_size(self):
         """
@@ -1066,14 +1169,9 @@ class RoundedRectangle2D(UI):
         Returns
         -------
         list
-            Width and height of the rectangle.
+            Width and height of the rectangle, without the shadow.
         """
-        if hasattr(self, "_size"):
-            return self._size
-        bounds = self.actor.get_bounding_box()
-        minx, miny, minz = bounds[0]
-        maxx, maxy, maxz = bounds[1]
-        return [maxx - minx, maxy - miny]
+        return self._size
 
     @property
     def width(self):
@@ -1134,14 +1232,59 @@ class RoundedRectangle2D(UI):
         """
         w = max(size[0], 1)
         h = max(size[1], 1)
+        self._size = [w, h]
         self.actor.geometry = plane_geometry(width=w, height=h)
         self.actor.material.size = (w, h)
+        self.shadow_actor.material.size = (w, h)
+        self._update_shadow_geometry()
         self._update_actors_position()
 
     def _update_actors_position(self):
-        """Set the position of the internal actor."""
+        """Set the position of the box actor and its shadow."""
         position = self.get_position(x_anchor=Anchor.CENTER, y_anchor=Anchor.CENTER)
         self.set_actor_position(self.actor, position, self.z_order)
+        self.set_actor_position(
+            self.shadow_actor,
+            position + self._shadow_offset,
+            self.z_order,
+            sub_order=-0.5,
+        )
+
+    def _update_shadow_geometry(self):
+        """Size the shadow quad to cover the blurred and spread shadow."""
+        if not self._shadow_built:
+            return
+        material = self.shadow_actor.material
+        extent = max(material.shadow_spread, 0) + 1.5 * material.shadow_blur + 1
+        width, height = self._size
+        self.shadow_actor.geometry = plane_geometry(
+            width=width + 2 * extent, height=height + 2 * extent
+        )
+        self._update_shadow_visibility()
+
+    def _update_shadow_visibility(self):
+        """Show the shadow actor only when the box is visible and has a shadow."""
+        material = self.shadow_actor.material
+        has_shadow = (
+            material.shadow_blur > 0
+            or material.shadow_spread != 0
+            or bool(np.any(self._shadow_offset != 0))
+        )
+        self.shadow_actor.visible = self._visible and has_shadow
+
+    def set_visibility(self, visibility):
+        """
+        Set visibility of the rectangle and its shadow.
+
+        Parameters
+        ----------
+        visibility : bool
+            If `True`, the rectangle will be visible. If `False`, it will be
+            hidden.
+        """
+        self._visible = bool(visibility)
+        super(RoundedRectangle2D, self).set_visibility(visibility)
+        self._update_shadow_visibility()
 
     @property
     def color(self):
@@ -1162,8 +1305,9 @@ class RoundedRectangle2D(UI):
 
         Parameters
         ----------
-        color : tuple
-            New color.
+        color : str, tuple, list or ndarray
+            A hex string, RGB(A) in [0, 1], or RGB(A) in [0, 255]. An alpha
+            channel is ignored; use ``opacity`` instead.
         """
         color = normalize_colors(color)[0]
         self.actor.material.color = np.array([*color[:3], 1.0])
@@ -1191,6 +1335,7 @@ class RoundedRectangle2D(UI):
             New opacity.
         """
         self.actor.material.opacity = opacity
+        self.shadow_actor.material.opacity = opacity
 
     @property
     def corner_radius(self):
@@ -1199,10 +1344,11 @@ class RoundedRectangle2D(UI):
 
         Returns
         -------
-        float
-            Corner radius.
+        float or tuple of float
+            The radius as it was set: one value for every corner, or the
+            top-left, top-right, bottom-right and bottom-left radii.
         """
-        return self.actor.material.corner_radius
+        return self._corner_radius
 
     @corner_radius.setter
     def corner_radius(self, radius):
@@ -1211,10 +1357,185 @@ class RoundedRectangle2D(UI):
 
         Parameters
         ----------
-        radius : float
-            New corner radius.
+        radius : float or tuple of float
+            One non-negative radius for every corner, or four radii for the
+            top-left, top-right, bottom-right and bottom-left corners.
         """
-        self.actor.material.corner_radius = radius
+        if np.ndim(radius) == 0:
+            radii = np.full(4, float(radius))
+            value = float(radius)
+        else:
+            radii = np.asarray(radius, dtype=float)
+            if radii.shape != (4,):
+                raise ValueError(
+                    "corner_radius must be a number or a sequence of 4 numbers "
+                    f"(top-left, top-right, bottom-right, bottom-left), got {radius}."
+                )
+            value = tuple(float(r) for r in radii)
+        if np.any(radii < 0):
+            raise ValueError(f"corner_radius must be non-negative, got {radius}.")
+        self._corner_radius = value
+        self.actor.material.corner_radius = radii
+        self.shadow_actor.material.corner_radius = radii
+
+    @property
+    def border_color(self):
+        """
+        Get the border color.
+
+        Returns
+        -------
+        ndarray
+            RGBA border color in [0, 1].
+        """
+        return self.actor.material.border_color
+
+    @border_color.setter
+    def border_color(self, color):
+        """
+        Set the border color.
+
+        Parameters
+        ----------
+        color : str, tuple, list or ndarray
+            A hex string, RGB(A) in [0, 1], or RGB(A) in [0, 255]. See
+            :func:`normalize_colors`.
+        """
+        self.actor.material.border_color = _to_rgba(color)
+
+    @property
+    def border_width(self):
+        """
+        Get the border width.
+
+        Returns
+        -------
+        float
+            Border width in pixels.
+        """
+        return self.actor.material.border_width
+
+    @border_width.setter
+    def border_width(self, width):
+        """
+        Set the border width.
+
+        Parameters
+        ----------
+        width : float
+            Non-negative border width in pixels. 0 draws no border.
+        """
+        if width < 0:
+            raise ValueError(f"border_width must be non-negative, got {width}.")
+        self.actor.material.border_width = width
+
+    @property
+    def shadow_color(self):
+        """
+        Get the shadow color.
+
+        Returns
+        -------
+        ndarray
+            RGBA shadow color in [0, 1].
+        """
+        return self.shadow_actor.material.shadow_color
+
+    @shadow_color.setter
+    def shadow_color(self, color):
+        """
+        Set the shadow color.
+
+        Parameters
+        ----------
+        color : str, tuple, list or ndarray
+            A hex string, RGB(A) in [0, 1], or RGB(A) in [0, 255]. The alpha
+            channel sets the shadow strength.
+        """
+        self.shadow_actor.material.shadow_color = _to_rgba(color)
+
+    @property
+    def shadow_offset(self):
+        """
+        Get the shadow offset.
+
+        Returns
+        -------
+        tuple of float
+            Shadow displacement (x, y) in pixels, positive y pointing down.
+        """
+        return tuple(float(v) for v in self._shadow_offset)
+
+    @shadow_offset.setter
+    def shadow_offset(self, offset):
+        """
+        Set the shadow offset.
+
+        Parameters
+        ----------
+        offset : (float, float)
+            Shadow displacement (x, y) in pixels, positive y pointing down.
+        """
+        offset = np.asarray(offset, dtype=float)
+        if offset.shape != (2,):
+            raise ValueError(f"shadow_offset must be (x, y), got {offset.tolist()}.")
+        self._shadow_offset = offset
+        self.shadow_actor.material.shadow_offset = (offset[0], -offset[1])
+        self._update_shadow_visibility()
+        self._update_actors_position()
+
+    @property
+    def shadow_blur(self):
+        """
+        Get the shadow blur radius.
+
+        Returns
+        -------
+        float
+            Blur radius in pixels.
+        """
+        return self.shadow_actor.material.shadow_blur
+
+    @shadow_blur.setter
+    def shadow_blur(self, blur):
+        """
+        Set the shadow blur radius.
+
+        Parameters
+        ----------
+        blur : float
+            Non-negative blur radius in pixels.
+        """
+        if blur < 0:
+            raise ValueError(f"shadow_blur must be non-negative, got {blur}.")
+        self.shadow_actor.material.shadow_blur = blur
+        self._update_shadow_geometry()
+
+    @property
+    def shadow_spread(self):
+        """
+        Get the shadow spread.
+
+        Returns
+        -------
+        float
+            Spread in pixels.
+        """
+        return self.shadow_actor.material.shadow_spread
+
+    @shadow_spread.setter
+    def shadow_spread(self, spread):
+        """
+        Set the shadow spread.
+
+        Parameters
+        ----------
+        spread : float
+            Distance in pixels by which the shadow grows (positive) or
+            shrinks (negative) relative to the box.
+        """
+        self.shadow_actor.material.shadow_spread = spread
+        self._update_shadow_geometry()
 
 
 class Disk2D(UI):

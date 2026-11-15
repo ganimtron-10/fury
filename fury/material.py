@@ -1,5 +1,7 @@
 """Module for creating various materials used in 3D rendering."""
 
+import logging
+
 import numpy as np
 
 from fury.colormap import normalize_colors
@@ -1085,12 +1087,34 @@ class RoundedRectangleMaterial(MeshBasicMaterial):
     """
     Material for rendering rounded rectangles using signed distance fields.
 
+    The same material renders either the box itself (fill and border) or its
+    drop shadow. A shadow material draws a blurred copy of the box shape and
+    never writes to the pick buffer, so the shadow cannot be clicked.
+
     Parameters
     ----------
     size : tuple
         Width and height of the rectangle in pixels or local units.
-    corner_radius : float
-        Radius of the rounded corners in the same units.
+    corner_radius : float or tuple of float
+        Radius of the rounded corners in the same units. A single value is
+        used for every corner. Four values give the top-left, top-right,
+        bottom-right and bottom-left radii.
+    border_color : tuple
+        RGBA border color with values in [0, 1].
+    border_width : float
+        Width of the border drawn inside the box edge. 0 draws no border.
+    shadow : bool
+        If True, render the drop shadow of the box instead of the box.
+    shadow_color : tuple
+        RGBA shadow color with values in [0, 1].
+    shadow_offset : tuple
+        Position (x, y) of the shadow relative to the box in local units,
+        with +y up. The shadow pass uses it to cut the box out of the shadow.
+    shadow_blur : float
+        Blur radius of the shadow. 0 gives a hard edge.
+    shadow_spread : float
+        Distance by which the shadow shape grows (positive) or shrinks
+        (negative) relative to the box.
     **kwargs : dict
         Additional keyword arguments forwarded to ``MeshBasicMaterial``.
     """
@@ -1098,10 +1122,29 @@ class RoundedRectangleMaterial(MeshBasicMaterial):
     uniform_type = dict(
         MeshBasicMaterial.uniform_type,
         size="2xf4",
-        corner_radius="f4",
+        corner_radius="4xf4",
+        border_color="4xf4",
+        border_width="f4",
+        shadow_color="4xf4",
+        shadow_offset="2xf4",
+        shadow_blur="f4",
+        shadow_spread="f4",
     )
 
-    def __init__(self, size=(100.0, 100.0), corner_radius=10.0, **kwargs):
+    def __init__(
+        self,
+        size=(100.0, 100.0),
+        corner_radius=10.0,
+        *,
+        border_color=(0.0, 0.0, 0.0, 1.0),
+        border_width=0.0,
+        shadow=False,
+        shadow_color=(0.0, 0.0, 0.0, 0.5),
+        shadow_offset=(0.0, 0.0),
+        shadow_blur=0.0,
+        shadow_spread=0.0,
+        **kwargs,
+    ):
         """
         Initialize the material and forward arguments to the base class.
 
@@ -1109,15 +1152,76 @@ class RoundedRectangleMaterial(MeshBasicMaterial):
         ----------
         size : tuple
             Width and height of the rectangle in pixels or local units.
-        corner_radius : float
-            Radius of the rounded corners in the same units.
+        corner_radius : float or tuple of float
+            Radius of the rounded corners in the same units. A single value
+            is used for every corner. Four values give the top-left,
+            top-right, bottom-right and bottom-left radii.
+        border_color : tuple
+            RGBA border color with values in [0, 1].
+        border_width : float
+            Width of the border drawn inside the box edge. 0 draws no border.
+        shadow : bool
+            If True, render the drop shadow of the box instead of the box.
+        shadow_color : tuple
+            RGBA shadow color with values in [0, 1].
+        shadow_offset : tuple
+            Position (x, y) of the shadow relative to the box in local units,
+            with +y up. The shadow pass uses it to cut the box out of the
+            shadow.
+        shadow_blur : float
+            Blur radius of the shadow. 0 gives a hard edge.
+        shadow_spread : float
+            Distance by which the shadow shape grows (positive) or shrinks
+            (negative) relative to the box.
         **kwargs : dict
             Additional keyword arguments forwarded to ``MeshBasicMaterial``.
         """
-        kwargs.setdefault("pick_write", True)
+        self._shadow = bool(shadow)
+        if self._shadow:
+            if kwargs.get("pick_write"):
+                logging.warning(
+                    "pick_write=True is ignored for a shadow material: "
+                    "the shadow is never pickable."
+                )
+            kwargs["pick_write"] = False
+            kwargs.setdefault("depth_write", False)
+        else:
+            kwargs.setdefault("pick_write", True)
         super().__init__(**kwargs)
         self.size = size
         self.corner_radius = corner_radius
+        self.border_color = border_color
+        self.border_width = border_width
+        self.shadow_color = shadow_color
+        self.shadow_offset = shadow_offset
+        self.shadow_blur = shadow_blur
+        self.shadow_spread = shadow_spread
+
+    def _set_uniform(self, name, value):
+        """
+        Write one uniform value and schedule the buffer upload.
+
+        Parameters
+        ----------
+        name : str
+            Name of the uniform field.
+        value : float or array_like
+            New value of the field.
+        """
+        self.uniform_buffer.data[name] = value
+        self.uniform_buffer.update_full()
+
+    @property
+    def shadow(self):
+        """
+        Get whether this material renders the drop shadow.
+
+        Returns
+        -------
+        bool
+            True for a shadow material, False for the box itself.
+        """
+        return self._shadow
 
     @property
     def size(self):
@@ -1141,33 +1245,182 @@ class RoundedRectangleMaterial(MeshBasicMaterial):
         value : tuple
             Width and height of the rectangle.
         """
-        self.uniform_buffer.data["size"] = value
-        self.uniform_buffer.update_full()
+        self._set_uniform("size", value)
 
     @property
     def corner_radius(self):
         """
-        Get the corner radius of the rectangle.
+        Get the corner radii of the rectangle.
 
         Returns
         -------
-        float
-            Corner radius of the rectangle.
+        tuple of float
+            Top-left, top-right, bottom-right and bottom-left radii. Always
+            four values, also when a single radius was set; earlier versions
+            returned a single float.
         """
-        return float(self.uniform_buffer.data["corner_radius"])
+        return tuple(float(r) for r in self.uniform_buffer.data["corner_radius"])
 
     @corner_radius.setter
     def corner_radius(self, value):
         """
-        Set the corner radius of the rectangle.
+        Set the corner radii of the rectangle.
+
+        Parameters
+        ----------
+        value : float or tuple of float
+            One radius for every corner, or the top-left, top-right,
+            bottom-right and bottom-left radii.
+        """
+        self._set_uniform(
+            "corner_radius", np.broadcast_to(np.asarray(value, dtype=float), (4,))
+        )
+
+    @property
+    def border_color(self):
+        """
+        Get the border color.
+
+        Returns
+        -------
+        ndarray
+            RGBA border color.
+        """
+        return self.uniform_buffer.data["border_color"].copy()
+
+    @border_color.setter
+    def border_color(self, value):
+        """
+        Set the border color.
+
+        Parameters
+        ----------
+        value : tuple
+            RGBA border color with values in [0, 1].
+        """
+        self._set_uniform("border_color", value)
+
+    @property
+    def border_width(self):
+        """
+        Get the border width.
+
+        Returns
+        -------
+        float
+            Width of the border drawn inside the box edge.
+        """
+        return float(self.uniform_buffer.data["border_width"])
+
+    @border_width.setter
+    def border_width(self, value):
+        """
+        Set the border width.
 
         Parameters
         ----------
         value : float
-            Corner radius of the rectangle.
+            Width of the border drawn inside the box edge. 0 draws no border.
         """
-        self.uniform_buffer.data["corner_radius"] = float(value)
-        self.uniform_buffer.update_full()
+        self._set_uniform("border_width", float(value))
+
+    @property
+    def shadow_color(self):
+        """
+        Get the shadow color.
+
+        Returns
+        -------
+        ndarray
+            RGBA shadow color.
+        """
+        return self.uniform_buffer.data["shadow_color"].copy()
+
+    @shadow_color.setter
+    def shadow_color(self, value):
+        """
+        Set the shadow color.
+
+        Parameters
+        ----------
+        value : tuple
+            RGBA shadow color with values in [0, 1].
+        """
+        self._set_uniform("shadow_color", value)
+
+    @property
+    def shadow_offset(self):
+        """
+        Get the shadow offset.
+
+        Returns
+        -------
+        ndarray
+            Position (x, y) of the shadow relative to the box, +y up.
+        """
+        return self.uniform_buffer.data["shadow_offset"].copy()
+
+    @shadow_offset.setter
+    def shadow_offset(self, value):
+        """
+        Set the shadow offset.
+
+        Parameters
+        ----------
+        value : tuple
+            Position (x, y) of the shadow relative to the box in local units,
+            with +y up.
+        """
+        self._set_uniform("shadow_offset", value)
+
+    @property
+    def shadow_blur(self):
+        """
+        Get the shadow blur radius.
+
+        Returns
+        -------
+        float
+            Blur radius of the shadow.
+        """
+        return float(self.uniform_buffer.data["shadow_blur"])
+
+    @shadow_blur.setter
+    def shadow_blur(self, value):
+        """
+        Set the shadow blur radius.
+
+        Parameters
+        ----------
+        value : float
+            Blur radius of the shadow. 0 gives a hard edge.
+        """
+        self._set_uniform("shadow_blur", float(value))
+
+    @property
+    def shadow_spread(self):
+        """
+        Get the shadow spread.
+
+        Returns
+        -------
+        float
+            Distance by which the shadow shape grows or shrinks.
+        """
+        return float(self.uniform_buffer.data["shadow_spread"])
+
+    @shadow_spread.setter
+    def shadow_spread(self, value):
+        """
+        Set the shadow spread.
+
+        Parameters
+        ----------
+        value : float
+            Distance by which the shadow shape grows (positive) or shrinks
+            (negative) relative to the box.
+        """
+        self._set_uniform("shadow_spread", float(value))
 
 
 class BillboardMaterial(MeshBasicMaterial):
