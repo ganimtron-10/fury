@@ -588,11 +588,12 @@ class UI(object, metaclass=_UIMeta):
         other themed value, such as colors, font sizes, fonts and box
         styles, is read again from ``theme``. Structural items keep the value
         read at creation, because they decide which parts a widget is built
-        from or how large they are: the ``LineSlider2D`` items ``layout``,
-        ``line_width``, ``handle_outer_radius`` and ``header_gap``, the
-        ``ButtonGroup`` item ``indicator`` and its button sizes, the
-        ``PlaybackPanel`` border kind, and sizes derived from font sizes,
-        such as list slot heights. Children and parts that were given their
+        from or how large they are: the ``LineSlider2D`` item ``layout``,
+        the ``ButtonGroup`` item ``indicator`` and the size of its icon
+        buttons, the ``PlaybackPanel`` border kind, and sizes derived from
+        font sizes, such as list slot heights. Slider track widths and
+        handle radii, and the size and label gap of box indicators, are
+        restyled. Children and parts that were given their
         own theme with this method keep it. The component stops following the
         global theme, so a later :func:`fury.ui.set_theme` leaves it alone. Called
         on a part of another widget, the part keeps the theme when its

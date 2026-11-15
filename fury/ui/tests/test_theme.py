@@ -2052,3 +2052,522 @@ def test_text_color_none_after_theme_change_follows_button():
     expected = ui.TextButton2D("Go").child.color
     npt.assert_allclose(button.child.color, expected)
     npt.assert_allclose(button.child.color, _hex("#141518"))
+
+
+NEW_THEMES = ["hairline", "soft_pill", "frost", "ember"]
+
+NEW_THEME_COLORS = {
+    "hairline": {"accent": "#FFFFFF", "fill": "#FFFFFF", "round": False},
+    "soft_pill": {"accent": "#8B7CFF", "fill": "#8B7CFF", "round": True},
+    "frost": {"accent": "#2563EB", "fill": "#2563EB", "round": True},
+    "ember": {"accent": "#FF7A45", "fill": "#FF7A45", "round": True},
+}
+
+
+def _render_on(element, background, points):
+    """
+    Render one UI element over a background color and read some pixels.
+
+    Parameters
+    ----------
+    element : UI
+        Element to render.
+    background : tuple of float
+        RGB background of the scene, in [0, 1].
+    points : list of (int, int)
+        Pixel coordinates (x, y), with y pointing down.
+
+    Returns
+    -------
+    list of ndarray
+        RGB values in [0, 255] of each point.
+    """
+    scene = window.Scene(background=background)
+    scene.add(element)
+    show_m = window.ShowManager(
+        scene=scene, size=(200, 200), window_type="offscreen", pixel_ratio=1
+    )
+    show_m.render()
+    show_m.window.draw()
+    image = np.asarray(show_m.snapshot())[..., :3].astype(int)
+    show_m.close()
+    return [image[y, x] for x, y in points]
+
+
+def _over_black(color, opacity):
+    """
+    Get the color of a translucent surface drawn over black.
+
+    Blending happens in linear light, like the renderer.
+
+    Parameters
+    ----------
+    color : str
+        Hex color of the surface.
+    opacity : float
+        Opacity of the surface.
+
+    Returns
+    -------
+    ndarray
+        RGB values in [0, 255].
+    """
+    srgb = _hex(color)
+    linear = np.where(srgb <= 0.04045, srgb / 12.92, ((srgb + 0.055) / 1.055) ** 2.4)
+    linear = linear * opacity
+    blended = np.where(
+        linear <= 0.0031308, linear * 12.92, 1.055 * linear ** (1 / 2.4) - 0.055
+    )
+    return blended * 255
+
+
+def test_theme_names_lists_builtin_themes():
+    """theme_names lists every built-in theme, and density is not one."""
+    names = ui.theme_names()
+
+    assert names == [
+        "classic",
+        "graphite",
+        "graphite_light",
+        "hairline",
+        "soft_pill",
+        "frost",
+        "ember",
+    ]
+    assert "compact" not in names
+    for name in names:
+        assert ui.builtin_theme(name).name == name
+
+
+@pytest.mark.parametrize("name", ["missing", "compact", "Graphite"])
+def test_unknown_theme_names_raise(name):
+    """Unknown names raise a ValueError listing the available themes."""
+    with pytest.raises(ValueError, match=f"Unknown theme '{name}'.*hairline"):
+        ui.builtin_theme(name)
+    with pytest.raises(ValueError, match=f"Unknown theme '{name}'"):
+        ui.set_theme(name)
+    assert ui.get_theme().name == "classic"
+
+
+@pytest.mark.parametrize("name", NEW_THEMES)
+def test_new_themes_define_every_graphite_item(name):
+    """New themes define the same items as Graphite, so restyling back works."""
+    graphite = ui.builtin_theme("graphite").to_dict()["items"]
+    theme = ui.builtin_theme(name).to_dict()["items"]
+
+    assert set(theme) == set(graphite)
+    for type_name, items in graphite.items():
+        assert set(theme[type_name]) == set(items), type_name
+
+
+@pytest.mark.parametrize("name", NEW_THEMES)
+def test_new_theme_panel_corner_and_border(name):
+    """Round themes leave the panel corner empty; Hairline fills it."""
+    with ui.theme_scope(name):
+        panel = ui.Panel2D(size=(120, 100), position=(40, 40))
+    center, border, corner = render_pixels(panel, [(100, 90), (40, 90), (40, 40)])
+    theme = ui.builtin_theme(name)
+    background = _over_black(
+        theme.get(ui.Panel2D, "color"), theme.get(ui.Panel2D, "opacity")
+    )
+
+    border_color = _over_black(
+        theme.get(ui.Panel2D, "border_color"), theme.get(ui.Panel2D, "opacity")
+    )
+
+    npt.assert_allclose(center, background, atol=3)
+    assert np.abs(border - border_color).sum() < np.abs(border - background).sum()
+    if NEW_THEME_COLORS[name]["round"]:
+        assert corner.max() <= 2
+    else:
+        assert corner.sum() > center.sum()
+
+
+@pytest.mark.parametrize("name", NEW_THEMES)
+def test_new_theme_button_colors_and_radius(name):
+    """A primary button is drawn in the accent color, with the theme radius."""
+    with ui.theme_scope(name):
+        button = ui.TextButton2D("", size=(100, 40), position=(50, 80))
+    inside, corner = render_pixels(button, [(60, 100), (50, 80)])
+
+    npt.assert_allclose(inside, _hex(NEW_THEME_COLORS[name]["accent"]) * 255, atol=3)
+    if NEW_THEME_COLORS[name]["round"]:
+        assert corner.max() < 40
+    else:
+        assert corner.min() > 150
+
+
+@pytest.mark.parametrize("name", NEW_THEMES)
+def test_new_theme_slider_fill_and_track(name):
+    """The slider fill left of the handle uses the accent, the track does not."""
+    with ui.theme_scope(name):
+        slider = ui.LineSlider2D(length=160, position=(20, 80), initial_value=75)
+    left, top = slider.track.get_position()
+    y = int(top + slider.track.size[1] / 2 - 0.5)
+    fill, track = render_pixels(slider, [(int(left) + 30, y), (int(left) + 150, y)])
+
+    npt.assert_allclose(fill, _hex(NEW_THEME_COLORS[name]["fill"]) * 255, atol=3)
+    assert np.abs(track - fill).max() > 30
+
+
+def test_frost_panel_shows_the_scene_without_shadow_inside():
+    """Frost lets the scene show through and its shadow stays outside."""
+    strong_shadow = ui.builtin_theme("frost").derive(
+        items={"Panel2D": {"shadow_color": (0, 0, 0, 0.9)}}
+    )
+    no_shadow = ui.builtin_theme("frost").derive(
+        items={"Panel2D": {"shadow_color": (0, 0, 0, 0), "shadow_blur": 0}}
+    )
+    points = [(100, 80), (100, 135)]
+    with ui.theme_scope(strong_shadow):
+        shadowed = ui.Panel2D(size=(120, 100), position=(40, 30))
+    with ui.theme_scope(no_shadow):
+        plain = ui.Panel2D(size=(120, 100), position=(40, 30))
+
+    light = (0.85, 0.87, 0.9)
+    inside, below = _render_on(shadowed, light, points)
+    plain_inside, plain_below = _render_on(plain, light, points)
+    on_red = _render_on(plain, (1, 0, 0), points)[0]
+
+    npt.assert_allclose(inside, plain_inside, atol=2)
+    assert below.sum() < plain_below.sum() - 60
+    assert on_red[0] - on_red[2] > 20
+    assert ui.builtin_theme("frost").get(ui.Panel2D, "opacity") == 0.78
+
+
+@pytest.mark.parametrize("name", NEW_THEMES)
+@pytest.mark.parametrize("widget", RESTYLE_MATCHES_FRESH)
+def test_graphite_to_new_theme_and_back_matches_fresh(name, widget, tmp_path):
+    """Graphite widgets restyled to a new theme and back match fresh ones."""
+    factory = _composite_factories(tmp_path)[widget]
+    ui.set_theme("graphite")
+    element = factory()
+    graphite_reference = _render_scene(factory())
+
+    ui.set_theme(name)
+    npt.assert_array_equal(_render_scene(element), _render_scene(factory()))
+
+    ui.set_theme("graphite")
+    npt.assert_array_equal(_render_scene(element), graphite_reference)
+
+
+@pytest.mark.parametrize("name", ui.theme_names())
+def test_compact_density_scales_metrics_down(name):
+    """Compact density shrinks fonts, spacing, radii and slider sizes."""
+    comfortable = ui.builtin_theme(name)
+    compact = comfortable.derive(density="compact")
+
+    assert compact.density == "compact"
+    assert compact.name == "custom"
+    for ui_type, item in [
+        (ui.TextBlock2D, "font_size"),
+        (ui.TextButton2D, "font_size"),
+        (ui.LineSlider2D, "font_size"),
+        (ui.LineSlider2D, "handle_outer_radius"),
+    ]:
+        assert compact.get(ui_type, item) < comfortable.get(ui_type, item), item
+    line_width = comfortable.get(ui.LineSlider2D, "line_width")
+    assert compact.get(ui.LineSlider2D, "line_width") == max(1, round(line_width * 0.8))
+    for ui_type, item in [
+        (ui.Panel2D, "padding"),
+        (ui.Panel2D, "gap"),
+        (ui.Panel2D, "corner_radius"),
+        (ui.TextButton2D, "corner_radius"),
+    ]:
+        value = comfortable.get(ui_type, item)
+        assert compact.get(ui_type, item) == (round(value * 0.8) if value else 0)
+    assert compact.get(ui.Panel2D, "color") == comfortable.get(ui.Panel2D, "color")
+    assert compact.get(ui.Panel2D, "border_width") == comfortable.get(
+        ui.Panel2D, "border_width"
+    )
+
+
+def test_compact_graphite_matches_the_dense_mockup():
+    """Compact Graphite uses 12 px text, 10 px padding and 6 px gaps."""
+    compact = ui.builtin_theme("graphite").derive(density="compact")
+
+    assert compact.get(ui.TextBlock2D, "font_size") == 12
+    assert compact.get(ui.Panel2D, "padding") == 10
+    assert compact.get(ui.Panel2D, "gap") == 6
+    assert compact.get(ui.TextBox2D, "text_padding") == (0, 6)
+    assert compact.get(ui.LineSlider2D, "line_width") == 3
+
+
+def test_compact_panel_renders_smaller():
+    """Widgets created with compact density are smaller than comfortable ones."""
+    sizes = {}
+    for density in ("comfortable", "compact"):
+        theme = ui.builtin_theme("graphite").derive(density=density)
+        with ui.theme_scope(theme):
+            panel = ui.Panel2D(size=(200, 50))
+            panel.set_layout(direction=ui.Direction.COLUMN, height=ui.fit())
+            panel.add(ui.TextBlock2D(text="Rendering", dynamic_bbox=True))
+            panel.add(ui.LineSlider2D(length=150, label="Opacity"))
+            panel.add(ui.Checkbox(["Shading", "Show axes"]))
+        ui.UIContext.flush_layouts()
+        sizes[density] = panel.size[1]
+
+    assert sizes["compact"] < sizes["comfortable"]
+
+
+def test_comfortable_density_is_the_theme_itself():
+    """Comfortable density leaves every item unchanged and restyles nothing."""
+    for name in ui.theme_names():
+        theme = ui.builtin_theme(name).to_dict()
+        comfortable = ui.builtin_theme(name).derive(density="comfortable").to_dict()
+        assert comfortable["density"] == theme["density"] == "comfortable"
+        assert comfortable["items"] == theme["items"]
+
+    ui.set_theme("graphite")
+    graphite = ui.get_theme()
+    ui.set_theme(graphite, density="comfortable")
+    assert ui.get_theme() is graphite
+
+
+def test_set_theme_density_restyles_live_and_back():
+    """Changing the density restyles existing widgets like fresh ones."""
+    ui.set_theme("graphite")
+    text = ui.TextBlock2D(text="Hello", position=(50, 50), dynamic_bbox=True)
+    button = ui.TextButton2D("Go", position=(50, 120))
+    graphite = ui.get_theme()
+    comfortable_text = _render_scene(text)
+    comfortable_button = _render_scene(button)
+
+    ui.set_theme(ui.get_theme(), density="compact")
+    assert ui.get_theme().density == "compact"
+    assert text.font_size == 12
+    assert button.font_size == 12
+    fresh_text = ui.TextBlock2D(text="Hello", position=(50, 50), dynamic_bbox=True)
+    npt.assert_array_equal(_render_scene(text), _render_scene(fresh_text))
+    fresh_button = ui.TextButton2D("Go", position=(50, 120))
+    npt.assert_array_equal(_render_scene(button), _render_scene(fresh_button))
+
+    ui.set_theme(ui.get_theme(), density="comfortable")
+    assert ui.get_theme() is graphite
+    assert text.font_size == 13
+    npt.assert_array_equal(_render_scene(text), comfortable_text)
+    npt.assert_array_equal(_render_scene(button), comfortable_button)
+
+
+def test_density_change_restyles_panel_spacing():
+    """A panel laid out with the theme spacing follows a density change."""
+    ui.set_theme("soft_pill")
+    panel = ui.Panel2D(size=(200, 50))
+    panel.set_layout(direction=ui.Direction.COLUMN, height=ui.fit())
+    panel.add(ui.TextBlock2D(text="A", dynamic_bbox=True))
+    panel.add(ui.TextBlock2D(text="B", dynamic_bbox=True))
+    ui.UIContext.flush_layouts()
+    comfortable_height = panel.size[1]
+
+    ui.set_theme("soft_pill", density="compact")
+    ui.UIContext.flush_layouts()
+
+    assert panel.background.corner_radius == round(18 * 0.8)
+    assert panel.size[1] < comfortable_height
+
+
+def test_unknown_density_raises():
+    """An unknown density raises a ValueError naming the densities."""
+    with pytest.raises(ValueError, match="Unknown density 'dense'.*compact"):
+        ui.builtin_theme("graphite").derive(density="dense")
+    with pytest.raises(ValueError, match="Unknown density 'dense'"):
+        ui.set_theme("graphite", density="dense")
+
+
+def test_compact_theme_save_load_roundtrip(tmp_path):
+    """A saved compact theme loads with its density and scales once."""
+    path = tmp_path / "compact.json"
+    compact = ui.builtin_theme("frost").derive(name="frost_compact", density="compact")
+    compact.save(path)
+    loaded = ui.Theme.load(path)
+
+    assert loaded.density == "compact"
+    assert loaded.get(ui.TextBlock2D, "font_size") == 12
+    assert loaded.get(ui.Panel2D, "corner_radius") == 10
+    loaded.save(tmp_path / "again.json")
+    assert (tmp_path / "again.json").read_text() == path.read_text()
+
+
+@pytest.mark.parametrize("base_density", [None, "comfortable", "compact"])
+def test_compact_theme_dict_roundtrip_with_a_base(base_density):
+    """A compact theme rebuilt from its dict, on any base, scales once."""
+    compact = ui.builtin_theme("graphite").derive(density="compact")
+    base = None
+    if base_density is not None:
+        base = ui.builtin_theme("graphite").derive(density=base_density)
+    rebuilt = ui.Theme.from_dict(compact.to_dict(), base=base)
+
+    assert rebuilt.density == "compact"
+    assert rebuilt.get(ui.TextBlock2D, "font_size") == 12
+    assert rebuilt.get(ui.Panel2D, "padding") == 10
+
+
+def test_loaded_compact_theme_switches_back_to_comfortable(tmp_path):
+    """A loaded compact theme returns to the original values when comfortable."""
+    path = tmp_path / "compact.json"
+    ui.builtin_theme("graphite").derive(density="compact").save(path)
+    ui.set_theme(ui.Theme.load(path))
+    assert ui.get_theme().get(ui.TextBlock2D, "font_size") == 12
+
+    ui.set_theme(density="comfortable")
+
+    assert ui.get_theme().density == "comfortable"
+    assert ui.get_theme().get(ui.TextBlock2D, "font_size") == 13
+    assert ui.get_theme().get(ui.Panel2D, "padding") == 12
+
+
+def test_derived_items_under_compact_are_scaled_on_lookup():
+    """Items given to a compact theme are stored as given and scaled once."""
+    compact = ui.builtin_theme("graphite").derive(density="compact")
+    custom = compact.derive(items={"TextBlock2D": {"font_size": 26}})
+    custom.set("Panel2D", "padding", 0.5)
+
+    assert custom.get(ui.TextBlock2D, "font_size") == 24
+    assert custom.get(ui.Panel2D, "padding") == pytest.approx(0.4)
+    assert custom.to_dict()["items"]["TextBlock2D"]["font_size"] == 26
+    assert custom.derive(density="comfortable").get(ui.TextBlock2D, "font_size") == 26
+
+
+def test_set_theme_density_uses_the_global_theme_not_the_scope():
+    """set_theme with only a density changes the global theme."""
+    ui.set_theme("ember")
+    with ui.theme_scope("frost"):
+        ui.set_theme(density="compact")
+        assert ui.get_theme().name == "frost"
+    theme = ui.get_theme()
+
+    assert theme.name == "ember"
+    assert theme.density == "compact"
+    assert theme.get(ui.Panel2D, "color") == "#1A1716"
+
+
+def test_theme_scope_accepts_a_density():
+    """theme_scope can build elements with a density without changing the theme."""
+    with ui.theme_scope("soft_pill", density="compact") as theme:
+        text = ui.TextBlock2D(text="A", dynamic_bbox=True)
+
+    assert theme.name == "soft_pill"
+    assert theme.density == "compact"
+    assert text.font_size == 12
+    assert ui.get_theme().density == "comfortable"
+
+
+@pytest.mark.parametrize("name", ["graphite", "soft_pill", "hairline", "classic"])
+def test_density_change_restyles_existing_slider(name):
+    """A slider restyled to compact matches a fresh compact slider."""
+    ui.set_theme(name)
+    slider = ui.LineSlider2D(length=160, position=(20, 80), initial_value=75)
+    comfortable = _render_scene(slider)
+
+    ui.set_theme(density="compact")
+    fresh = ui.LineSlider2D(length=160, position=(20, 80), initial_value=75)
+    npt.assert_array_equal(slider.size, fresh.size)
+    npt.assert_array_equal(slider.handle.size, fresh.handle.size)
+    npt.assert_array_equal(slider.track.size, fresh.track.size)
+    npt.assert_array_equal(_render_scene(slider), _render_scene(fresh))
+
+    ui.set_theme(density="comfortable")
+    npt.assert_array_equal(_render_scene(slider), comfortable)
+
+
+@pytest.mark.parametrize("group", [ui.Checkbox, ui.RadioButton])
+def test_density_change_restyles_existing_box_indicators(group):
+    """Box indicators and their label gap follow a density change."""
+    ui.set_theme("graphite")
+    options = group(["Shading", "Show axes"], checked_labels=["Shading"])
+    options.set_position((40, 40))
+    comfortable = _render_scene(options)
+
+    ui.set_theme(density="compact")
+    fresh = group(["Shading", "Show axes"], checked_labels=["Shading"])
+    fresh.set_position((40, 40))
+    ui.UIContext.flush_layouts()
+    assert options.button_size == fresh.button_size
+    assert options.button_label_gap == fresh.button_label_gap == 6
+    npt.assert_array_equal(_render_scene(options), _render_scene(fresh))
+
+    ui.set_theme(density="comfortable")
+    npt.assert_array_equal(_render_scene(options), comfortable)
+
+
+def test_hairline_panel_shows_the_scene_through():
+    """The Hairline panel is translucent, without a shadow around it."""
+    with ui.theme_scope("hairline"):
+        panel = ui.Panel2D(size=(120, 100), position=(40, 30))
+    points = [(100, 80), (100, 140), (190, 190)]
+
+    inside, below, far = _render_on(panel, (0.5, 0.5, 0.5), points)
+    on_red = _render_on(panel, (1, 0, 0), points)[0]
+
+    assert on_red[0] - on_red[2] > 20
+    assert inside.max() > 40
+    npt.assert_array_equal(below, far)
+
+
+def test_density_keeps_a_ring_handle_around_its_inner_radius():
+    """A ring handle stays larger than its inner radius when compact."""
+    ui.set_theme("classic")
+    slider = ui.LineSlider2D(inner_radius=9, outer_radius=None)
+    assert slider.handle.outer_radius == 10
+
+    ui.set_theme(density="compact")
+    fresh = ui.LineSlider2D(inner_radius=9, outer_radius=None)
+
+    assert slider.handle.outer_radius == fresh.handle.outer_radius == 10
+    assert slider.handle.inner_radius == 9
+
+
+def test_user_slider_sizes_survive_a_density_change():
+    """line_width and outer_radius given by the user are kept."""
+    ui.set_theme("graphite")
+    slider = ui.LineSlider2D(line_width=7, outer_radius=11, length=150)
+    handle_size = tuple(slider.handle.size)
+
+    ui.set_theme(density="compact")
+    ui.set_theme(density="comfortable")
+    ui.set_theme(density="compact")
+
+    assert slider.track.size[1] == 7
+    assert tuple(slider.handle.size) == handle_size == (22, 22)
+
+
+def test_scaled_float_items_stay_floats():
+    """Density keeps float items floats and integer items integers."""
+    theme = ui.Theme(
+        items={"UI": {"padding": 12.0, "gap": 8, "corner_radius": 0.5}},
+        density="compact",
+    )
+
+    assert theme.get(ui.UI, "padding") == 10.0
+    assert isinstance(theme.get(ui.UI, "padding"), float)
+    assert theme.get(ui.UI, "gap") == 6
+    assert isinstance(theme.get(ui.UI, "gap"), int)
+    assert theme.get(ui.UI, "corner_radius") == pytest.approx(0.4)
+
+
+def test_panel_relays_out_slider_and_checkbox_after_density_change():
+    """A panel stacks its slider and checkbox again for the new density."""
+    ui.set_theme("graphite")
+
+    def build():
+        panel = ui.Panel2D(size=(220, 50), position=(10, 10))
+        panel.set_layout(direction=ui.Direction.COLUMN, height=ui.fit())
+        slider = ui.LineSlider2D(length=180, label="Opacity")
+        checkbox = ui.Checkbox(["Shading", "Show axes"], checked_labels=["Shading"])
+        panel.add(slider)
+        panel.add(checkbox)
+        return panel, slider, checkbox
+
+    panel, slider, checkbox = build()
+    ui.UIContext.flush_layouts()
+    comfortable_height = panel.size[1]
+
+    ui.set_theme(density="compact")
+    fresh, fresh_slider, fresh_checkbox = build()
+    ui.UIContext.flush_layouts()
+
+    assert panel.size[1] < comfortable_height
+    npt.assert_array_equal(panel.size, fresh.size)
+    npt.assert_array_equal(slider.get_position(), fresh_slider.get_position())
+    npt.assert_array_equal(checkbox.get_position(), fresh_checkbox.get_position())
+    npt.assert_array_equal(_render_scene(panel), _render_scene(fresh))
