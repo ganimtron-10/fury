@@ -3887,6 +3887,9 @@ class ListBoxItem2D(UI):
         self.background.resize(size)
 
 
+_LABEL_FONT_SIZE = 18
+
+
 def _collect_ui_elements(ui_element):
     """
     Collect a UI element and all the elements inside it.
@@ -4044,6 +4047,8 @@ class TreeNode2D(UI):
         Whether the node is expanded.
     selected : bool
         Whether the node is selected.
+    selectable : bool
+        Whether clicking the title row selects the node.
     on_node_select : callable
         Called with the node after it is selected.
     on_node_deselect : callable
@@ -4563,6 +4568,9 @@ class TreeNode2D(UI):
             text_width = button_x - text_x
 
         text_width = max(text_width, 1)
+        font_size = min(_LABEL_FONT_SIZE, int(self.child_height * 0.72))
+        if self.label_text.font_size != font_size:
+            self.label_text.font_size = font_size
         self.label_text.resize((text_width, self.child_height))
         self._fit_label(text_width)
         self.title_panel.update_element(self.button, (int(button_x), int(button_y)))
@@ -4578,7 +4586,7 @@ class TreeNode2D(UI):
         width : int
             Width available to the label, in pixels.
         """
-        fit_key = (self._label, width, self.child_height)
+        fit_key = (self._label, width, self.child_height, self.label_text.font_size)
         if getattr(self, "_label_fit", None) == fit_key:
             return
         self._label_fit = fit_key
@@ -4985,16 +4993,31 @@ class TreeNode2D(UI):
         expanded : bool
             True if the node is to be expanded, False otherwise.
         """
-        self._expanded = expanded
-        if self._expandable:
-            self.button.toggled = expanded
-        if not expanded:
-            for child in self._child_nodes:
-                if isinstance(child, TreeNode2D):
-                    child.expanded = False
-        self.set_content_visibility(self._visible and expanded)
+        if expanded:
+            self._expanded = True
+            if self._expandable:
+                self.button.toggled = True
+            self.set_content_visibility(self._visible)
+        else:
+            self._collapse_subtree()
         self._update_actors_position()
         self.on_size_change(self)
+
+    def _collapse_subtree(self):
+        """
+        Collapse this node and the nodes below it.
+
+        The nodes are laid out again without reporting each change, so the
+        node holding this one is told only once.
+        """
+        for child in self._child_nodes:
+            if isinstance(child, TreeNode2D):
+                child._collapse_subtree()
+        self._expanded = False
+        if self._expandable:
+            self.button.toggled = False
+        self.set_content_visibility(False)
+        self.resize((self.title_panel.size[0], self._fitted_height()), recursive=False)
 
     @property
     def icon(self):
@@ -5284,8 +5307,8 @@ class Tree2D(UI):
         self._size = size
         self._multiselect = multiselect
         self._button_position = button_position
-        self._icon = icon
-        self._selected_icon = selected_icon
+        self._icon = _load_icon(icon)
+        self._selected_icon = _load_icon(selected_icon)
         self._tree_color = color
         self._tree_opacity = opacity
         self.scroll_bar_active_color = scroll_bar_active_color
@@ -5835,9 +5858,13 @@ class Tree2D(UI):
 
         Raises
         ------
+        TypeError
+            If ``node`` is not a TreeNode2D.
         ValueError
             If a label of the added nodes is already used in the tree.
         """
+        if not isinstance(node, TreeNode2D):
+            raise TypeError("node must be a TreeNode2D instance.")
         self._check_labels(node)
         self.base_node.add_node(node)
         self._nodes.append(node)

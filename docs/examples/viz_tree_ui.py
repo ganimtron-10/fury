@@ -136,8 +136,9 @@ tree.add_content(
 )
 
 ###############################################################################
-# Expand the module nodes so their children are listed at start. Use the mouse
-# wheel or the scroll bar to move through the rows.
+# Expand the module nodes so their children are listed at start. Expand more
+# nodes to see their widgets; once the rows no longer fit, use the mouse wheel
+# or the scroll bar to move through them.
 
 for module in ("Core", "Elements", "Containers"):
     tree.get_node(module).toggle_view()

@@ -3629,6 +3629,41 @@ def test_ui_tree2d_scroll_bar_follows_pointer_after_dragging_past_end(ui_scene):
     npt.assert_allclose(_center(tree.scroll_bar)[1], y + 20, atol=1)
 
 
+@pytest.mark.parametrize("node_height", [12, 16, 20, 40])
+def test_ui_tree2d_labels_fit_any_row_height(node_height):
+    """Labels stay visible and inside their row for small and large rows."""
+    tree = ui.Tree2D(structure=[{"Alpha": ["Beta"]}], node_height=node_height)
+    tree.get_node("Alpha").toggle_view()
+
+    for label in ("Alpha", "Beta"):
+        label_text = tree.get_node(label).label_text
+        assert label_text.message == label
+        assert label_text.get_text_actor_size()[1] <= node_height
+
+
+def test_ui_treenode2d_collapse_reports_one_size_change():
+    """Collapsing a node with expanded descendants reports one change."""
+    children = [ui.TreeNode2D(label=f"c{i}") for i in range(3)]
+    for child in children:
+        child.add_node(ui.TreeNode2D(label=f"{child.label} leaf"))
+    root = ui.TreeNode2D(label="root", children=children)
+    root.expanded = True
+    for child in children:
+        child.expanded = True
+    changes = []
+    root.on_size_change = lambda node: changes.append(node.label)
+
+    root.expanded = False
+
+    npt.assert_equal(changes, ["root"])
+    assert not any(child.expanded for child in children)
+    root.expanded = True
+    npt.assert_array_equal(
+        [child.get_position()[1] for child in children],
+        root.get_position()[1] + root.child_height * np.arange(1, 4),
+    )
+
+
 def test_ui_tree2d_click_selects_one_node_without_multiselect(ui_scene):
     """With multiselect off, a click deselects nodes in other branches too."""
     show_manager, scene = ui_scene
