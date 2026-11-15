@@ -384,6 +384,7 @@ def test_disk2d_visual_snapshot():
     assert_visibility(disk, toggle=disk.set_visibility, colors=[(0.0, 1.0, 0.0)])
 
 
+@pytest.mark.usefixtures("classic_theme")
 def test_textblock2d_initialization_default():
     """
     Test TextBlock2D initialization with minimal valid parameters.
@@ -501,6 +502,7 @@ def test_textblock2d_alignment_invalid():
         tb.vertical_justification = "sideways"
 
 
+@pytest.mark.usefixtures("classic_theme")
 def test_textblock2d_color_property():
     """Test text color getter and setter."""
     tb = ui.TextBlock2D(size=(100, 50))
@@ -510,6 +512,7 @@ def test_textblock2d_color_property():
     npt.assert_array_almost_equal(tb.color, [0.5, 0.5, 0.5])
 
 
+@pytest.mark.usefixtures("classic_theme")
 def test_textblock2d_color_normalization():
     """Test TextBlock2D accepts hex strings and [0, 255] colors."""
     tb = ui.TextBlock2D(size=(100, 50), color="#0000FF")

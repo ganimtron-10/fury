@@ -3,11 +3,11 @@
 Graphite Themes
 ===============
 
-This example shows the built-in Graphite themes. Graphite is a neutral,
-monochrome design: flat panels with a hairline border, rounded corners and a
-soft shadow, semibold titles and a single accent color, so nothing competes
-with the data in the scene. Graphite Light is the same design with light
-colors.
+This example shows the built-in Graphite themes. Graphite, the default theme
+of FURY UI elements, is a neutral, monochrome design: flat panels with a
+hairline border, rounded corners and a soft shadow, semibold titles and a
+single accent color, so nothing competes with the data in the scene. Graphite
+Light is the same design with light colors.
 
 The same settings panel is built twice, once in each theme, over a dark and a
 light part of the scene.
@@ -97,10 +97,12 @@ def settings_panel(position):
 
 
 ##############################################################################
-# ``theme_scope`` builds each panel in its own theme. Use
-# ``ui.set_theme("graphite")`` instead to make Graphite the theme of every
-# element created afterwards; it also restyles existing elements that follow
-# the global theme.
+# ``theme_scope`` builds each panel in its own theme. Graphite is also the
+# default global theme, but the scope pins the first panel to it, so a later
+# ``ui.set_theme`` call or the ``FURY_UI_THEME`` environment variable does not
+# change it. ``ui.set_theme("graphite_light")`` would instead make Graphite
+# Light the theme of every element created afterwards, and restyle existing
+# elements that follow the global theme.
 
 with ui.theme_scope("graphite"):
     dark_panel = settings_panel((30, 60))

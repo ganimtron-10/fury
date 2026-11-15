@@ -58,6 +58,9 @@ card_2 = Card2D(
     body_text="This card cannot be dragged (draggable=False).",
     position=(290, 100),
     size=(250, 280),
+    bg_color=(0.78, 0.8, 0.83),
+    title_color=(0.08, 0.08, 0.1),
+    body_color=(0.18, 0.18, 0.22),
     draggable=False,
 )
 scene.add(card_2)

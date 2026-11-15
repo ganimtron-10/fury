@@ -22,9 +22,15 @@ from fury.window import (
 scene = Scene()
 
 ###############################################################################
-# Create a Panel2D.
+# Create a Panel2D with a light, 5 pixel wide border.
 
-panel = Panel2D(size=(300, 300), color=(0.2, 0.2, 0.2), has_border=True, border_width=5)
+panel = Panel2D(
+    size=(300, 300),
+    color=(0.2, 0.2, 0.2),
+    has_border=True,
+    border_width=5,
+    border_color=(0.85, 0.85, 0.85),
+)
 
 ###############################################################################
 # Let's add some simple shapes to the panel.

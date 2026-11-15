@@ -26,6 +26,12 @@ scene = Scene()
 
 
 ##############################################################################
+# The active tab title uses a lighter color than the others, so it stands out
+# from the inactive tabs.
+
+ACTIVE_TAB_COLOR = "#45484F"
+
+##############################################################################
 # Create a TabUI with three tabs. The first tab is visible on startup.
 
 tab_ui = TabUI(
@@ -34,9 +40,8 @@ tab_ui = TabUI(
     tab_titles=["Shapes", "Slider", "Notes"],
     startup_tab_id=0,
     font_size=16,
+    active_color=ACTIVE_TAB_COLOR,
     draggable=True,
-    active_color=(0.95, 0.95, 1.0),
-    inactive_color=(0.45, 0.48, 0.56),
 )
 
 ##############################################################################
@@ -137,9 +142,8 @@ accordion_tab_ui = TabUI(
     startup_tab_id=0,
     tab_bar_pos="accordion",
     font_size=15,
+    active_color=ACTIVE_TAB_COLOR,
     draggable=True,
-    active_color=(0.95, 0.95, 1.0),
-    inactive_color=(0.45, 0.48, 0.56),
 )
 
 accordion_info = TextBlock2D(
@@ -197,9 +201,8 @@ bottom_tab_ui = TabUI(
     startup_tab_id=0,
     tab_bar_pos="bottom",
     font_size=15,
+    active_color=ACTIVE_TAB_COLOR,
     draggable=True,
-    active_color=(0.95, 0.95, 1.0),
-    inactive_color=(0.45, 0.48, 0.56),
 )
 
 bottom_text = TextBlock2D(
@@ -252,9 +255,8 @@ vertical_tab_ui = TabUI(
     startup_tab_id=0,
     tab_bar_pos="left",
     font_size=14,
+    active_color=ACTIVE_TAB_COLOR,
     draggable=True,
-    active_color=(0.95, 0.95, 1.0),
-    inactive_color=(0.45, 0.48, 0.56),
 )
 
 vertical_text = TextBlock2D(

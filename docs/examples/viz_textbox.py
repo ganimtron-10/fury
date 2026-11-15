@@ -23,7 +23,7 @@ textbox_single = TextBox2D(
     height=1,
     text="Single line",
     position=(50, 450),
-    color=(1, 0, 0),
+    color=(1, 0.4, 0.4),
     font_size=20,
 )
 
@@ -36,19 +36,18 @@ textbox_multi = TextBox2D(
     height=3,
     text="Multi-line\nText box",
     position=(50, 300),
-    color=(0, 0, 1),
+    color=(0.45, 0.7, 1.0),
     font_size=25,
 )
 
 ##############################################################################
 # 3. Static Text Box
-# A standard text box that displays static text in black.
+# A standard text box that uses the text color of the theme.
 textbox_static = TextBox2D(
     width=20,
     height=2,
     text="Static Text box",
     position=(50, 200),
-    color=(0, 0, 0),  # Black color
     font_size=20,
 )
 
@@ -61,7 +60,7 @@ textbox_styled = TextBox2D(
     height=2,
     text="Bold & Italic\nCenter justification",
     position=(50, 100),
-    color=(0, 0.5, 0),  # Dark green color
+    color=(0.4, 0.85, 0.5),  # Light green color
     font_size=18,
     justification="center",
     bold=True,

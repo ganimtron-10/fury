@@ -40,12 +40,11 @@ color_dict = {
 # We pass the keys of our dictionary as the available items.
 combobox = ui.ComboBox2D(
     items=list(color_dict.keys()),
-    position=(50, 200),
+    position=(20, 20),
     size=(250, 200),
     placeholder="Select Color...",
     draggable=True,
     font_size=20,
-    selection_bg_color=(0.9, 0.9, 0.9),
     menu_opacity=0.95,
 )
 
