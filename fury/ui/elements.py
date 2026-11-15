@@ -469,6 +469,29 @@ def _tinted_texture(texture, color):
     return Texture(tinted, dim=2, size=texture.size, generate_mipmaps=True)
 
 
+def _ring_outer_radius(outer_radius, inner_radius):
+    """
+    Get a handle outer radius that leaves a visible ring.
+
+    Parameters
+    ----------
+    outer_radius : float
+        Outer radius from the theme or the caller, possibly scaled for a
+        density.
+    inner_radius : float
+        Inner radius of the handle. 0 draws a full disk.
+
+    Returns
+    -------
+    float
+        ``outer_radius``, raised to ``inner_radius + 1`` when it would not
+        be larger than the inner radius.
+    """
+    if inner_radius and outer_radius <= inner_radius:
+        return inner_radius + 1
+    return outer_radius
+
+
 class TextButton2D(Button2D):
     """
     A button component that updates text and color based on state.
@@ -744,7 +767,9 @@ class LineSlider2D(Slider2D):
             min_value=min_value,
             max_value=max_value,
             handle_inner_radius=inner_radius,
-            handle_outer_radius=self._theme_value("handle_outer_radius", outer_radius),
+            handle_outer_radius=_ring_outer_radius(
+                self._theme_value("handle_outer_radius", outer_radius), inner_radius
+            ),
             handle_side=handle_side,
             font_size=font_size,
             text_template=text_template,
@@ -829,11 +854,36 @@ class LineSlider2D(Slider2D):
             self.label._push_style("font_size", self._font_size)
 
     def _refresh_style(self):
-        """Read the colors, box styles and font size again from the theme."""
+        """Read the colors, box styles, sizes and font size again."""
         super(LineSlider2D, self)._refresh_style()
+        self._apply_metrics()
         self._apply_style()
         self._update_actors_position()
         self.mark_layout_dirty()
+
+    def _apply_metrics(self):
+        """Resize the track and the disk handle for the themed sizes."""
+        self._header_gap = self._theme_value("header_gap")
+        line_width = self._theme_value("line_width")
+        if line_width != self._line_width:
+            self._line_width = line_width
+            self.track.resize(
+                (self._length, line_width)
+                if self.orientation == "horizontal"
+                else (line_width, self._length)
+            )
+        radius = _ring_outer_radius(
+            self._theme_value("handle_outer_radius"), self._handle_inner_radius
+        )
+        if radius == self._handle_outer_radius:
+            return
+        self._handle_outer_radius = radius
+        if self.shape != "disk":
+            return
+        if self._inline:
+            self.handle.resize((2 * radius, 2 * radius))
+        else:
+            self.handle.outer_radius = radius
 
     def _get_actors(self):
         """
@@ -3172,6 +3222,24 @@ class _BoxToggle2D(Button2D):
             )
             self.handle_events(self.mark)
 
+    def resize(self, size):
+        """
+        Resize the indicator, its box and its mark.
+
+        Parameters
+        ----------
+        size : (float, float)
+            New width and height in pixels. The width is used as the side.
+        """
+        side = size[0]
+        if self.child and self._round_mark:
+            self.mark.resize((side * 0.4, side * 0.4))
+            self.mark._push_style("corner_radius", side * 0.2)
+        elif self.child:
+            self.mark.geometry = _checkmark_geometry(side)
+        super(_BoxToggle2D, self).resize((side, side))
+        self.update_visual_state()
+
     def set_style(self, style):
         """
         Change the colors of the indicator.
@@ -3358,8 +3426,7 @@ class ButtonGroup(UI):
         self.button_states = button_states
 
         if self._box_indicator:
-            side = max(12, int(round(font_size * 1.1)))
-            self.button_size = (side, side)
+            self.button_size = self._box_indicator_size(font_size)
             self.button_label_gap = self._theme_value("gap")
         else:
             self.button_size = (int(font_size * 1.2), int(font_size * 1.2))
@@ -3368,6 +3435,24 @@ class ButtonGroup(UI):
         super(ButtonGroup, self).__init__(position=position, z_order=z_order)
 
         self.on_change = lambda group: None
+
+    @staticmethod
+    def _box_indicator_size(font_size):
+        """
+        Get the size of a box indicator for a label font size.
+
+        Parameters
+        ----------
+        font_size : int
+            Font size of the labels.
+
+        Returns
+        -------
+        tuple of int
+            Width and height of the indicator.
+        """
+        side = max(12, int(round(font_size * 1.1)))
+        return (side, side)
 
     def _make_button_states(self):
         """
@@ -3412,6 +3497,7 @@ class ButtonGroup(UI):
             rows.append(
                 Row(button, text, gap=self.button_label_gap, align_cross=Align.CENTER)
             )
+        self._rows = rows
 
         vertical = self.orientation == "vertical"
         self._box = LayoutBox(
@@ -3475,9 +3561,11 @@ class ButtonGroup(UI):
         }
 
     def _refresh_style(self):
-        """Read the label and indicator colors again from the theme."""
+        """Read the label and indicator colors and sizes again."""
         self.font_family = self._theme_value("font_family")
         self._font_size = self._theme_value("font_size")
+        if self._box_indicator:
+            self._apply_box_metrics()
         for button, text in self.options.values():
             text._push_style("color", self.text_color)
             if text._family_name != self.font_family:
@@ -3486,6 +3574,21 @@ class ButtonGroup(UI):
                 text._push_style("font_size", self._font_size)
             if self._box_indicator:
                 button.set_style(self._indicator_style())
+
+    def _apply_box_metrics(self):
+        """Resize the box indicators and their label gap for the theme."""
+        size = self._box_indicator_size(self._font_size)
+        if size != tuple(self.button_size):
+            self.button_size = size
+            for button, _ in self.options.values():
+                button.resize(size)
+            for row in self._rows:
+                row.mark_layout_dirty()
+        gap = self._theme_value("gap")
+        if gap != self.button_label_gap:
+            self.button_label_gap = gap
+            for row in self._rows:
+                row.set_layout(gap=gap)
 
     def _get_actors(self):
         """

@@ -51,6 +51,7 @@ __all__ = [
     "get_theme",
     "set_theme",
     "theme_scope",
+    "theme_names",
     "Anchor",
 ]
 
@@ -94,7 +95,14 @@ from .elements import (
     TexturedButton2D,
 )
 from .layout import Align, Direction, Position, fit, fixed, grow, percent
-from .theme import Theme, builtin_theme, get_theme, set_theme, theme_scope
+from .theme import (
+    Theme,
+    builtin_theme,
+    get_theme,
+    set_theme,
+    theme_names,
+    theme_scope,
+)
 
 # from .elements import (
 #     Checkbox,
