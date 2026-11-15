@@ -22,6 +22,7 @@ __all__ = [
 ]
 
 
+import logging
 from numbers import Number
 import os
 from string import printable
@@ -37,7 +38,7 @@ from fury.data import read_viz_icons
 from fury.deprecator import deprecated_params
 from fury.geometry import buffer_to_geometry
 from fury.io import get_extension, load_image, load_image_texture
-from fury.lib import EventType
+from fury.lib import EventType, Texture
 from fury.material import _create_mesh_material
 from fury.primitive import prim_ring
 from fury.ui.containers import ImageContainer2D, LayoutBox, Panel2D, Row
@@ -48,12 +49,15 @@ from fury.ui.core import (
     Button2D,
     Disk2D,
     Rectangle2D,
+    RoundedRectangle2D,
     Slider2D,
     TextBlock2D,
+    _to_rgba,
+    themed,
 )
 from fury.ui.helpers import clip_overflow
 from fury.ui.layout import Align, Direction, grow, percent
-from fury.ui.theme import theme_scope
+from fury.ui.theme import _inherited_theme_scope
 
 TWO_PI = 2.0 * np.pi
 
@@ -169,6 +173,15 @@ class Loader2D(UI):
             actor.material.depth_write = False
             actor.material.pick_write = False
         self._update_rotations()
+
+    def _refresh_style(self):
+        """Read the overlay and message style again from the theme."""
+        self.overlay._push_style("color", self._theme_value("overlay_color"))
+        self.overlay._push_style("opacity", self._theme_value("overlay_opacity"))
+        self.text._push_style("color", self._theme_value("text_color"))
+        font_size = self._theme_value("font_size")
+        if self.text.font_size != font_size:
+            self.text._push_style("font_size", font_size)
 
     def _get_actors(self):
         """
@@ -329,7 +342,41 @@ class TexturedButton2D(Button2D):
     def __init__(self, states, position=(0, 0), size=(30, 30), is_toggle=False):
         """Initialize the textured button instance."""
         self.texture_map = self._load_textures(states)
+        self._tint = None
+        self._tinted_map = {}
         super().__init__(position=position, size=size, is_toggle=is_toggle)
+        self._set_style("icon_color", _theme_value_or_none(self, "icon_color"))
+
+    def _show_icon_color(self, color):
+        """
+        Draw the state images in one color, keeping their transparency.
+
+        Images without an alpha channel keep their own colors.
+
+        Parameters
+        ----------
+        color : str, tuple, list, ndarray or None
+            A hex string, RGB in [0, 1] or RGB in [0, 255]. None draws the
+            images in their own colors.
+        """
+        rgb = None if color is None else tuple(_to_rgba(color)[:3])
+        if rgb != self._tint:
+            self._tint = rgb
+            self._tinted_map = {}
+            if rgb is not None:
+                for name, texture in self.texture_map.items():
+                    self._tinted_map[name] = _tinted_texture(texture, rgb)
+        self.update_visual_state()
+
+    icon_color = themed(
+        fshow=_show_icon_color,
+        reset_on_none=True,
+        doc=(
+            "Color the state images are drawn in, as RGB floats, or None when "
+            "they keep their own colors. Assigning None follows the theme, or "
+            "the widget the button belongs to, again."
+        ),
+    )
 
     def _load_textures(self, states):
         """
@@ -363,14 +410,63 @@ class TexturedButton2D(Button2D):
 
         key = self.resolve_state_key(self.texture_map)
         if key:
-            tex = self.texture_map[key]
+            tex = self._tinted_map.get(key, self.texture_map[key])
 
             self.child.actor.material.map = tex
             self.child.actor.material.needs_update = True
-            self.child.color = (1.0, 1.0, 1.0)
+            self.child._push_style("color", (1.0, 1.0, 1.0))
         else:
             tint = 0.5 if self.is_pressed else (0.8 if self.is_hovered else 1.0)
-            self.child.color = (tint, tint, tint)
+            self.child._push_style("color", (tint, tint, tint))
+
+
+def _theme_value_or_none(element, item):
+    """
+    Get a themed value of an element, or None when its theme lacks the item.
+
+    Parameters
+    ----------
+    element : UI
+        The element.
+    item : str
+        Theme item name.
+
+    Returns
+    -------
+    object or None
+        The value, or None if neither the element nor its theme has it.
+    """
+    try:
+        return element._theme_value(item)
+    except KeyError:
+        return None
+
+
+def _tinted_texture(texture, color):
+    """
+    Create a copy of an image texture drawn in one color.
+
+    Parameters
+    ----------
+    texture : Texture
+        Image texture with gray, gray and alpha, RGB or RGBA data.
+    color : ndarray
+        RGB color in [0, 1].
+
+    Returns
+    -------
+    Texture
+        RGBA texture with every pixel set to ``color`` and the alpha of
+        ``texture``, or ``texture`` itself when it has no alpha channel.
+    """
+    data = np.asarray(texture.data)
+    if data.ndim != 3 or data.shape[2] not in (2, 4):
+        return texture
+    scale = np.iinfo(data.dtype).max if np.issubdtype(data.dtype, np.integer) else 1
+    tinted = np.empty(data.shape[:2] + (4,), dtype=data.dtype)
+    tinted[..., :3] = np.round(np.asarray(color) * scale).astype(data.dtype)
+    tinted[..., 3] = data[..., -1]
+    return Texture(tinted, dim=2, size=texture.size, generate_mipmaps=True)
 
 
 class TextButton2D(Button2D):
@@ -383,9 +479,10 @@ class TextButton2D(Button2D):
         The default text to display on the button.
     states : dict, optional
         Configuration for visual states. Supports mapping keys to colors
-        (hex strings or RGB tuples) or dictionaries containing 'text' and
-        'color' keys. Defaults to the theme item of the same name, which
-        replaces the whole mapping rather than single states.
+        (hex strings or RGB tuples) or dictionaries with a ``'color'`` (the
+        background), and optionally ``'text'``, ``'text_color'`` and
+        ``'border_color'`` keys. Defaults to the theme item of the same
+        name, which replaces the whole mapping rather than single states.
     position : (float, float)
         Absolute coordinates (x, y) for placement.
     size : (int, int)
@@ -395,7 +492,18 @@ class TextButton2D(Button2D):
         Defaults to the theme item of the same name.
     is_toggle : bool, optional
         If True, the button behaves as a toggle switch.
+    variant : str, optional
+        ``"primary"`` for the main action, or ``"secondary"`` for a quieter
+        button. A secondary button reads the theme items
+        ``secondary_states``, ``secondary_text_color`` and
+        ``secondary_border_color`` instead of ``states``, ``text_color`` and
+        ``border_color``.
     """
+
+    states = themed(
+        item="states",
+        doc="Visual states of the button, see the ``states`` parameter.",
+    )
 
     def __init__(
         self,
@@ -405,13 +513,20 @@ class TextButton2D(Button2D):
         size=(100, 40),
         font_size=None,
         is_toggle=False,
+        *,
+        variant="primary",
     ):
         """Initialize the text button instance."""
+        if variant not in ("primary", "secondary"):
+            raise ValueError(
+                f"variant must be 'primary' or 'secondary', got {variant!r}."
+            )
+        self._variant_prefix = "secondary_" if variant == "secondary" else ""
         font_size = self._theme_value("font_size", font_size)
         self.default_label = label
         self.font_size = font_size
 
-        self.states = states or self._theme_value("states")
+        self._set_style("states", self._theme_value("states", states or None))
 
         super().__init__(position=position, size=size, is_toggle=is_toggle)
 
@@ -433,9 +548,46 @@ class TextButton2D(Button2D):
         )
         self.handle_events(self.child.actor)
         self.handle_events(self.child.background.actor)
+        self._apply_style()
+
+    def _theme_item(self, item):
+        """
+        Get the name of a theme item for the button variant.
+
+        Parameters
+        ----------
+        item : str
+            Item name for a primary button.
+
+        Returns
+        -------
+        str
+            The item name, prefixed with ``secondary_`` for the states, text
+            color and border color of a secondary button.
+        """
+        if item in ("states", "text_color", "border_color"):
+            return self._variant_prefix + item
+        return item
+
+    def _apply_style(self):
+        """Apply the themed font and box style to the text block."""
+        self.child._push_style("font_weight", self._theme_value("font_weight"))
+        self._apply_box_style(self.child.background)
+
+    def _refresh_style(self):
+        """Show the states, colors, font and box style."""
+        self.font_size = self._theme_value("font_size")
+        self.child._push_styles(
+            font_size=self.font_size,
+            font_family=self._theme_value("font_family"),
+            color=self._theme_value("text_color"),
+            background_color=self._theme_value("bg_color"),
+        )
+        self._apply_style()
+        self.update_visual_state()
 
     def update_visual_state(self):
-        """Update the text message and background color based on state."""
+        """Update the text, colors and border of the button for its state."""
         if not self.child:
             return
 
@@ -447,22 +599,60 @@ class TextButton2D(Button2D):
 
         target_color = (1, 1, 1)
         target_text = self.default_label
+        text_color = None
+        border_color = None
 
         if isinstance(data, (str, tuple, list, np.ndarray)):
             target_color = data
         elif isinstance(data, dict):
             target_color = data.get("color", target_color)
             target_text = data.get("text", target_text)
+            text_color = data.get("text_color")
+            border_color = data.get("border_color")
 
-        self.child.background.color = target_color
+        if text_color is None and self._uses_state_style("text_color"):
+            text_color = self._theme_value("text_color")
+        if border_color is None and self._uses_state_style("border_color"):
+            border_color = self._theme_value("border_color")
+
+        self.child.background._push_style("color", target_color)
+        if text_color is not None:
+            self.child._push_style("color", text_color)
+        if border_color is not None:
+            self.child.background._push_style("border_color", border_color)
 
         if self.child.message != target_text:
             self.child.message = target_text
+
+    def _uses_state_style(self, key):
+        """
+        Check whether any state sets a style key.
+
+        Parameters
+        ----------
+        key : str
+            Key of a state dictionary, such as ``"text_color"``.
+
+        Returns
+        -------
+        bool
+            True if some state is a dictionary with this key.
+        """
+        return any(
+            isinstance(data, dict) and key in data for data in self.states.values()
+        )
 
 
 class LineSlider2D(Slider2D):
     """
     A 2D Line Slider component.
+
+    The theme item ``layout`` chooses how the slider is drawn. The
+    ``"classic"`` layout shows the value above the handle. The ``"inline"``
+    layout, used by the Graphite themes, shows the label on the left and the
+    value on the right of a row above a thin track, and fills the track up
+    to the handle. The inline layout only applies to horizontal sliders, and
+    is chosen when the slider is created.
 
     Parameters
     ----------
@@ -478,10 +668,13 @@ class LineSlider2D(Slider2D):
         The length of the slider track in pixels.
     line_width : int, optional
         The thickness of the slider track.
+        Defaults to the theme item of the same name.
     inner_radius : int, optional
-        The inner radius for disk-shaped handles (for rings).
+        The inner radius for disk-shaped handles (for rings). Not used by the
+        inline layout.
     outer_radius : int, optional
         The outer radius for disk-shaped handles.
+        Defaults to the theme item ``handle_outer_radius``.
     handle_side : int, optional
         The side length for square-shaped handles.
     font_size : int, optional
@@ -495,6 +688,18 @@ class LineSlider2D(Slider2D):
         The handle shape: "disk" or "square".
     z_order : int, optional
         The stacking priority. The handle is assigned z_order + 1.
+    label : str, optional
+        Name of the value, shown on the left of the value by the inline
+        layout. The classic layout does not show it.
+    layout : str, optional
+        ``"classic"`` or ``"inline"``, see above.
+        Defaults to the theme item of the same name.
+
+    Notes
+    -----
+    ``track`` is a :class:`RoundedRectangle2D`. In the inline layout the
+    handle is a round :class:`RoundedRectangle2D` with a shadow, not a
+    :class:`Disk2D`, and ``fill`` and ``label`` are extra parts.
     """
 
     def __init__(
@@ -505,20 +710,33 @@ class LineSlider2D(Slider2D):
         min_value=0,
         max_value=100,
         length=200,
-        line_width=5,
+        line_width=None,
         inner_radius=0,
-        outer_radius=10,
+        outer_radius=None,
         handle_side=20,
         font_size=None,
         orientation="horizontal",
         text_template="{value:.1f} ({ratio:.0%})",
         shape="disk",
         z_order=0,
+        label=None,
+        layout=None,
     ):
         """Initialize the slider instance."""
         self.orientation = orientation.lower().strip()
         self._length = length
-        self._line_width = line_width
+        self._line_width = self._theme_value("line_width", line_width)
+        layout = self._theme_value("layout", layout)
+        if layout not in ("classic", "inline"):
+            raise ValueError(f"layout must be 'classic' or 'inline', got {layout!r}.")
+        self._inline = layout == "inline" and self.orientation == "horizontal"
+        self._label = label
+        self._header_gap = self._theme_value("header_gap")
+        if label is not None and not self._inline:
+            logging.warning(
+                "The slider label is only shown by the horizontal inline layout; "
+                "it will be ignored."
+            )
 
         super(LineSlider2D, self).__init__(
             position=position,
@@ -526,7 +744,7 @@ class LineSlider2D(Slider2D):
             min_value=min_value,
             max_value=max_value,
             handle_inner_radius=inner_radius,
-            handle_outer_radius=outer_radius,
+            handle_outer_radius=self._theme_value("handle_outer_radius", outer_radius),
             handle_side=handle_side,
             font_size=font_size,
             text_template=text_template,
@@ -534,7 +752,27 @@ class LineSlider2D(Slider2D):
             z_order=z_order,
         )
 
+        self._apply_style()
         self.value = initial_value
+
+    def _make_handle(self):
+        """
+        Create the handle, a rounded box with a shadow in the inline layout.
+
+        Returns
+        -------
+        UI
+            The handle component.
+        """
+        if not self._inline:
+            return super(LineSlider2D, self)._make_handle()
+        if self.shape == "disk":
+            side = 2 * self._handle_outer_radius
+        elif self.shape == "square":
+            side = self._handle_side
+        else:
+            raise ValueError("shape must be 'disk' or 'square'")
+        return RoundedRectangle2D(size=(side, side), corner_radius=0)
 
     def _setup(self):
         """Set up the internal actors."""
@@ -544,11 +782,8 @@ class LineSlider2D(Slider2D):
             if self.orientation == "horizontal"
             else (self._line_width, self._length)
         )
-        self.track = Rectangle2D(size=track_size)
-        self.track.color = self._theme_value("track_color")
+        self.track = RoundedRectangle2D(size=track_size, corner_radius=0)
         self.track.z_order = self.z_order
-
-        self.handle.color = self.default_color
 
         self.track.on_left_mouse_button_pressed = self.track_click_callback
         self.track.on_left_mouse_button_dragged = self.handle_move_callback
@@ -557,7 +792,48 @@ class LineSlider2D(Slider2D):
         self.handle.on_left_mouse_button_dragged = self.handle_move_callback
         self.handle.on_left_mouse_button_released = self.handle_release_callback
 
-        self._children.extend([self.track, self.handle, self.text])
+        self.fill = None
+        self.label = None
+        parts = [self.track, self.handle, self.text]
+        if self._inline:
+            self.fill = RoundedRectangle2D(size=(1, self._line_width), corner_radius=0)
+            self.fill.on_left_mouse_button_pressed = self.track_click_callback
+            self.fill.on_left_mouse_button_dragged = self.handle_move_callback
+            self.fill.on_left_mouse_button_released = self.handle_release_callback
+            self.text.justification = "right"
+            self.label = TextBlock2D(
+                text=self._label or "",
+                dynamic_bbox=True,
+                font_size=self._font_size,
+            )
+            parts.extend([self.fill, self.label])
+
+        self._children.extend(parts)
+
+    def _apply_style(self):
+        """Apply the themed colors and box styles to the parts."""
+        self.track._push_style("color", self._theme_value("track_color"))
+        self._update_handle_color()
+        if not self._inline:
+            return
+
+        self.track._push_style("corner_radius", self._line_width / 2)
+        self.fill._push_style("color", self._theme_value("fill_color"))
+        self.fill._push_style("corner_radius", self._line_width / 2)
+        side = self.handle.size[0]
+        radius = side / 2 if self.shape == "disk" else min(3, side / 2)
+        self._apply_box_style(self.handle, prefix="handle_", corner_radius=radius)
+        self.text._push_style("color", self._theme_value("value_color"))
+        self.label._push_style("color", self._theme_value("label_color"))
+        if self.label.font_size != self._font_size:
+            self.label._push_style("font_size", self._font_size)
+
+    def _refresh_style(self):
+        """Read the colors, box styles and font size again from the theme."""
+        super(LineSlider2D, self)._refresh_style()
+        self._apply_style()
+        self._update_actors_position()
+        self.mark_layout_dirty()
 
     def _get_actors(self):
         """
@@ -571,6 +847,17 @@ class LineSlider2D(Slider2D):
         """
         return []
 
+    def _header_height(self):
+        """
+        Get the height of the label and value row of the inline layout.
+
+        Returns
+        -------
+        int
+            Height in pixels.
+        """
+        return int(round(self._font_size * 1.4))
+
     def _get_size(self):
         """
         Calculate the total bounding box size of the slider.
@@ -580,6 +867,10 @@ class LineSlider2D(Slider2D):
         numpy.ndarray
             The (width, height) in pixels.
         """
+        if self._inline:
+            track_height = max(self._line_width, self.handle.size[1])
+            height = self._header_height() + self._header_gap + track_height
+            return np.array([self._length, height])
         if self.orientation == "horizontal":
             width = self._length
             height = max(self._line_width, self.handle.size[1])
@@ -596,9 +887,24 @@ class LineSlider2D(Slider2D):
         self.handle.z_order = self.z_order + 1
         self.text.z_order = self.z_order + 2
 
-        self.track.set_position(
-            pos + self.size / 2, x_anchor=Anchor.CENTER, y_anchor=Anchor.CENTER
-        )
+        if self._inline:
+            self.fill.z_order = self.z_order + 1
+            self.handle.z_order = self.z_order + 2
+            self.text.z_order = self.z_order + 3
+            self.label.z_order = self.z_order + 3
+            size = self.size
+            track_height = max(self._line_width, self.handle.size[1])
+            track_center = pos + np.array(
+                [size[0] / 2, size[1] - track_height / 2], dtype=float
+            )
+            self.track.set_position(
+                track_center, x_anchor=Anchor.CENTER, y_anchor=Anchor.CENTER
+            )
+            self.label.set_position(pos, x_anchor=Anchor.LEFT, y_anchor=Anchor.TOP)
+        else:
+            self.track.set_position(
+                pos + self.size / 2, x_anchor=Anchor.CENTER, y_anchor=Anchor.CENTER
+            )
 
         self._update_handle_position()
 
@@ -607,14 +913,13 @@ class LineSlider2D(Slider2D):
         track_origin = self.track.get_position(
             x_anchor=Anchor.LEFT, y_anchor=Anchor.TOP
         )
+        offset = self.ratio * self._length
         if self.orientation == "horizontal":
-            offset = self.ratio * self._length
             handle_center = track_origin + np.array([offset, self._line_width / 2])
             text_pos = handle_center + np.array(
                 [0, -(self.handle.size[1] + self.text.size[1] / 2)]
             )
         else:
-            offset = self.ratio * self._length
             handle_center = track_origin + np.array([self._line_width / 2, offset])
             text_pos = handle_center + np.array(
                 [self.handle.size[0] + self.text.size[0] / 2, 0]
@@ -623,9 +928,16 @@ class LineSlider2D(Slider2D):
         self.handle.set_position(
             handle_center, x_anchor=Anchor.CENTER, y_anchor=Anchor.CENTER
         )
-        self.text.set_position(text_pos, x_anchor=Anchor.CENTER, y_anchor=Anchor.CENTER)
-
         self.text.message = self.format_text()
+
+        if self._inline:
+            self.fill.resize((max(offset, 1), self._line_width))
+            self.fill.set_position(track_origin)
+            pos = self.get_position(x_anchor=Anchor.RIGHT, y_anchor=Anchor.TOP)
+            self.text.set_position(pos, x_anchor=Anchor.RIGHT, y_anchor=Anchor.TOP)
+            return
+
+        self.text.set_position(text_pos, x_anchor=Anchor.CENTER, y_anchor=Anchor.CENTER)
 
     def handle_move_callback(self, event):
         """
@@ -636,7 +948,8 @@ class LineSlider2D(Slider2D):
         event : PointerEvent
             The PyGfx pointer event.
         """
-        self.handle.color = self.active_color
+        self._dragging = True
+        self._update_handle_color()
 
         left_x = self.track.get_position(x_anchor=Anchor.LEFT)[0]
         bottom_y = self.track.get_position(y_anchor=Anchor.BOTTOM)[1]
@@ -713,12 +1026,13 @@ class PlaybackPanel(UI):
         """
         Set up internal components including buttons, slider, and text labels.
         """
+        border_width = self._theme_value("border_width")
         self.panel = Panel2D(
             size=(220, 45),
             color=self._theme_value("panel_color"),
-            has_border=True,
+            has_border=border_width > 0,
             border_color=self._theme_value("border_color"),
-            border_width=2,
+            border_width=border_width if border_width > 0 else None,
         )
 
         self.time_text = TextBlock2D(
@@ -771,8 +1085,11 @@ class PlaybackPanel(UI):
             text_template="",
             shape="disk",
             outer_radius=10,
+            layout="classic",
         )
-        self._progress_bar.track.color = self._theme_value("progress_color")
+        self._progress_bar._push_styles(track_color=self._theme_value("progress_color"))
+
+        self._apply_icon_color()
 
         self.panel.add_element(self._play_pause_btn, (10, 10))
         self.panel.add_element(self._stop_btn, (45, 10))
@@ -790,9 +1107,31 @@ class PlaybackPanel(UI):
 
         self.panel.on_left_mouse_button_pressed = self.left_button_pressed
         self.panel.on_left_mouse_button_dragged = self.left_button_dragged
-
         self.panel.background.on_left_mouse_button_pressed = self.left_button_pressed
         self.panel.background.on_left_mouse_button_dragged = self.left_button_dragged
+
+    def _refresh_style(self):
+        """Read the panel, text and progress colors again from the theme."""
+        self.panel._push_styles(
+            color=self._theme_value("panel_color"),
+            border_color=self._theme_value("border_color"),
+        )
+        self.time_text._push_style("color", self._theme_value("time_color"))
+        self.speed_text._push_style("color", self._theme_value("speed_color"))
+        self._progress_bar._push_styles(track_color=self._theme_value("progress_color"))
+        self._apply_icon_color()
+
+    def _apply_icon_color(self):
+        """Draw the button icons in the theme ``icon_color``, if it has one."""
+        icon_color = _theme_value_or_none(self, "icon_color")
+        for button in (
+            self._play_pause_btn,
+            self._stop_btn,
+            self._loop_btn,
+            self._speed_up_btn,
+            self._slow_down_btn,
+        ):
+            button._push_style("icon_color", icon_color)
 
     def _update_actors_position(self):
         """Update internal actor positions."""
@@ -1192,7 +1531,7 @@ class TextBox2D(UI):
         self.window_right = 0
         self.caret_pos = 0
         self.init = True
-        self._has_focus = False
+        self._set_focus(False)
 
         self._shift_pressed = False
         self._caps_lock_on = False
@@ -1240,11 +1579,10 @@ class TextBox2D(UI):
             dynamic_bbox=False,
             size=(bg_width, bg_height),
         )
-        self.text.color = self._color
         self.text.bold = self._bold
         self.text.italic = self._italic
         self.text.shadow = self._shadow
-        self.text.background_color = self._theme_value("bg_color")
+        self._apply_style()
 
         self._children.append(self.text)
 
@@ -1257,6 +1595,55 @@ class TextBox2D(UI):
         self.text.on_key_press = self.key_press
         self.text.on_key_release = self.key_release
         self.text.on_wheel = self.wheel_scroll
+
+    def _apply_style(self):
+        """Apply the themed colors, box style, text padding and focus ring."""
+        self.text._push_style("color", self._color)
+        self.text._push_style("background_color", self._theme_value("bg_color"))
+        self.text.set_layout(padding=self._theme_value("text_padding"))
+        self._apply_box_style(self.text.background)
+        self._update_focus_style()
+
+    def _update_focus_style(self):
+        """Show the focus ring while the text box is being edited."""
+        if not hasattr(self, "text"):
+            return
+        if self._has_focus:
+            self.text.background._push_style(
+                "border_color", self._theme_value("focus_border_color")
+            )
+            self.text.background._push_style(
+                "border_width", self._theme_value("focus_border_width")
+            )
+        else:
+            self.text.background._push_style(
+                "border_color", self._theme_value("border_color")
+            )
+            self.text.background._push_style(
+                "border_width", self._theme_value("border_width")
+            )
+
+    def _refresh_style(self):
+        """Read the colors, font and box style again from the theme."""
+        self._color = self._theme_value("color")
+        self._font_size = self._theme_value("font_size")
+        self._font_family = self._theme_value("font_family")
+        self.text._push_style("font_size", self._font_size)
+        self.text._push_style("font_family", self._font_family)
+        self._apply_style()
+        self.render_text(show_caret=self._has_focus)
+
+    def _set_focus(self, focused):
+        """
+        Set whether the text box is being edited, and update the focus ring.
+
+        Parameters
+        ----------
+        focused : bool
+            True when the text box gets the keyboard focus.
+        """
+        self._has_focus = bool(focused)
+        self._update_focus_style()
 
     def _update_height(self):
         """
@@ -1387,7 +1774,7 @@ class TextBox2D(UI):
                 self.add_character("\n")
             else:
                 self.render_text(show_caret=False)
-                self._has_focus = False
+                self._set_focus(False)
                 UIContext.active_ui = None
                 self.on_blur(None)
                 return True
@@ -1603,7 +1990,7 @@ class TextBox2D(UI):
                 self._message = ""
             self.init = False
             self.caret_pos = len(self._message)
-        self._has_focus = True
+        self._set_focus(True)
         UIContext.active_ui = self.text
         self.render_text()
 
@@ -1617,7 +2004,7 @@ class TextBox2D(UI):
             The pointer event.
         """
         if self._has_focus:
-            self._has_focus = False
+            self._set_focus(False)
             self.render_text(show_caret=False)
             self.on_blur(event)
 
@@ -1661,7 +2048,7 @@ class TextBox2D(UI):
 
         is_done = self.handle_character(key, key_char, modifiers)
         if is_done:
-            self._has_focus = False
+            self._set_focus(False)
             UIContext.active_ui = None
             self.render_text(show_caret=False)
             self.on_blur(event)
@@ -1735,6 +2122,20 @@ class LineDoubleSlider2D(UI):
         Stacking order of the slider.
     """
 
+    default_color = themed(
+        item="handle_color",
+        doc="Color of the handles at rest (theme item ``handle_color``).",
+    )
+    active_color = themed(
+        item="handle_active_color",
+        doc="Color of a handle while dragged (theme item ``handle_active_color``).",
+    )
+    hover_color = themed(
+        item="handle_hover_color",
+        doc="Color of a handle under the pointer, or None to keep the rest color "
+        "(theme item ``handle_hover_color``).",
+    )
+
     def __init__(
         self,
         *,
@@ -1758,8 +2159,10 @@ class LineDoubleSlider2D(UI):
         self._length = length
         self._line_width = line_width
 
-        self.default_color = self._theme_value("handle_color")
-        self.active_color = self._theme_value("handle_active_color")
+        self._set_style("handle_color", self._theme_value("handle_color"))
+        self._set_style("handle_active_color", self._theme_value("handle_active_color"))
+        self._set_style("handle_hover_color", self._theme_value("handle_hover_color"))
+        self._hovered = [False, False]
 
         if min_value >= max_value:
             raise ValueError(
@@ -1796,7 +2199,7 @@ class LineDoubleSlider2D(UI):
             else (self._line_width, self._length)
         )
         self.track = Rectangle2D(size=track_size)
-        self.track.color = self._theme_value("track_color")
+        self.track._push_style("color", self._theme_value("track_color"))
         self.track.z_order = self.z_order
 
         for _ in range(2):
@@ -1810,7 +2213,7 @@ class LineDoubleSlider2D(UI):
             else:
                 raise ValueError("shape must be 'disk' or 'square'")
 
-            handle.color = self.default_color
+            handle._push_style("color", self.default_color)
             handle.z_order = self.z_order + 1
             self.handles.append(handle)
 
@@ -1843,12 +2246,77 @@ class LineDoubleSlider2D(UI):
         self.handles[1].on_left_mouse_button_released = lambda e: (
             self.handle_release_callback(e, 1)
         )
+        for idx, handle in enumerate(self.handles):
+            handle.on_hover = lambda e, i=idx: self._set_handle_hovered(i, True)
+            handle.on_dishover = lambda e, i=idx: self._set_handle_hovered(i, False)
 
         self._active_handle = None
 
         self._children.extend(
             [self.track, self.handles[0], self.handles[1], self.texts[0], self.texts[1]]
         )
+
+    def _reset_interaction_state(self):
+        """
+        Cancel the drag and hover feedback of the handles.
+
+        Returns
+        -------
+        None
+            State is updated in place without dispatching callbacks.
+        """
+        super()._reset_interaction_state()
+        self._hovered = [False, False]
+        self._active_handle = None
+        for idx, handle in enumerate(self.handles):
+            handle._push_style("color", self._rest_color(idx))
+
+    def _set_handle_hovered(self, idx, hovered):
+        """
+        Show the hover color while the pointer is over a handle.
+
+        Parameters
+        ----------
+        idx : int
+            Index of the handle.
+        hovered : bool
+            True when the pointer entered the handle.
+        """
+        self._hovered[idx] = hovered
+        if self._active_handle != idx:
+            self.handles[idx]._push_style("color", self._rest_color(idx))
+
+    def _rest_color(self, idx):
+        """
+        Get the color of a handle that is not being dragged.
+
+        Parameters
+        ----------
+        idx : int
+            Index of the handle.
+
+        Returns
+        -------
+        color
+            The hover color while hovered, if the theme has one, otherwise
+            the default color.
+        """
+        if self._hovered[idx] and self.hover_color is not None:
+            return self.hover_color
+        return self.default_color
+
+    def _refresh_style(self):
+        """Read the track and handle colors again from the theme."""
+        self.track._push_style("color", self._theme_value("track_color"))
+        self._font_size = self._theme_value("font_size")
+        for text in self.texts:
+            if text.font_size != self._font_size:
+                text._push_style("font_size", self._font_size)
+        for idx, handle in enumerate(self.handles):
+            if self._active_handle == idx:
+                handle._push_style("color", self.active_color)
+            else:
+                handle._push_style("color", self._rest_color(idx))
 
     def handle_down(self, idx):
         """
@@ -1991,7 +2459,7 @@ class LineDoubleSlider2D(UI):
             else:
                 return
 
-        self.handles[idx].color = self.active_color
+        self.handles[idx]._push_style("color", self.active_color)
 
         left_x = self.track.get_position(x_anchor=Anchor.LEFT)[0]
         bottom_y = self.track.get_position(y_anchor=Anchor.BOTTOM)[1]
@@ -2033,12 +2501,12 @@ class LineDoubleSlider2D(UI):
         idx : int, optional
             Index of the handle being released.
         """
-        if idx is not None:
-            self.handles[idx].color = self.default_color
-        else:
-            self.handles[0].color = self.default_color
-            self.handles[1].color = self.default_color
         self._active_handle = None
+        if idx is not None:
+            self.handles[idx]._push_style("color", self._rest_color(idx))
+        else:
+            self.handles[0]._push_style("color", self._rest_color(0))
+            self.handles[1]._push_style("color", self._rest_color(1))
 
     @property
     def min_value(self):
@@ -2286,6 +2754,11 @@ class RingSlider2D(Slider2D):
 
         self.value = initial_value
 
+    def _refresh_style(self):
+        """Read the track and handle colors again from the theme."""
+        super(RingSlider2D, self)._refresh_style()
+        self.track._push_style("color", self._theme_value("track_color"))
+
     def _setup(self):
         """
         Setup this UI component.
@@ -2298,10 +2771,10 @@ class RingSlider2D(Slider2D):
             outer_radius=self._track_outer_radius,
             inner_radius=self._track_inner_radius,
         )
-        self.track.color = self._theme_value("track_color")
+        self.track._push_style("color", self._theme_value("track_color"))
         self.track.z_order = self.z_order
 
-        self.handle.color = self.default_color
+        self.handle._push_style("color", self.default_color)
 
         self.track.on_left_mouse_button_pressed = self.track_click_callback
         self.track.on_left_mouse_button_dragged = self.handle_move_callback
@@ -2379,7 +2852,8 @@ class RingSlider2D(Slider2D):
         event : PointerEvent
             The PyGfx pointer event.
         """
-        self.handle.color = self.active_color
+        self._dragging = True
+        self._update_handle_color()
         center = self.get_position(x_anchor=Anchor.CENTER, y_anchor=Anchor.CENTER)
         x, y = event.x - center[0], center[1] - event.y
         angle = np.arctan2(x, y) % TWO_PI
@@ -2505,10 +2979,17 @@ class RangeSlider(UI):
             shape=self.shape,
             orientation=self.orientation,
             text_template=self.value_slider_text_template,
+            layout="classic",
         )
 
         self.range_slider.on_moving_slider = self.range_slider_handle_move_callback
         self._children.extend([self.range_slider, self.value_slider])
+
+    def _refresh_style(self):
+        """Pass the font size of the theme to both sliders."""
+        self.font_size = self._theme_value("font_size")
+        self.range_slider._push_styles(font_size=self.font_size)
+        self.value_slider._push_styles(font_size=self.font_size)
 
     def _get_actors(self):
         """
@@ -2612,6 +3093,172 @@ def _toggle_icon_states(name):
     }
 
 
+def _checkmark_geometry(size):
+    """
+    Build a checkmark made of two thick strokes.
+
+    Parameters
+    ----------
+    size : float
+        Side of the box the checkmark is drawn in, in pixels.
+
+    Returns
+    -------
+    Geometry
+        Triangles of the checkmark, centered on the origin with +y up.
+    """
+    points = np.array([(-0.26, 0.02), (-0.07, -0.18), (0.27, 0.2)]) * size
+    half_width = 0.075 * size
+    positions = []
+    indices = []
+    for start, end in zip(points[:-1], points[1:], strict=True):
+        direction = (end - start) / np.linalg.norm(end - start)
+        normal = np.array([-direction[1], direction[0]]) * half_width
+        start = start - direction * half_width
+        end = end + direction * half_width
+        base = len(positions)
+        positions.extend([start + normal, start - normal, end - normal, end + normal])
+        indices.extend([(base, base + 1, base + 2), (base, base + 2, base + 3)])
+    positions = np.hstack([np.array(positions), np.zeros((len(positions), 1))])
+    return buffer_to_geometry(
+        positions=positions.astype(np.float32),
+        indices=np.array(indices, dtype=np.int32),
+    )
+
+
+class _BoxToggle2D(Button2D):
+    """
+    Checkbox or radio indicator drawn as a box instead of an icon.
+
+    The box is filled with the ``on`` color and shows its mark, a checkmark
+    or a dot, while toggled. Hovering or pressing highlights the border.
+
+    Parameters
+    ----------
+    size : int
+        Side of the box in pixels.
+    round_mark : bool
+        If True, the box is a circle with a dot, as for a radio button.
+        Otherwise it is a rounded square with a checkmark.
+    style : dict
+        Colors of the indicator, as returned by
+        :meth:`ButtonGroup._indicator_style`.
+    """
+
+    def __init__(self, *, size, round_mark, style):
+        """Initialize the indicator."""
+        self._round_mark = round_mark
+        self._style = style
+        self._shown = True
+        super(_BoxToggle2D, self).__init__(size=(size, size), is_toggle=True)
+
+    def _setup(self):
+        """Create the box and its mark."""
+        side = self._dims[0]
+        self.child = RoundedRectangle2D(size=self._dims, corner_radius=0)
+        self.handle_events(self.child.actor)
+        if self._round_mark:
+            self.mark = RoundedRectangle2D(
+                size=(side * 0.4, side * 0.4), corner_radius=side * 0.2
+            )
+            self.handle_events(self.mark.actor)
+        else:
+            material = _create_mesh_material(
+                material="basic", mode="auto", alpha_mode="blend"
+            )
+            material.side = "both"
+            self.mark = create_mesh(
+                geometry=_checkmark_geometry(side), material=material
+            )
+            self.handle_events(self.mark)
+
+    def set_style(self, style):
+        """
+        Change the colors of the indicator.
+
+        Parameters
+        ----------
+        style : dict
+            Colors of the indicator, as returned by
+            :meth:`ButtonGroup._indicator_style`.
+        """
+        self._style = style
+        self.update_visual_state()
+
+    def update_visual_state(self):
+        """Color the box and show the mark for the current state."""
+        if not self.child:
+            return
+        style = self._style
+        on = self.toggled
+        side = self._dims[0]
+        self.child._push_style(
+            "corner_radius", side / 2 if self._round_mark else min(3, side / 2)
+        )
+        self.child._push_style("border_width", 1)
+        self.child._push_style("color", style["on_color"] if on else style["color"])
+        if on:
+            border = style["on_color"]
+        elif self.is_hovered or self.is_pressed:
+            border = style["hover_border_color"]
+        else:
+            border = style["border_color"]
+        self.child._push_style("border_color", border)
+        opacity = 1.0 if self.enabled else style["disabled_opacity"]
+        self.child._push_style("opacity", opacity)
+        if self._round_mark:
+            self.mark._push_style("color", style["mark_color"])
+            self.mark._push_style("opacity", opacity)
+            self.mark.set_visibility(on and self._shown)
+        else:
+            self.mark.material.color = (
+                *normalize_colors(style["mark_color"])[0][:3],
+                1,
+            )
+            self.mark.material.opacity = opacity
+            self.mark.visible = on and self._shown
+
+    def set_visibility(self, visibility):
+        """
+        Show or hide the indicator. The mark only shows while toggled.
+
+        Parameters
+        ----------
+        visibility : bool
+            If True, the indicator is visible.
+        """
+        self._shown = bool(visibility)
+        self.child.set_visibility(visibility)
+        self.update_visual_state()
+
+    def _update_actors_position(self):
+        """Center the box and the mark on the indicator."""
+        if not self.child:
+            return
+        self.child.set_position(self.get_position())
+        self.child.z_order = self.z_order
+        center = self.get_position(x_anchor=Anchor.CENTER, y_anchor=Anchor.CENTER)
+        mark_actor = self.mark.actor if self._round_mark else self.mark
+        UIContext.z_order_bounds = self.z_order + 1
+        self.set_actor_position(mark_actor, center, self.z_order + 1)
+
+    def _get_actors(self):
+        """
+        Get the actors composing this UI component.
+
+        Returns
+        -------
+        list
+            The box and mark actors.
+        """
+        actors = list(self.child.actors)
+        if self._round_mark:
+            actors.extend(self.mark.actors)
+        else:
+            actors.append(self.mark)
+        return actors
+
+
 class ButtonGroup(UI):
     """
     Base class for a group of labeled toggle buttons.
@@ -2659,7 +3306,16 @@ class ButtonGroup(UI):
         Ordered list of option labels.
     options : dict
         Mapping of label to its ``(button, text)`` pair.
+
+    Notes
+    -----
+    When ``button_states`` is not given and the theme item ``indicator`` is
+    ``"box"``, as in the Graphite themes, the options are drawn as boxes
+    (checkboxes) or circles (radio buttons) colored by the theme instead of
+    icons. The indicator kind is chosen when the group is created.
     """
+
+    text_color = themed(item="text_color", doc="Color of the option labels.")
 
     @deprecated_params("padding", "gap", since="2.2.0", until="3.0.0")
     def __init__(
@@ -2692,14 +3348,22 @@ class ButtonGroup(UI):
         self._gap = gap
         self._font_size = font_size
         self.font_family = font_family
-        self.text_color = text_color
+        self._set_style("text_color", text_color)
 
+        self._box_indicator = (
+            button_states is None and self._theme_value("indicator") == "box"
+        )
         if button_states is None:
             button_states = self._make_button_states()
         self.button_states = button_states
 
-        self.button_size = (int(font_size * 1.2), int(font_size * 1.2))
-        self.button_label_gap = max(12, int(round(font_size * 0.8)))
+        if self._box_indicator:
+            side = max(12, int(round(font_size * 1.1)))
+            self.button_size = (side, side)
+            self.button_label_gap = self._theme_value("gap")
+        else:
+            self.button_size = (int(font_size * 1.2), int(font_size * 1.2))
+            self.button_label_gap = max(12, int(round(font_size * 0.8)))
 
         super(ButtonGroup, self).__init__(position=position, z_order=z_order)
 
@@ -2727,11 +3391,7 @@ class ButtonGroup(UI):
 
         rows = []
         for label in self.labels:
-            button = TexturedButton2D(
-                states=self.button_states,
-                size=self.button_size,
-                is_toggle=True,
-            )
+            button = self._make_button()
             text = TextBlock2D(
                 text=label,
                 font_size=self.font_size,
@@ -2761,6 +3421,71 @@ class ButtonGroup(UI):
         )
         self._box.z_order = self.z_order
         self._children.append(self._box)
+
+    def _make_button(self):
+        """
+        Create the toggle button of one option.
+
+        Returns
+        -------
+        Button2D
+            A drawn box indicator when the theme item ``indicator`` is
+            ``"box"`` and no icons were given, otherwise an icon button.
+        """
+        if self._box_indicator:
+            return _BoxToggle2D(
+                size=self.button_size[0],
+                round_mark=self._round_indicator,
+                style=self._indicator_style(),
+            )
+        return TexturedButton2D(
+            states=self.button_states,
+            size=self.button_size,
+            is_toggle=True,
+        )
+
+    @property
+    def _round_indicator(self):
+        """
+        Tell whether the box indicator is round, as for a radio button.
+
+        Returns
+        -------
+        bool
+            False for the square checkbox indicator.
+        """
+        return False
+
+    def _indicator_style(self):
+        """
+        Get the colors of the box indicators from the theme.
+
+        Returns
+        -------
+        dict
+            Colors and the opacity used while disabled.
+        """
+        return {
+            "color": self._theme_value("indicator_color"),
+            "on_color": self._theme_value("indicator_on_color"),
+            "border_color": self._theme_value("indicator_border_color"),
+            "hover_border_color": self._theme_value("indicator_hover_border_color"),
+            "mark_color": self._theme_value("mark_color"),
+            "disabled_opacity": self._theme_value("indicator_disabled_opacity"),
+        }
+
+    def _refresh_style(self):
+        """Read the label and indicator colors again from the theme."""
+        self.font_family = self._theme_value("font_family")
+        self._font_size = self._theme_value("font_size")
+        for button, text in self.options.values():
+            text._push_style("color", self.text_color)
+            if text._family_name != self.font_family:
+                text._push_style("font_family", self.font_family)
+            if text.font_size != self._font_size:
+                text._push_style("font_size", self._font_size)
+            if self._box_indicator:
+                button.set_style(self._indicator_style())
 
     def _get_actors(self):
         """
@@ -3053,6 +3778,18 @@ class RadioButton(ButtonGroup):
         """
         return _toggle_icon_states("circle")
 
+    @property
+    def _round_indicator(self):
+        """
+        Tell whether the box indicator is round, as for a radio button.
+
+        Returns
+        -------
+        bool
+            True: radio buttons use a circle with a dot.
+        """
+        return True
+
     def _handle_option_change(self, label):
         """
         Enforce single selection when an option is clicked.
@@ -3139,6 +3876,31 @@ class ComboBox2D(UI):
         Container for item list.
     """
 
+    sel_text_color = themed(
+        item="selection_text_color", doc="Color of the selected text."
+    )
+    sel_bg_color = themed(
+        item="selection_bg_color",
+        doc="Background color of the selection box.",
+    )
+    menu_txt_color = themed(item="menu_text_color", doc="Color of the menu text.")
+    selected_color = themed(
+        item="selected_color",
+        doc="Background color of the selected option.",
+    )
+    unselected_color = themed(
+        item="unselected_color",
+        doc="Background color of unselected options.",
+    )
+    scroll_active_color = themed(
+        item="scroll_bar_active_color",
+        doc="Color of the scroll bar while dragged.",
+    )
+    scroll_inactive_color = themed(
+        item="scroll_bar_inactive_color",
+        doc="Color of the scroll bar at rest.",
+    )
+
     def __init__(
         self,
         *,
@@ -3189,13 +3951,13 @@ class ComboBox2D(UI):
         self._drag_offset = None
         self._is_dragging = False
         self.draggable = draggable
-        self.sel_text_color = selection_text_color
-        self.sel_bg_color = selection_bg_color
-        self.menu_txt_color = menu_text_color
-        self.selected_color = selected_color
-        self.unselected_color = unselected_color
-        self.scroll_active_color = scroll_bar_active_color
-        self.scroll_inactive_color = scroll_bar_inactive_color
+        self._set_style("selection_text_color", selection_text_color)
+        self._set_style("selection_bg_color", selection_bg_color)
+        self._set_style("menu_text_color", menu_text_color)
+        self._set_style("selected_color", selected_color)
+        self._set_style("unselected_color", unselected_color)
+        self._set_style("scroll_bar_active_color", scroll_bar_active_color)
+        self._set_style("scroll_bar_inactive_color", scroll_bar_inactive_color)
         self.menu_opacity = menu_opacity
 
         (
@@ -3226,8 +3988,13 @@ class ComboBox2D(UI):
             bold=True,
         )
 
+        self._apply_box_style(self.selection_box.background)
+
         self.drop_down_button = TexturedButton2D(
             states=self._icon_files, size=self.drop_button_size, is_toggle=True
+        )
+        self.drop_down_button._push_style(
+            "icon_color", _theme_value_or_none(self, "icon_color")
         )
 
         self.drop_down_menu = ListBox2D(
@@ -3273,6 +4040,27 @@ class ComboBox2D(UI):
         self.on_change = lambda ui: None
 
         self._children.extend([self.panel])
+
+    def _refresh_style(self):
+        """Read the selection and menu colors again from the theme."""
+        self.selection_box._push_style("color", self.sel_text_color)
+        self.selection_box._push_style("background_color", self.sel_bg_color)
+        self._apply_box_style(self.selection_box.background)
+        scale = getattr(self, "_font_scale", 1.0)
+        self.font_size = max(1, int(round(self._theme_value("font_size") * scale)))
+        if self.selection_box.font_size != self.font_size:
+            self.selection_box._push_style("font_size", self.font_size)
+        self.drop_down_menu._push_styles(
+            font_size=self.font_size,
+            text_color=self.menu_txt_color,
+            selected_color=self.selected_color,
+            unselected_color=self.unselected_color,
+            scroll_bar_active_color=self.scroll_active_color,
+            scroll_bar_inactive_color=self.scroll_inactive_color,
+        )
+        self.drop_down_button._push_style(
+            "icon_color", _theme_value_or_none(self, "icon_color")
+        )
 
     def _setup_drag_events(self):
         """Attach drag event handlers to all interactive surfaces."""
@@ -3334,6 +4122,7 @@ class ComboBox2D(UI):
             ComboBox size(width, height) in pixels.
         """
         ratio = size[1] / self.panel_size[1]
+        self._font_scale = getattr(self, "_font_scale", 1.0) * ratio
         self.font_size = max(1, int(self.font_size * ratio))
         self.panel_size = size
 
@@ -3343,12 +4132,12 @@ class ComboBox2D(UI):
             self.drop_button_size,
         ) = self._calculate_layout(size)
 
-        self.drop_down_menu.font_size = self.font_size
+        self.drop_down_menu._push_style("font_size", self.font_size)
         self.drop_down_menu.slot_height = max(
             1, int(self.font_size * self.drop_down_menu.line_spacing)
         )
 
-        self.selection_box.font_size = self.font_size
+        self.selection_box._push_style("font_size", self.font_size)
         self.panel.resize(size)
         self.panel.update_layout()
 
@@ -3554,6 +4343,24 @@ class ListBox2D(UI):
         Callback function for when the selected items have changed.
     """
 
+    text_color = themed(item="text_color", doc="Color of the item text.")
+    selected_color = themed(
+        item="selected_color",
+        doc="Background color of selected items.",
+    )
+    unselected_color = themed(
+        item="unselected_color",
+        doc="Background color of unselected items.",
+    )
+    scroll_bar_active_color = themed(
+        item="scroll_bar_active_color",
+        doc="Color of the scroll bar while dragged.",
+    )
+    scroll_bar_inactive_color = themed(
+        item="scroll_bar_inactive_color",
+        doc="Color of the scroll bar at rest.",
+    )
+
     def __init__(
         self,
         values,
@@ -3591,9 +4398,9 @@ class ListBox2D(UI):
         self.line_spacing = line_spacing
         self.slot_height = int(self.font_size * self.line_spacing)
 
-        self.text_color = text_color
-        self.selected_color = selected_color
-        self.unselected_color = unselected_color
+        self._set_style("text_color", text_color)
+        self._set_style("selected_color", selected_color)
+        self._set_style("unselected_color", unselected_color)
         self.background_opacity = background_opacity
 
         self.values = values
@@ -3609,10 +4416,10 @@ class ListBox2D(UI):
             self.slot_height * self.nb_slots - self.scroll_bar.height
         ) / denom
 
-        self.scroll_bar_active_color = scroll_bar_active_color
-        self.scroll_bar_inactive_color = scroll_bar_inactive_color
-        self.scroll_bar.color = self.scroll_bar_inactive_color
-        self.scroll_bar.opacity = self.background_opacity
+        self._set_style("scroll_bar_active_color", scroll_bar_active_color)
+        self._set_style("scroll_bar_inactive_color", scroll_bar_inactive_color)
+        self.scroll_bar._push_style("color", self.scroll_bar_inactive_color)
+        self.scroll_bar._push_style("opacity", self.background_opacity)
 
         self.position = position
         self.scroll_init_position = 0
@@ -3620,6 +4427,37 @@ class ListBox2D(UI):
 
         # Offer some standard hooks to the user.
         self.on_change = lambda: None
+
+    def _refresh_style(self):
+        """Read the panel, item and scroll bar colors again from the theme."""
+        self.panel._push_style("color", self._theme_value("panel_color"))
+        self.scroll_bar._push_style("color", self.scroll_bar_inactive_color)
+        self.font_size = self._theme_value("font_size")
+        for index, slot in enumerate(self.slots):
+            if slot.textblock.font_size != self.font_size:
+                slot.textblock._push_style("font_size", self.font_size)
+            slot._push_styles(
+                text_color=self._slot_text_color(index),
+                selected_color=self.selected_color,
+                unselected_color=self.unselected_color,
+            )
+
+    def _slot_text_color(self, index):
+        """
+        Get the text color of a slot.
+
+        Parameters
+        ----------
+        index : int
+            Index of the slot.
+
+        Returns
+        -------
+        color
+            The text color of the list. Widgets built on the list may
+            replace this method to color entries differently.
+        """
+        return self.text_color
 
     def _setup(self):
         """
@@ -3663,7 +4501,7 @@ class ListBox2D(UI):
                 unselected_color=self.unselected_color,
                 background_opacity=self.background_opacity,
             )
-            item.textblock.font_size = font_size
+            item.textblock._push_style("font_size", font_size)
             self.slots.append(item)
             self.panel.add(item, height=self.slot_height)
         self.panel.update_layout()
@@ -3699,7 +4537,9 @@ class ListBox2D(UI):
         self.panel_size = np.array(size, dtype=int)
         self.panel.resize(size)
 
-        self.nb_slots = int((size[1] - 2 * self.padding) // max(1, self.slot_height))
+        self.nb_slots = max(
+            int((size[1] - 2 * self.padding) // max(1, self.slot_height)), 0
+        )
 
         new_scrollbar_width = int(size[0] / 20)
         self._scroll_bar_x = int(size[0] - new_scrollbar_width - self.padding)
@@ -3711,7 +4551,7 @@ class ListBox2D(UI):
             font_size = self.font_size
 
             for _ in range(self.nb_slots - len(self.slots)):
-                with theme_scope(self.theme):
+                with _inherited_theme_scope(self.theme):
                     item = ListBoxItem2D(
                         on_select=self.select,
                         size=(self.slot_width, self.slot_height),
@@ -3720,7 +4560,7 @@ class ListBox2D(UI):
                         unselected_color=self.unselected_color,
                         background_opacity=self.background_opacity,
                     )
-                item.textblock.font_size = font_size
+                item.textblock._push_style("font_size", font_size)
                 item.background.actor.add_event_handler(
                     self.wheel_callback, EventType.WHEEL
                 )
@@ -3735,7 +4575,7 @@ class ListBox2D(UI):
             self.panel.remove_element(item)
 
         for slot in self.slots:
-            slot.textblock.font_size = self.font_size
+            slot.textblock._push_style("font_size", self.font_size)
             slot.set_layout(height=self.slot_height)
         self.panel.update_layout()
 
@@ -3856,7 +4696,7 @@ class ListBox2D(UI):
         event : object
             The pygfx event.
         """
-        self.scroll_bar.color = self.scroll_bar_active_color
+        self.scroll_bar._push_style("color", self.scroll_bar_active_color)
         self.scroll_init_position = event.y
 
     def scroll_release_callback(self, event):
@@ -3868,7 +4708,7 @@ class ListBox2D(UI):
         event : object
             The pygfx event.
         """
-        self.scroll_bar.color = self.scroll_bar_inactive_color
+        self.scroll_bar._push_style("color", self.scroll_bar_inactive_color)
 
     def scroll_drag_callback(self, event):
         """
@@ -4009,7 +4849,26 @@ class ListBoxItem2D(UI):
         Defaults to the theme item of the same name.
     background_opacity : float, optional
         Opacity.
+
+    Notes
+    -----
+    ``background`` is a :class:`RoundedRectangle2D`. It was a
+    :class:`Rectangle2D` before themes had box styles.
     """
+
+    text_color = themed(item="text_color", doc="Color of the item text.")
+    selected_color = themed(
+        item="selected_color",
+        doc="Background color when selected.",
+    )
+    unselected_color = themed(
+        item="unselected_color",
+        doc="Background color when not selected.",
+    )
+    hover_color = themed(
+        item="hover_color",
+        doc="Background color under the pointer, or None for no hover color.",
+    )
 
     def __init__(
         self,
@@ -4049,12 +4908,66 @@ class ListBoxItem2D(UI):
         self.background.resize(size)
         self.background_opacity = background_opacity
         self.selected = False
-        self.text_color = text_color
-        self.textblock.color = self.text_color
-        self.selected_color = selected_color
-        self.unselected_color = unselected_color
-        self.background.opacity = self.background_opacity
+        self._set_style("text_color", text_color)
+        self.textblock._push_style("color", self.text_color)
+        self._set_style("selected_color", selected_color)
+        self._set_style("unselected_color", unselected_color)
+        self.background._push_style("opacity", self.background_opacity)
+        self._set_style("hover_color", self._theme_value("hover_color"))
+        self._apply_box_style(self.background)
         self.deselect()
+
+    def _refresh_style(self):
+        """Read the colors and box style again from the theme."""
+        self.textblock._push_style("color", self.text_color)
+        self._apply_box_style(self.background)
+        self._update_background()
+
+    def _handle_hover(self, event):
+        """
+        Highlight the item while the pointer is over it.
+
+        Parameters
+        ----------
+        event : PointerEvent
+            The PyGfx pointer event.
+        """
+        self._hovered = True
+        self._update_background()
+
+    def _handle_dishover(self, event):
+        """
+        Remove the hover highlight when the pointer leaves the item.
+
+        Parameters
+        ----------
+        event : PointerEvent
+            The PyGfx pointer event.
+        """
+        self._hovered = False
+        self._update_background()
+
+    def _reset_interaction_state(self):
+        """
+        Cancel the hover highlight of the item.
+
+        Returns
+        -------
+        None
+            State is updated in place without dispatching callbacks.
+        """
+        super()._reset_interaction_state()
+        self._hovered = False
+        self._update_background()
+
+    def _update_background(self):
+        """Color the background for the selected, hovered or default state."""
+        if self.selected:
+            self.background._push_style("color", self.selected_color)
+        elif self._hovered and self.hover_color is not None:
+            self.background._push_style("color", self.hover_color)
+        else:
+            self.background._push_style("color", self.unselected_color)
 
     def _setup(self):
         """
@@ -4063,16 +4976,20 @@ class ListBoxItem2D(UI):
         Create the ListBoxItem2D with its background (Rectangle2D) and its
         label (TextBlock2D).
         """
-        self.background = Rectangle2D(size=self._item_size)
+        self.background = RoundedRectangle2D(size=self._item_size, corner_radius=0)
         self.textblock = TextBlock2D(
             size=self._item_size,
             justification="left",
             vertical_justification="middle",
         )
+        self._hovered = False
 
         # Add default events listener for this UI component.
         self.textblock.on_left_mouse_button_clicked = self.left_button_clicked
         self.background.on_left_mouse_button_clicked = self.left_button_clicked
+        for part in (self.background, self.textblock):
+            part.on_hover = self._handle_hover
+            part.on_dishover = self._handle_dishover
 
         self._children.extend([self.background, self.textblock])
 
@@ -4111,17 +5028,17 @@ class ListBoxItem2D(UI):
 
     def deselect(self):
         """Deselect the item and remove highlight."""
-        self.background.color = self.unselected_color
         self.textblock.bold = False
         self.textblock.message = self.textblock.message  # Force redraw
         self.selected = False
+        self._update_background()
 
     def select(self):
         """Select the item and highlight its background."""
         self.textblock.bold = True
         self.textblock.message = self.textblock.message  # Force redraw
-        self.background.color = self.selected_color
         self.selected = True
+        self._update_background()
 
     @property
     def element(self):
@@ -4238,6 +5155,12 @@ class TreeNode2D(UI):
         Whether the current node is expanded or not.
     """
 
+    selected_color = themed(item="selected_color", doc="Title color when selected.")
+    unselected_color = themed(
+        item="color",
+        doc="Title color when not selected (theme item ``color``).",
+    )
+
     def __init__(
         self,
         label,
@@ -4290,8 +5213,8 @@ class TreeNode2D(UI):
 
         self.selected = False
         self.selected_nodes = []
-        self.selected_color = selected_color
-        self.unselected_color = color
+        self._set_style("selected_color", selected_color)
+        self._set_style("color", color)
         self._initial_opacity = opacity
         self.multiselect = multiselect
 
@@ -4303,6 +5226,33 @@ class TreeNode2D(UI):
 
         self.on_node_select = lambda ui: None
         self.on_node_deselect = lambda ui: None
+
+    def _theme_children(self):
+        """
+        Get the components restyled together with this node.
+
+        Returns
+        -------
+        list of UI
+            The children of this component and its child nodes.
+        """
+        children = super(TreeNode2D, self)._theme_children()
+        known = {id(child) for child in children}
+        children.extend(
+            node
+            for node in self._child_nodes
+            if isinstance(node, UI) and id(node) not in known
+        )
+        return children
+
+    def _refresh_style(self):
+        """Show the title color and draw the expand icon in the theme color."""
+        if "title_color" not in self._style_state()[0]:
+            self._set_style(
+                "title_color",
+                self.selected_color if self.selected else self.unselected_color,
+            )
+        self.button._push_style("icon_color", _theme_value_or_none(self, "icon_color"))
 
     def _setup(self):
         """
@@ -4337,6 +5287,7 @@ class TreeNode2D(UI):
             size=(_btn_size, _btn_size),
             is_toggle=True,
         )
+        self.button._push_style("icon_color", _theme_value_or_none(self, "icon_color"))
 
         _btn_y = (self.child_height - _btn_size) // 2
         icon_width = self.label_image.size[0] if self.has_icon else 0
@@ -4810,8 +5761,7 @@ class TreeNode2D(UI):
         """
         return self._child_nodes
 
-    @property
-    def color(self):
+    def _get_color(self):
         """
         Get the background color of the title panel.
 
@@ -4822,8 +5772,7 @@ class TreeNode2D(UI):
         """
         return self.title_panel.color
 
-    @color.setter
-    def color(self, color):
+    def _show_color(self, color):
         """
         Set background color of the title panel.
 
@@ -4832,10 +5781,11 @@ class TreeNode2D(UI):
         color : list of 3 floats
             The new background color.
         """
-        self.title_panel.color = color
+        self._forward(self.title_panel, "color", color)
 
-    @property
-    def opacity(self):
+    color = themed(_get_color, _show_color, item="title_color")
+
+    def _get_opacity(self):
         """
         Get the background opacity of title panel.
 
@@ -4846,8 +5796,7 @@ class TreeNode2D(UI):
         """
         return self.title_panel.opacity
 
-    @opacity.setter
-    def opacity(self, opacity):
+    def _show_opacity(self, opacity):
         """
         Set the background opacity of title panel.
 
@@ -4856,10 +5805,11 @@ class TreeNode2D(UI):
         opacity : float
             The new opacity.
         """
-        self.title_panel.opacity = opacity
+        self._forward(self.title_panel, "opacity", opacity)
 
-    @property
-    def content_color(self):
+    opacity = themed(_get_opacity, _show_opacity)
+
+    def _get_content_color(self):
         """
         Return the background color of the content panel.
 
@@ -4870,8 +5820,7 @@ class TreeNode2D(UI):
         """
         return self.content_panel.color
 
-    @content_color.setter
-    def content_color(self, color):
+    def _show_content_color(self, color):
         """
         Set background color of the content panel.
 
@@ -4880,10 +5829,11 @@ class TreeNode2D(UI):
         color : list of 3 floats
             The new color.
         """
-        self.content_panel.color = color
+        self._forward(self.content_panel, "color", color)
 
-    @property
-    def content_opacity(self):
+    content_color = themed(_get_content_color, _show_content_color)
+
+    def _get_content_opacity(self):
         """
         Get the background opacity of content panel.
 
@@ -4894,8 +5844,7 @@ class TreeNode2D(UI):
         """
         return self.content_panel.opacity
 
-    @content_opacity.setter
-    def content_opacity(self, opacity):
+    def _show_content_opacity(self, opacity):
         """
         Set the background opacity of content panel.
 
@@ -4904,7 +5853,9 @@ class TreeNode2D(UI):
         opacity : float
             The new opacity.
         """
-        self.content_panel.opacity = opacity
+        self._forward(self.content_panel, "opacity", opacity)
+
+    content_opacity = themed(_get_content_opacity, _show_content_opacity)
 
     @property
     def child_height(self):
@@ -5031,7 +5982,7 @@ class TreeNode2D(UI):
     def clear_selections(self):
         """Clear all the selected nodes."""
         for selected_node in self.selected_nodes:
-            selected_node.color = selected_node.unselected_color
+            selected_node._push_style("color", selected_node.unselected_color)
 
             if selected_node.has_icon:
                 icon_data = selected_node.node_icons["unselected"]
@@ -5065,7 +6016,7 @@ class TreeNode2D(UI):
 
                 self.parent.selected_nodes.append(self)
 
-            self.color = self.selected_color
+            self._set_style("title_color", self.selected_color)
             if self.has_icon:
                 icon_data = self.node_icons["selected"]
                 self.label_image.set_img(
@@ -5081,7 +6032,7 @@ class TreeNode2D(UI):
                 if not self.multiselect:
                     self.parent.clear_selections()
 
-            self.color = self.unselected_color
+            self._set_style("title_color", self.unselected_color)
             if self.has_icon:
                 icon_data = self.node_icons["unselected"]
                 self.label_image.set_img(
@@ -5187,6 +6138,14 @@ class Tree2D(UI):
         Path/URl to the icon placed next to the label for selected state.
     """
 
+    scroll_bar_active_color = themed(
+        item="scroll_bar_active_color",
+        doc="Color of the scroll bar when the tree overflows or while dragged.",
+    )
+    scroll_bar_inactive_color = themed(
+        item="scroll_bar_inactive_color", doc="Color of the scroll bar at rest."
+    )
+
     def __init__(
         self,
         structure,
@@ -5229,8 +6188,8 @@ class Tree2D(UI):
         self.selected_icon = selected_icon
         self._tree_color = color
         self._tree_opacity = opacity
-        self.scroll_bar_active_color = scroll_bar_active_color
-        self.scroll_bar_inactive_color = scroll_bar_inactive_color
+        self._set_style("scroll_bar_active_color", scroll_bar_active_color)
+        self._set_style("scroll_bar_inactive_color", scroll_bar_inactive_color)
         self.view_offset = 0
         self.scroll_init_position = 0
         self.scroll_step_size = 0
@@ -5356,6 +6315,27 @@ class Tree2D(UI):
 
         bind_node_wheel(self.base_node)
 
+    def _scroll_bar_color(self):
+        """
+        Get the scroll bar color for the current content height.
+
+        Returns
+        -------
+        color
+            The active color when the tree overflows, otherwise the inactive
+            color.
+        """
+        visible_height = self.content_size[1] - self.base_node.child_height
+        if self.base_node.children_size() > visible_height:
+            return self.scroll_bar_active_color
+        return self.scroll_bar_inactive_color
+
+    def _refresh_style(self):
+        """Read the tree and scroll bar colors again from the theme."""
+        self._tree_color = self._theme_value("color")
+        self.base_node._push_styles(color=self._tree_color)
+        self.scroll_bar._push_style("color", self._scroll_bar_color())
+
     def _get_actors(self):
         """
         Get the actors composing this UI component.
@@ -5398,11 +6378,11 @@ class Tree2D(UI):
         if actual_height <= visible_height:
             self.scroll_bar.height = actual_height
             self.view_offset = 0
-            self.scroll_bar.color = self.scroll_bar_inactive_color
+            self.scroll_bar._push_style("color", self.scroll_bar_inactive_color)
 
             self.scroll_step_size = 0
         else:
-            self.scroll_bar.color = self.scroll_bar_active_color
+            self.scroll_bar._push_style("color", self.scroll_bar_active_color)
             self.scroll_bar.height = int(
                 max(20, visible_height * visible_height / actual_height)
             )
@@ -5438,7 +6418,7 @@ class Tree2D(UI):
         event : PointerEvent
             The pygfx pointer event.
         """
-        self.scroll_bar.color = self.scroll_bar_active_color
+        self.scroll_bar._push_style("color", self.scroll_bar_active_color)
         self.scroll_init_position = event.y
 
     def scroll_release_callback(self, event):
@@ -5450,7 +6430,7 @@ class Tree2D(UI):
         event : PointerEvent
             The pygfx pointer event.
         """
-        self.scroll_bar.color = self.scroll_bar_inactive_color
+        self.scroll_bar._push_style("color", self.scroll_bar_inactive_color)
 
     def scroll_drag_callback(self, event):
         """
@@ -5510,7 +6490,7 @@ class Tree2D(UI):
         structure : list of dicts
             [{'node': ['child', 'child']}, .....].
         """
-        with theme_scope(self.theme):
+        with _inherited_theme_scope(self.theme):
             for obj in structure:
                 parent_label = list(obj.keys())[0]
                 child_labels = list(obj.values())[0]
@@ -5707,9 +6687,16 @@ class FileMenu2D(UI):
         # directory vs. file coloring stays correct after scrolling too.
         self._listbox_update = self.listbox.update
         self.listbox.update = self._update_listbox_and_colors
+        self.listbox._slot_text_color = self._entry_text_color
         self.listbox.on_change = self.directory_click_callback
 
         self._children.extend([self.listbox])
+
+    def _refresh_style(self):
+        """Read the font size and entry colors again from the theme."""
+        self.font_size = self._theme_value("font_size")
+        self.listbox._push_styles(font_size=self.font_size)
+        self.set_slot_colors()
 
     def _get_actors(self):
         """
@@ -5816,6 +6803,28 @@ class FileMenu2D(UI):
         file_names.sort(key=lambda s: s.lower())
         return file_names
 
+    def _entry_text_color(self, index):
+        """
+        Get the text color of the entry shown in a slot.
+
+        Parameters
+        ----------
+        index : int
+            Index of the slot.
+
+        Returns
+        -------
+        color
+            The directory or file color of the theme.
+        """
+        list_idx = self.listbox.view_offset + index
+        if list_idx < len(self.directory_contents):
+            if self.directory_contents[list_idx][1] == "directory":
+                return self._theme_value("directory_color")
+            if self.directory_contents[list_idx][1] == "file":
+                return self._theme_value("file_color")
+        return self.listbox.text_color
+
     def set_slot_colors(self):
         """
         Color each slot's text by the type of entry it shows.
@@ -5827,9 +6836,9 @@ class FileMenu2D(UI):
             if list_idx >= len(self.directory_contents):
                 continue
             if self.directory_contents[list_idx][1] == "directory":
-                slot.textblock.color = self._theme_value("directory_color")
+                slot._push_style("text_color", self._theme_value("directory_color"))
             elif self.directory_contents[list_idx][1] == "file":
-                slot.textblock.color = self._theme_value("file_color")
+                slot._push_style("text_color", self._theme_value("file_color"))
 
     def directory_click_callback(self):
         """Move into the selected entry if it is a directory."""
@@ -6412,7 +7421,9 @@ class Card2D(UI):
         Border color, same formats as ``bg_color``.
         Defaults to the theme item of the same name.
     border_width : int, optional
-        Width of the border in pixels.
+        Width of the border in pixels. A width of 0 uses the panel's themed
+        box style instead.
+        Defaults to the theme item of the same name.
     maintain_aspect : bool, optional
         If True, the image is scaled to maintain its aspect ratio.
     z_order : int, optional
@@ -6446,7 +7457,7 @@ class Card2D(UI):
         title_color=None,
         body_color=None,
         border_color=None,
-        border_width=0,
+        border_width=None,
         maintain_aspect=False,
         z_order=0,
     ):
@@ -6484,8 +7495,8 @@ class Card2D(UI):
         if self.maintain_aspect:
             self._true_image_size = self._image_data.shape[:2][::-1]
 
-        self.border_width = border_width
-        self.has_border = bool(border_width)
+        self.border_width = self._theme_value("border_width", border_width)
+        self.has_border = bool(self.border_width)
 
         super(Card2D, self).__init__(position=position, z_order=z_order)
 
@@ -6519,6 +7530,7 @@ class Card2D(UI):
             bold=True,
             color=self._title_color,
             size=_title_box_size,
+            font_weight=self._theme_value("title_font_weight"),
         )
 
         self.panel = Panel2D(
@@ -6526,7 +7538,7 @@ class Card2D(UI):
             color=self._bg_color,
             opacity=self._bg_opacity,
             border_color=self._border_color,
-            border_width=self.border_width,
+            border_width=self.border_width if self.has_border else None,
             has_border=self.has_border,
         )
 
@@ -6540,6 +7552,19 @@ class Card2D(UI):
 
         self._setup_drag_events()
         self._children.append(self.panel)
+
+    def _refresh_style(self):
+        """Read the card colors and title weight again from the theme."""
+        self._title_color = normalize_colors(self._theme_value("title_color"))[0]
+        self._body_color = normalize_colors(self._theme_value("body_color"))[0]
+        self._bg_color = normalize_colors(self._theme_value("bg_color"))[0]
+        self._border_color = normalize_colors(self._theme_value("border_color"))[0]
+        self.title_box._push_style("color", self._title_color)
+        self.title_box._push_style(
+            "font_weight", self._theme_value("title_font_weight")
+        )
+        self.body_box._push_style("color", self._body_color)
+        self.panel._push_styles(color=self._bg_color, border_color=self._border_color)
 
     def _setup_drag_events(self):
         """Attach drag event handlers to all interactive card surfaces."""
@@ -6608,8 +7633,7 @@ class Card2D(UI):
         """Update the internal position of the UI element."""
         self.panel.set_position(self.get_position())
 
-    @property
-    def color(self):
+    def _get_color(self):
         """
         Get the background color of the card.
 
@@ -6620,8 +7644,7 @@ class Card2D(UI):
         """
         return self.panel.color
 
-    @color.setter
-    def color(self, color):
+    def _show_color(self, color):
         """
         Set the background color of the card.
 
@@ -6630,7 +7653,10 @@ class Card2D(UI):
         color : str, tuple, list or ndarray
             A hex string ("#FF0000"), RGB(A) in [0, 1], or RGB(A) in [0, 255].
         """
-        self.panel.color = normalize_colors(color)[0]
+        self._bg_color = normalize_colors(color)[0]
+        self._forward(self.panel, "color", self._bg_color)
+
+    color = themed(_get_color, _show_color, item="bg_color")
 
     @property
     def body(self):
@@ -6681,7 +7707,30 @@ class Card2D(UI):
         self.title_box.message = text
 
     @property
-    def opacity(self):
+    def bg_color(self):
+        """
+        Get the background color of the card, the same as :attr:`color`.
+
+        Returns
+        -------
+        ndarray
+            RGB color of the card background.
+        """
+        return self.color
+
+    @bg_color.setter
+    def bg_color(self, color):
+        """
+        Set the background color of the card, the same as :attr:`color`.
+
+        Parameters
+        ----------
+        color : str, tuple, list or ndarray
+            A hex string, RGB(A) in [0, 1], or RGB(A) in [0, 255].
+        """
+        self.color = color
+
+    def _get_opacity(self):
         """
         Get the opacity of the card.
 
@@ -6692,8 +7741,7 @@ class Card2D(UI):
         """
         return self.panel.opacity
 
-    @opacity.setter
-    def opacity(self, value):
+    def _show_opacity(self, value):
         """
         Set the opacity of the card.
 
@@ -6702,7 +7750,9 @@ class Card2D(UI):
         value : float
             The new opacity of the card.
         """
-        self.panel.opacity = np.clip(value, 0, 1)
+        self._forward(self.panel, "opacity", np.clip(value, 0, 1))
+
+    opacity = themed(_get_opacity, _show_opacity, item="bg_opacity")
 
     def left_button_pressed(self, event):
         """
@@ -6810,6 +7860,8 @@ class SpinBox(UI):
         Decreases the value by ``step`` when clicked.
     """
 
+    panel_color = themed(item="panel_color", doc="Background color of the panel.")
+
     def __init__(
         self,
         *,
@@ -6829,7 +7881,7 @@ class SpinBox(UI):
         panel_color = self._theme_value("panel_color", panel_color)
         self.panel_size = size
         self.padding = padding
-        self.panel_color = panel_color
+        self._set_style("panel_color", panel_color)
         self.min_val = min_val
         self.max_val = max_val
         self.step = step
@@ -6859,6 +7911,7 @@ class SpinBox(UI):
         self.decrement_button = TexturedButton2D(
             states={"default": read_viz_icons(fname="circle-down.png")}
         )
+        self._apply_icon_color()
 
         self.panel.set_layout(padding=self.padding, gap=self.padding)
         self.panel.add(self.textbox, width=grow(), height=grow())
@@ -6923,6 +7976,17 @@ class SpinBox(UI):
     def _update_actors_position(self):
         """Update the internal position of the UI element."""
         self.panel.set_position(self.get_position())
+
+    def _refresh_style(self):
+        """Read the panel and icon colors again from the theme."""
+        self.panel._push_style("color", self.panel_color)
+        self._apply_icon_color()
+
+    def _apply_icon_color(self):
+        """Draw the button icons in the theme ``icon_color``, if it has one."""
+        icon_color = _theme_value_or_none(self, "icon_color")
+        for button in (self.increment_button, self.decrement_button):
+            button._push_style("icon_color", icon_color)
 
     def increment_callback(self, button):
         """

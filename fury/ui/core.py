@@ -24,12 +24,221 @@ from fury.ui.helpers import (
     get_anchor_to_multiplier,
 )
 from fury.ui.layout import LayoutNode, compute_sizes, place
-from fury.ui.theme import get_theme, theme_scope
+from fury.ui.theme import _as_theme, _inherited_theme_scope, get_theme
 
 _TEXT_FIT_TOLERANCE = 1
 
+BOX_STYLE_ITEMS = (
+    "corner_radius",
+    "border_color",
+    "border_width",
+    "shadow_color",
+    "shadow_offset",
+    "shadow_blur",
+    "shadow_spread",
+)
 
-class UI(object, metaclass=abc.ABCMeta):
+
+def _to_rgba(color):
+    """
+    Convert a color in any supported format to RGBA.
+
+    Parameters
+    ----------
+    color : str, tuple, list or ndarray
+        A hex string, RGB(A) in [0, 1], or RGB(A) in [0, 255].
+
+    Returns
+    -------
+    ndarray
+        RGBA color in [0, 1]. Opaque when no alpha was given.
+    """
+    color = normalize_colors(color)[0]
+    if color.shape[0] == 3:
+        color = np.append(color, 1.0)
+    return color.astype(float)
+
+
+class themed:
+    """
+    Descriptor for a themed value of a UI component.
+
+    The value is stored under its theme item name. A value assigned through
+    the attribute is the user's choice and is kept when the theme changes; a
+    parent widget writes with ``_push_style``, and the theme with
+    ``_set_style``. Like a property, it takes an optional getter, and a
+    function that displays a new value.
+
+    Parameters
+    ----------
+    fget : callable, optional
+        Function returning the current value. Without it, the last value set
+        is returned, as an RGB tuple of floats for color items.
+    fshow : callable, optional
+        Function displaying a new value. It may raise to reject the value,
+        which is then not stored.
+    item : str, optional
+        Theme item name. Defaults to the attribute name.
+    doc : str, optional
+        Docstring, taken from ``fget`` when not given.
+    reset_on_none : bool, optional
+        If True, assigning None makes the value follow the theme again.
+    """
+
+    def __init__(
+        self, fget=None, fshow=None, *, item=None, doc=None, reset_on_none=False
+    ):
+        """
+        Initialize the descriptor.
+
+        Parameters
+        ----------
+        fget : callable, optional
+            Function returning the current value.
+        fshow : callable, optional
+            Function displaying a new value.
+        item : str, optional
+            Theme item name.
+        doc : str, optional
+            Docstring.
+        reset_on_none : bool, optional
+            If True, assigning None makes the value follow the theme again.
+        """
+        self.fget = fget
+        self.fshow = fshow
+        self.item = item
+        self.reset_on_none = reset_on_none
+        self.__doc__ = doc if doc is not None else getattr(fget, "__doc__", None)
+
+    def __set_name__(self, owner, name):
+        """
+        Use the attribute name as the item name unless one was given.
+
+        Parameters
+        ----------
+        owner : type
+            Class defining the attribute.
+        name : str
+            Attribute name.
+        """
+        self.item = self.item or name
+
+    def __get__(self, element, owner=None):
+        """
+        Get the current value.
+
+        Parameters
+        ----------
+        element : UI or None
+            The component, or None for access through the class.
+        owner : type, optional
+            The class.
+
+        Returns
+        -------
+        object
+            The value, or the descriptor itself for class access.
+        """
+        if element is None:
+            return self
+        if self.fget is not None:
+            return self.fget(element)
+        value = element._style_state()[2].get(self.item)
+        if value is not None and self.item.endswith("color"):
+            return tuple(float(c) for c in normalize_colors(value)[0][:3])
+        return value
+
+    def __set__(self, element, value):
+        """
+        Set the value as the user's choice.
+
+        Parameters
+        ----------
+        element : UI
+            The component.
+        value : object
+            The new value, or None to follow the theme again when the
+            descriptor allows it.
+        """
+        if value is None and self.reset_on_none:
+            element._style_state()[0].pop(self.item, None)
+            element._set_style(self.item, element._theme_value(self.item))
+            element._request_refresh()
+            return
+        element._set_style(self.item, value, source="user")
+
+
+def _same_value(first, second):
+    """
+    Check whether two themed values are equal.
+
+    Parameters
+    ----------
+    first, second : object
+        Values such as colors, sizes or names.
+
+    Returns
+    -------
+    bool
+        True if the values are equal.
+    """
+    try:
+        return bool(np.array_equal(np.asarray(first), np.asarray(second)))
+    except (TypeError, ValueError):
+        return first == second
+
+
+def _style_descriptors(cls):
+    """
+    Get the themed values of a UI class, keyed by theme item name.
+
+    Parameters
+    ----------
+    cls : type
+        UI class.
+
+    Returns
+    -------
+    dict
+        Mapping of item name to :class:`themed` descriptor.
+    """
+    cached = cls.__dict__.get("_themed_descriptors")
+    if cached is None:
+        cached = {}
+        for klass in reversed(cls.__mro__):
+            for value in vars(klass).values():
+                if isinstance(value, themed):
+                    cached[value.item] = value
+        cls._themed_descriptors = cached
+    return cached
+
+
+class _UIMeta(abc.ABCMeta):
+    """Metaclass that tells a UI element when its construction finished."""
+
+    def __call__(cls, *args, **kwargs):
+        """
+        Create a UI element, then let it follow the global theme.
+
+        Parameters
+        ----------
+        *args : tuple
+            Positional arguments of the constructor.
+        **kwargs : dict
+            Keyword arguments of the constructor.
+
+        Returns
+        -------
+        UI
+            The fully constructed element.
+        """
+        element = super().__call__(*args, **kwargs)
+        if getattr(element, "_theme_source", None) == "global":
+            UIContext.follow_global_theme(element)
+        return element
+
+
+class UI(object, metaclass=_UIMeta):
     """
     An umbrella class for all UI elements.
 
@@ -98,6 +307,10 @@ class UI(object, metaclass=abc.ABCMeta):
         Callback function for when a keyboard key is pressed.
     """
 
+    _styled_by_parent = False
+    _on_style_change = None
+    _on_visibility_change = None
+
     def __init__(
         self, *, position=(0, 0), x_anchor=Anchor.LEFT, y_anchor=Anchor.TOP, z_order=0
     ):
@@ -115,10 +328,12 @@ class UI(object, metaclass=abc.ABCMeta):
         self._layout_natural_size = None
         self._layout_applied_size = None
         self._hover_needs_sync = False
+        self._requested_visibility = True
 
         if getattr(self, "_theme", None) is None:
             self._theme = get_theme()
-        with theme_scope(self._theme):
+        self._theme_source = UIContext.theme_source()
+        with _inherited_theme_scope(self._theme):
             self._setup()
         self.set_position(position, x_anchor, y_anchor)
 
@@ -152,19 +367,55 @@ class UI(object, metaclass=abc.ABCMeta):
     @property
     def theme(self):
         """
-        Get the theme this UI component was created with.
+        Get the theme of this UI component.
 
         Returns
         -------
         Theme
             The theme from :func:`fury.ui.theme_scope` or
-            :func:`fury.ui.set_theme` at creation time.
+            :func:`fury.ui.set_theme` at creation time, or the theme given
+            later through :meth:`apply_theme` or :func:`fury.ui.set_theme`.
         """
         return self._theme
+
+    def _style_state(self):
+        """
+        Get the stored themed values.
+
+        Returns
+        -------
+        tuple of dict
+            Values chosen by the user, values passed by a parent widget, and
+            the values currently shown, all keyed by theme item name.
+        """
+        if not hasattr(self, "_style_values"):
+            self._style_values = ({}, {}, {})
+        return self._style_values
+
+    def _theme_item(self, item):
+        """
+        Get the name under which the theme stores an item.
+
+        Parameters
+        ----------
+        item : str
+            Item name used by this component.
+
+        Returns
+        -------
+        str
+            Item name in the theme. Subclasses map variants here.
+        """
+        return item
 
     def _theme_value(self, item, value=None):
         """
         Get a value, or the theme item for this component if it is None.
+
+        A value that is not None is remembered, so a later
+        :meth:`apply_theme` keeps it. For a component a user creates it is
+        the user's choice; for a part created by another widget it is the
+        parent's value, which the parent may replace when it is restyled.
 
         Parameters
         ----------
@@ -176,13 +427,253 @@ class UI(object, metaclass=abc.ABCMeta):
         Returns
         -------
         object
-            ``value``, or the theme item.
+            ``value``, a value given earlier for the item, or the theme item.
         """
+        user, parent, _ = self._style_state()
         if value is not None:
+            source = getattr(self, "_theme_source", None) or UIContext.theme_source()
+            (parent if source == "inherited" else user)[item] = value
             return value
+        if item in user:
+            return user[item]
+        if item in parent:
+            return parent[item]
         if getattr(self, "_theme", None) is None:
             self._theme = get_theme()
-        return self._theme.get(type(self), item)
+        return self._theme.get(type(self), self._theme_item(item))
+
+    def _set_style(self, item, value, *, source="theme", force=False):
+        """
+        Store and show a themed value.
+
+        Parameters
+        ----------
+        item : str
+            Theme item name.
+        value : object
+            The value.
+        source : str, optional
+            ``"user"``, ``"parent"`` or ``"theme"``. A parent's value never
+            replaces the user's, unless ``force`` is True.
+        force : bool, optional
+            If True, a parent's value replaces the user's.
+        """
+        user, parent, shown = self._style_state()
+        if source == "parent":
+            parent[item] = value
+            if item in user and not force:
+                return
+            user.pop(item, None)
+        if source != "user" and item in shown and _same_value(shown[item], value):
+            return
+        descriptor = _style_descriptors(type(self)).get(item)
+        previous = getattr(self, "_style_source", "theme")
+        self._style_source = source
+        try:
+            if descriptor is not None and descriptor.fshow is not None:
+                descriptor.fshow(self, value)
+        finally:
+            self._style_source = previous
+        shown[item] = value
+        if source == "user":
+            user[item] = value
+        if self._on_style_change is not None:
+            self._on_style_change(item)
+        if source != "theme":
+            self._request_refresh()
+
+    def _push_style(self, item, value, *, force=False):
+        """
+        Set a themed value of this part on behalf of its parent widget.
+
+        Parameters
+        ----------
+        item : str
+            Theme item name.
+        value : object
+            The value.
+        force : bool, optional
+            If True, replace a value the user set on the part.
+        """
+        self._set_style(item, value, source="parent", force=force)
+
+    def _push_styles(self, **items):
+        """
+        Set several themed values of this part on behalf of its parent.
+
+        Parameters
+        ----------
+        **items : dict
+            Theme item names and values.
+        """
+        with UIContext.style_batch():
+            for item, value in items.items():
+                self._push_style(item, value)
+
+    def _forward(self, part, item, value):
+        """
+        Pass a value from one of this component's setters to a part.
+
+        When the user set the value, it also replaces a value the user had
+        set on the part directly.
+
+        Parameters
+        ----------
+        part : UI
+            The part.
+        item : str
+            Theme item name of the part.
+        value : object
+            The value.
+        """
+        source = getattr(self, "_style_source", "theme")
+        part._push_style(item, value, force=source == "user")
+
+    def _request_refresh(self):
+        """Refresh the look of this component now, or at the end of a batch."""
+        if type(self)._refresh_style is UI._refresh_style:
+            return
+        if not UIContext.queue_refresh(self):
+            self._refresh_style()
+
+    def _refresh_style(self):
+        """Show the current themed values on the parts of this component."""
+
+    def _box_style(self, *, prefix=""):
+        """
+        Get the box style theme items of this component.
+
+        Parameters
+        ----------
+        prefix : str, optional
+            Prefix of the item names, for components with several boxes.
+
+        Returns
+        -------
+        dict
+            Corner radius, border and shadow keyword arguments of
+            :class:`RoundedRectangle2D`.
+        """
+        return {name: self._theme_value(prefix + name) for name in BOX_STYLE_ITEMS}
+
+    def _apply_box_style(self, box, *, prefix="", **overrides):
+        """
+        Style a box with the box style theme items of this component.
+
+        Parameters
+        ----------
+        box : RoundedRectangle2D
+            The box to style.
+        prefix : str, optional
+            Prefix of the item names, for components with several boxes.
+        **overrides : dict
+            Box properties that replace the theme items.
+        """
+        style = self._box_style(prefix=prefix)
+        style.update(overrides)
+        for name, value in style.items():
+            box._push_style(name, value)
+
+    def apply_theme(self, theme):
+        """
+        Restyle this component, its parts and its children with a theme.
+
+        Values passed explicitly to a constructor, or set later through a
+        public property such as ``color`` or ``font_size``, on the component
+        or on one of its parts, are kept. Values a widget only accepts in its
+        constructor, such as the text color of ``TextBox2D``, the title and
+        body colors of ``Card2D``, ``ListBox2D.background_opacity``,
+        ``ComboBox2D.menu_opacity``, and the colors of ``PlaybackPanel``,
+        ``Loader2D`` and ``FileMenu2D``, follow the same rule. Every
+        other themed value, such as colors, font sizes, fonts and box
+        styles, is read again from ``theme``. Structural items keep the value
+        read at creation, because they decide which parts a widget is built
+        from or how large they are: the ``LineSlider2D`` items ``layout``,
+        ``line_width``, ``handle_outer_radius`` and ``header_gap``, the
+        ``ButtonGroup`` item ``indicator`` and its button sizes, the
+        ``PlaybackPanel`` border kind, and sizes derived from font sizes,
+        such as list slot heights. Children and parts that were given their
+        own theme with this method keep it. The component stops following the
+        global theme, so a later :func:`fury.ui.set_theme` leaves it alone. Called
+        on a part of another widget, the part keeps the theme when its
+        parent is restyled, but the parent still passes it the values it
+        controls, such as a list's item colors.
+
+        Parameters
+        ----------
+        theme : Theme or str
+            Theme, or name of a built-in theme.
+        """
+        self._theme_source = "own"
+        UIContext.unfollow_global_theme(self)
+        self._apply_theme(_as_theme(theme), follow_global=False)
+
+    def _apply_theme(self, theme, *, follow_global):
+        """
+        Restyle this component and its children.
+
+        Each component reads its themed values again, then all of them are
+        refreshed once, parents before their parts.
+
+        Parameters
+        ----------
+        theme : Theme
+            The new theme.
+        follow_global : bool
+            True when the global theme changed. Children created in their
+            own ``theme_scope``, or given their own theme, are then skipped.
+            False when the theme is applied explicitly: children then stop
+            following the global theme.
+        """
+        with UIContext.style_batch():
+            self._restyle(theme, follow_global=follow_global)
+
+    def _restyle(self, theme, *, follow_global):
+        """
+        Read the themed values of this component and its children again.
+
+        Parameters
+        ----------
+        theme : Theme
+            The new theme.
+        follow_global : bool
+            See :meth:`_apply_theme`.
+        """
+        self._theme = theme
+        if not follow_global and self._theme_source != "inherited":
+            self._theme_source = "own"
+            UIContext.unfollow_global_theme(self)
+        self._request_refresh()
+        user, parent, shown = self._style_state()
+        for item in _style_descriptors(type(self)):
+            if item in user or item in parent:
+                continue
+            if not theme.has(type(self), self._theme_item(item)):
+                continue
+            value = self._theme_value(item)
+            if item not in shown or not _same_value(shown[item], value):
+                self._set_style(item, value)
+        for child in self._theme_children():
+            inherited = child._theme_source == "inherited"
+            if child._theme_source == "own" or (follow_global and not inherited):
+                continue
+            if inherited and child._styled_by_parent:
+                continue
+            child._restyle(theme, follow_global=follow_global)
+
+    def _theme_children(self):
+        """
+        Get the components restyled together with this one.
+
+        Returns
+        -------
+        list of UI
+            The children and composite parts of this component.
+        """
+        unique = {}
+        for child in self._children:
+            unique.setdefault(id(child), child)
+        return list(unique.values())
 
     def _reset_interaction_state(self) -> None:
         """
@@ -373,11 +864,13 @@ class UI(object, metaclass=abc.ABCMeta):
             position of the actor.
         z_order : int
             The Z-order of the UI component.
-        sub_order : int, optional
+        sub_order : float, optional
             Ordering of this actor relative to other actors of the *same*
             component (and `z_order`). Higher values are drawn on top. This
             disambiguates coplanar actors, such as a text actor and its
             background, whose draw order would otherwise be undefined.
+            Negative values draw the actor below the other actors of the
+            same `z_order`.
         """
         canvas_size = UIContext.canvas_size
 
@@ -522,16 +1015,26 @@ class UI(object, metaclass=abc.ABCMeta):
         """
         Set visibility of this UI component.
 
+        The requested visibility is kept in ``_requested_visibility``. At
+        the end, the private single callback ``_on_visibility_change`` is
+        called if a parent widget set one, for example to keep a part hidden
+        that it must not show. Subclasses that override this method without
+        calling it, such as :class:`fury.ui.Panel2D` and
+        :class:`TextBlock2D`, do not call the callback.
+
         Parameters
         ----------
         visibility : bool
             If `True`, the UI component will be visible. If `False`, it will be hidden.
         """
+        self._requested_visibility = bool(visibility)
         for actor in self.actors:
             actor.visible = visibility
 
         for child in self._children:
             child.set_visibility(visibility)
+        if self._on_visibility_change is not None:
+            self._on_visibility_change()
 
     def handle_events(self, actor):
         """
@@ -828,11 +1331,13 @@ class Rectangle2D(UI):
         Must take values in [0, 1].
     """
 
+    _styled_by_parent = True
+
     def __init__(self, *, size=(100, 100), position=(0, 0), color=None, opacity=1.0):
         """Initialize a rectangle."""
         super(Rectangle2D, self).__init__(position=position)
-        self.color = self._theme_value("color", color)
-        self.opacity = opacity
+        self._set_style("color", self._theme_value("color", color))
+        self._set_style("opacity", self._theme_value("opacity", opacity))
         self.resize(size)
 
     def _setup(self):
@@ -943,8 +1448,7 @@ class Rectangle2D(UI):
 
         self.set_actor_position(self.actor, position, self.z_order)
 
-    @property
-    def color(self):
+    def _get_color(self):
         """
         Get the rectangle color.
 
@@ -955,8 +1459,7 @@ class Rectangle2D(UI):
         """
         return self.actor.material.color[:3]
 
-    @color.setter
-    def color(self, color):
+    def _show_color(self, color):
         """
         Set the rectangle color.
 
@@ -969,8 +1472,9 @@ class Rectangle2D(UI):
         color = normalize_colors(color)[0]
         self.actor.material.color = np.array([*color[:3], 1.0])
 
-    @property
-    def opacity(self):
+    color = themed(_get_color, _show_color)
+
+    def _get_opacity(self):
         """
         Get the rectangle opacity.
 
@@ -981,8 +1485,7 @@ class Rectangle2D(UI):
         """
         return self.actor.material.opacity
 
-    @opacity.setter
-    def opacity(self, opacity):
+    def _show_opacity(self, opacity):
         """
         Set the rectangle opacity.
 
@@ -993,10 +1496,17 @@ class Rectangle2D(UI):
         """
         self.actor.material.opacity = opacity
 
+    opacity = themed(_get_opacity, _show_opacity)
+
 
 class RoundedRectangle2D(UI):
     """
     A 2D rounded rectangle sub-classed from UI.
+
+    The box can have a border drawn inside its edge, a different radius for
+    each corner and a soft drop shadow. The shadow is drawn outside the box
+    but is not part of it: ``size``, ``position``, layout and picking only
+    cover the box itself.
 
     Parameters
     ----------
@@ -1007,11 +1517,60 @@ class RoundedRectangle2D(UI):
     color : str, tuple, list or ndarray, optional
         A hex string ("#FF0000"), RGB(A) in [0, 1], or RGB(A) in [0, 255].
         Defaults to the theme item of the same name.
-    corner_radius : float
-        Radius of the rounded corners in pixels.
+        An alpha channel is ignored; use ``opacity`` to fade the box. The
+        border and shadow colors, in contrast, keep their alpha.
+    corner_radius : float or tuple of float
+        Radius of the rounded corners in pixels. A single value rounds every
+        corner. Four values give the top-left, top-right, bottom-right and
+        bottom-left radii. Radii are limited to half of the smaller side when
+        drawn.
     opacity : float
         Must take values in [0, 1].
+    border_color : str, tuple, list or ndarray
+        Border color as a hex string, RGB(A) in [0, 1], or RGB(A) in
+        [0, 255].
+    border_width : float
+        Width of the border in pixels, drawn inside the box edge. 0 draws no
+        border.
+    shadow_color : str, tuple, list or ndarray
+        Shadow color as a hex string, RGB(A) in [0, 1], or RGB(A) in
+        [0, 255]. The alpha channel sets the shadow strength.
+    shadow_offset : (float, float)
+        Shadow displacement (x, y) in pixels. Positive y moves the shadow
+        down.
+    shadow_blur : float
+        Blur radius of the shadow in pixels.
+    shadow_spread : float
+        Distance in pixels by which the shadow grows (positive) or shrinks
+        (negative) relative to the box.
+
+    Notes
+    -----
+    The shadow is drawn when ``shadow_blur``, ``shadow_spread`` or
+    ``shadow_offset`` is non-zero. With the defaults no shadow is drawn. Like
+    a CSS box shadow, it is not drawn under the box, so it does not show
+    through a translucent box. Only within the 1-2 pixels of anti-aliasing
+    at the box edge can a little shadow remain under a translucent box.
+
+    The blur is an approximation of a gaussian blur. It matches CSS for boxes
+    much larger than the blur, but gets darker than CSS when the blur is
+    large relative to the box. Shadows are drawn beneath all boxes of the
+    same ``z_order``, so a box never falls into the shadow of a neighbor at
+    its own ``z_order``; raise the ``z_order`` of a box to cast its shadow
+    over others.
+
+    Corner radii larger than half of the smaller side are drawn as half of
+    that side, so a small box keeps a proper rounded shape: a 10x10 box with
+    the default radius of 10 is drawn as a circle. Earlier versions drew a
+    distorted shape in that case.
+
+    A box with square corners and no border is drawn with a plain mesh
+    material, exactly like :class:`Rectangle2D`, so its edges are not
+    anti-aliased. Widgets rely on this to draw a flat themed box with the
+    same pixels as before themes had box styles.
     """
+
+    _styled_by_parent = True
 
     def __init__(
         self,
@@ -1021,31 +1580,58 @@ class RoundedRectangle2D(UI):
         color=None,
         corner_radius=10.0,
         opacity=1.0,
+        border_color=(0, 0, 0),
+        border_width=0.0,
+        shadow_color=(0, 0, 0, 0.5),
+        shadow_offset=(0, 0),
+        shadow_blur=0.0,
+        shadow_spread=0.0,
     ):
         """Initialize a rounded rectangle."""
         super(RoundedRectangle2D, self).__init__(position=position)
 
-        self.color = self._theme_value("color", color)
-        self.opacity = opacity
-        self.corner_radius = corner_radius
+        self._set_style("color", self._theme_value("color", color))
+        self._set_style("opacity", self._theme_value("opacity", opacity))
+        for name, value in (
+            ("corner_radius", corner_radius),
+            ("border_color", border_color),
+            ("border_width", border_width),
+            ("shadow_color", shadow_color),
+            ("shadow_offset", shadow_offset),
+            ("shadow_blur", shadow_blur),
+            ("shadow_spread", shadow_spread),
+        ):
+            self._set_style(name, self._theme_value(name, value))
         self.resize(size)
 
     def _setup(self):
         """
         Set up this UI component.
 
-        Create the plane actor used internally.
+        Create the box actor with the plain material. The rounded material
+        and the shadow are created when a radius, border or shadow needs
+        them.
         """
-        geo = plane_geometry(width=1, height=1)
-        mat = RoundedRectangleMaterial(
-            size=(100.0, 100.0),
-            corner_radius=10.0,
-            color=(1, 1, 1),
-            opacity=1.0,
-            side="BOTH",
+        self._size = [0.0, 0.0]
+        self._color = np.array([1.0, 1.0, 1.0, 1.0])
+        self._opacity = 1.0
+        self._corner_radius = 0.0
+        self._radii = np.zeros(4)
+        self._border_color = np.array([0.0, 0.0, 0.0, 1.0])
+        self._border_width = 0.0
+        self._shadow_color = np.array([0.0, 0.0, 0.0, 0.5])
+        self._shadow_offset = np.zeros(2)
+        self._shadow_blur = 0.0
+        self._shadow_spread = 0.0
+        self._visible = True
+        self._sdf_material = None
+        self._shadow = None
+        self._flat_material = _create_mesh_material(
+            material="basic", alpha_mode="auto", mode="auto"
         )
-        self.actor = create_mesh(geometry=geo, material=mat)
-
+        self.actor = create_mesh(
+            geometry=plane_geometry(width=1, height=1), material=self._flat_material
+        )
         self.handle_events(self.actor)
 
     def _get_actors(self):
@@ -1055,9 +1641,23 @@ class RoundedRectangle2D(UI):
         Returns
         -------
         list
-            List of actors.
+            The box actor. The shadow, when there is one, is a child of it.
         """
         return [self.actor]
+
+    @property
+    def shadow_actor(self):
+        """
+        Get the shadow actor, a non-pickable child of the box actor.
+
+        Returns
+        -------
+        Mesh
+            The shadow mesh, hidden while the box has no shadow.
+        """
+        if self._shadow is None:
+            self._build_shadow()
+        return self._shadow
 
     def _get_size(self):
         """
@@ -1066,14 +1666,9 @@ class RoundedRectangle2D(UI):
         Returns
         -------
         list
-            Width and height of the rectangle.
+            Width and height of the rectangle, without the shadow.
         """
-        if hasattr(self, "_size"):
-            return self._size
-        bounds = self.actor.get_bounding_box()
-        minx, miny, minz = bounds[0]
-        maxx, maxy, maxz = bounds[1]
-        return [maxx - minx, maxy - miny]
+        return self._size
 
     @property
     def width(self):
@@ -1134,42 +1729,185 @@ class RoundedRectangle2D(UI):
         """
         w = max(size[0], 1)
         h = max(size[1], 1)
+        if [w, h] == self._size:
+            self._update_actors_position()
+            return
+        self._size = [w, h]
         self.actor.geometry = plane_geometry(width=w, height=h)
-        self.actor.material.size = (w, h)
+        if self._sdf_material is not None:
+            self._sdf_material.size = (w, h)
+        self._update_shadow()
         self._update_actors_position()
 
     def _update_actors_position(self):
-        """Set the position of the internal actor."""
+        """Set the position of the box actor and of its shadow."""
         position = self.get_position(x_anchor=Anchor.CENTER, y_anchor=Anchor.CENTER)
         self.set_actor_position(self.actor, position, self.z_order)
+        if self._shadow is not None:
+            self._shadow.local.position = (
+                self._shadow_offset[0],
+                -self._shadow_offset[1],
+                0,
+            )
+            self._shadow.render_order = self.actor.render_order - 0.5
 
-    @property
-    def color(self):
+    def _build_sdf_material(self):
+        """
+        Create the rounded material from the current style.
+
+        Returns
+        -------
+        RoundedRectangleMaterial
+            The material drawing corners and the border.
+        """
+        material = RoundedRectangleMaterial(
+            size=tuple(self._size),
+            corner_radius=self._radii,
+            color=self._color,
+            opacity=self._opacity,
+            border_color=self._border_color,
+            border_width=self._border_width,
+            side="BOTH",
+        )
+        return material
+
+    def _update_box_material(self):
+        """
+        Draw square, borderless boxes with the plain mesh material.
+
+        The rounded material is created the first time a radius or border
+        needs it. Picking and depth settings carry over to the other
+        material. Each material keeps its own ``alpha_mode``: the plain
+        material must keep the one of :class:`Rectangle2D` to draw the same
+        pixels.
+        """
+        flat = not np.any(self._radii > 0) and self._border_width == 0
+        if flat:
+            target = self._flat_material
+        else:
+            if self._sdf_material is None:
+                self._sdf_material = self._build_sdf_material()
+            target = self._sdf_material
+        current = self.actor.material
+        if current is target:
+            return
+        target.pick_write = current.pick_write
+        target.depth_write = current.depth_write
+        target.depth_test = current.depth_test
+        self.actor.material = target
+
+    def _has_shadow(self):
+        """
+        Tell whether the box casts a shadow.
+
+        Returns
+        -------
+        bool
+            True if the blur, spread or offset is non-zero.
+        """
+        return (
+            self._shadow_blur > 0
+            or self._shadow_spread != 0
+            or bool(np.any(self._shadow_offset != 0))
+        )
+
+    def _build_shadow(self):
+        """Create the shadow mesh as a child of the box actor."""
+        material = RoundedRectangleMaterial(
+            size=tuple(self._size),
+            corner_radius=self._radii,
+            shadow=True,
+            shadow_color=self._shadow_color,
+            shadow_offset=(self._shadow_offset[0], -self._shadow_offset[1]),
+            shadow_blur=self._shadow_blur,
+            shadow_spread=self._shadow_spread,
+            opacity=self._opacity,
+            side="BOTH",
+        )
+        self._shadow = create_mesh(
+            geometry=plane_geometry(width=1, height=1), material=material
+        )
+        self._shadow.visible = False
+        self.actor.add(self._shadow)
+        self._update_shadow()
+        self._update_actors_position()
+
+    def _update_shadow(self):
+        """Size and show the shadow, creating it when it is first needed."""
+        has_shadow = self._has_shadow()
+        if self._shadow is None:
+            if has_shadow:
+                self._build_shadow()
+            return
+        material = self._shadow.material
+        material.size = tuple(self._size)
+        if has_shadow:
+            extent = max(self._shadow_spread, 0) + 1.5 * self._shadow_blur + 1
+            width, height = self._size
+            self._shadow.geometry = plane_geometry(
+                width=width + 2 * extent, height=height + 2 * extent
+            )
+        self._shadow.visible = self._visible and has_shadow
+
+    def _set_shadow_uniform(self, name, value):
+        """
+        Set a value of the shadow material if the shadow exists.
+
+        Parameters
+        ----------
+        name : str
+            Name of the material property.
+        value : object
+            The value.
+        """
+        if self._shadow is not None:
+            setattr(self._shadow.material, name, value)
+
+    def set_visibility(self, visibility):
+        """
+        Set visibility of the rectangle and its shadow.
+
+        Parameters
+        ----------
+        visibility : bool
+            If `True`, the rectangle will be visible. If `False`, it will be
+            hidden.
+        """
+        self._visible = bool(visibility)
+        super(RoundedRectangle2D, self).set_visibility(visibility)
+        if self._shadow is not None:
+            self._shadow.visible = self._visible and self._has_shadow()
+
+    def _get_color(self):
         """
         Get the rectangle color.
 
         Returns
         -------
-        tuple
+        ndarray
             RGB color.
         """
-        return self.actor.material.color[:3]
+        return self._color[:3]
 
-    @color.setter
-    def color(self, color):
+    def _show_color(self, color):
         """
         Set the rectangle color.
 
         Parameters
         ----------
-        color : tuple
-            New color.
+        color : str, tuple, list or ndarray
+            A hex string, RGB(A) in [0, 1], or RGB(A) in [0, 255]. An alpha
+            channel is ignored; use ``opacity`` instead.
         """
         color = normalize_colors(color)[0]
-        self.actor.material.color = np.array([*color[:3], 1.0])
+        self._color = np.array([*color[:3], 1.0])
+        self._flat_material.color = self._color
+        if self._sdf_material is not None:
+            self._sdf_material.color = self._color
 
-    @property
-    def opacity(self):
+    color = themed(_get_color, _show_color)
+
+    def _get_opacity(self):
         """
         Get the rectangle opacity.
 
@@ -1178,10 +1916,9 @@ class RoundedRectangle2D(UI):
         float
             Opacity of the rectangle.
         """
-        return self.actor.material.opacity
+        return self._opacity
 
-    @opacity.setter
-    def opacity(self, opacity):
+    def _show_opacity(self, opacity):
         """
         Set the rectangle opacity.
 
@@ -1190,31 +1927,224 @@ class RoundedRectangle2D(UI):
         opacity : float
             New opacity.
         """
-        self.actor.material.opacity = opacity
+        self._opacity = opacity
+        self._flat_material.opacity = opacity
+        if self._sdf_material is not None:
+            self._sdf_material.opacity = opacity
+        self._set_shadow_uniform("opacity", opacity)
 
-    @property
-    def corner_radius(self):
+    opacity = themed(_get_opacity, _show_opacity)
+
+    def _get_corner_radius(self):
         """
         Get the corner radius.
 
         Returns
         -------
-        float
-            Corner radius.
+        float or tuple of float
+            The radius as it was set: one value for every corner, or the
+            top-left, top-right, bottom-right and bottom-left radii.
         """
-        return self.actor.material.corner_radius
+        return self._corner_radius
 
-    @corner_radius.setter
-    def corner_radius(self, radius):
+    def _show_corner_radius(self, radius):
         """
         Set the corner radius.
 
         Parameters
         ----------
-        radius : float
-            New corner radius.
+        radius : float or tuple of float
+            One non-negative radius for every corner, or four radii for the
+            top-left, top-right, bottom-right and bottom-left corners.
         """
-        self.actor.material.corner_radius = radius
+        if np.ndim(radius) == 0:
+            radii = np.full(4, float(radius))
+            value = float(radius)
+        else:
+            radii = np.asarray(radius, dtype=float)
+            if radii.shape != (4,):
+                raise ValueError(
+                    "corner_radius must be a number or a sequence of 4 numbers "
+                    f"(top-left, top-right, bottom-right, bottom-left), got {radius}."
+                )
+            value = tuple(float(r) for r in radii)
+        if np.any(radii < 0):
+            raise ValueError(f"corner_radius must be non-negative, got {radius}.")
+        self._corner_radius = value
+        self._radii = radii
+        if self._sdf_material is not None:
+            self._sdf_material.corner_radius = radii
+        self._set_shadow_uniform("corner_radius", radii)
+        self._update_box_material()
+
+    corner_radius = themed(_get_corner_radius, _show_corner_radius)
+
+    def _get_border_color(self):
+        """
+        Get the border color.
+
+        Returns
+        -------
+        ndarray
+            RGBA border color in [0, 1].
+        """
+        return self._border_color
+
+    def _show_border_color(self, color):
+        """
+        Set the border color.
+
+        Parameters
+        ----------
+        color : str, tuple, list or ndarray
+            A hex string, RGB(A) in [0, 1], or RGB(A) in [0, 255]. See
+            :func:`normalize_colors`.
+        """
+        self._border_color = _to_rgba(color)
+        if self._sdf_material is not None:
+            self._sdf_material.border_color = self._border_color
+
+    border_color = themed(_get_border_color, _show_border_color)
+
+    def _get_border_width(self):
+        """
+        Get the border width.
+
+        Returns
+        -------
+        float
+            Border width in pixels.
+        """
+        return self._border_width
+
+    def _show_border_width(self, width):
+        """
+        Set the border width.
+
+        Parameters
+        ----------
+        width : float
+            Non-negative border width in pixels. 0 draws no border.
+        """
+        if width < 0:
+            raise ValueError(f"border_width must be non-negative, got {width}.")
+        self._border_width = width
+        if self._sdf_material is not None:
+            self._sdf_material.border_width = width
+        self._update_box_material()
+
+    border_width = themed(_get_border_width, _show_border_width)
+
+    def _get_shadow_color(self):
+        """
+        Get the shadow color.
+
+        Returns
+        -------
+        ndarray
+            RGBA shadow color in [0, 1].
+        """
+        return self._shadow_color
+
+    def _show_shadow_color(self, color):
+        """
+        Set the shadow color.
+
+        Parameters
+        ----------
+        color : str, tuple, list or ndarray
+            A hex string, RGB(A) in [0, 1], or RGB(A) in [0, 255]. The alpha
+            channel sets the shadow strength.
+        """
+        self._shadow_color = _to_rgba(color)
+        self._set_shadow_uniform("shadow_color", self._shadow_color)
+
+    shadow_color = themed(_get_shadow_color, _show_shadow_color)
+
+    def _get_shadow_offset(self):
+        """
+        Get the shadow offset.
+
+        Returns
+        -------
+        tuple of float
+            Shadow displacement (x, y) in pixels, positive y pointing down.
+        """
+        return tuple(float(v) for v in self._shadow_offset)
+
+    def _show_shadow_offset(self, offset):
+        """
+        Set the shadow offset.
+
+        Parameters
+        ----------
+        offset : (float, float)
+            Shadow displacement (x, y) in pixels, positive y pointing down.
+        """
+        offset = np.asarray(offset, dtype=float)
+        if offset.shape != (2,):
+            raise ValueError(f"shadow_offset must be (x, y), got {offset.tolist()}.")
+        self._shadow_offset = offset
+        self._set_shadow_uniform("shadow_offset", (offset[0], -offset[1]))
+        self._update_shadow()
+        self._update_actors_position()
+
+    shadow_offset = themed(_get_shadow_offset, _show_shadow_offset)
+
+    def _get_shadow_blur(self):
+        """
+        Get the shadow blur radius.
+
+        Returns
+        -------
+        float
+            Blur radius in pixels.
+        """
+        return self._shadow_blur
+
+    def _show_shadow_blur(self, blur):
+        """
+        Set the shadow blur radius.
+
+        Parameters
+        ----------
+        blur : float
+            Non-negative blur radius in pixels.
+        """
+        if blur < 0:
+            raise ValueError(f"shadow_blur must be non-negative, got {blur}.")
+        self._shadow_blur = blur
+        self._set_shadow_uniform("shadow_blur", blur)
+        self._update_shadow()
+
+    shadow_blur = themed(_get_shadow_blur, _show_shadow_blur)
+
+    def _get_shadow_spread(self):
+        """
+        Get the shadow spread.
+
+        Returns
+        -------
+        float
+            Spread in pixels.
+        """
+        return self._shadow_spread
+
+    def _show_shadow_spread(self, spread):
+        """
+        Set the shadow spread.
+
+        Parameters
+        ----------
+        spread : float
+            Distance in pixels by which the shadow grows (positive) or
+            shrinks (negative) relative to the box.
+        """
+        self._shadow_spread = spread
+        self._set_shadow_uniform("shadow_spread", spread)
+        self._update_shadow()
+
+    shadow_spread = themed(_get_shadow_spread, _show_shadow_spread)
 
 
 class Disk2D(UI):
@@ -1236,6 +2166,8 @@ class Disk2D(UI):
         Must take values in [0, 1].
     """
 
+    _styled_by_parent = True
+
     def __init__(
         self,
         outer_radius,
@@ -1254,8 +2186,8 @@ class Disk2D(UI):
             position=center, x_anchor=Anchor.CENTER, y_anchor=Anchor.CENTER
         )
 
-        self.color = self._theme_value("color", color)
-        self.opacity = opacity
+        self._set_style("color", self._theme_value("color", color))
+        self._set_style("opacity", self._theme_value("opacity", opacity))
 
     def _setup(self):
         """
@@ -1302,8 +2234,7 @@ class Disk2D(UI):
 
         self.set_actor_position(self.actor, position, self.z_order)
 
-    @property
-    def color(self):
+    def _get_color(self):
         """
         Get the color of this UI component.
 
@@ -1314,8 +2245,7 @@ class Disk2D(UI):
         """
         return self.actor.material.color[:3]
 
-    @color.setter
-    def color(self, color):
+    def _show_color(self, color):
         """
         Set the color of this UI component.
 
@@ -1328,8 +2258,9 @@ class Disk2D(UI):
         color = normalize_colors(color)[0]
         self.actor.material.color = np.array([*color[:3], 1.0])
 
-    @property
-    def opacity(self):
+    color = themed(_get_color, _show_color)
+
+    def _get_opacity(self):
         """
         Get the opacity of this UI component.
 
@@ -1340,8 +2271,7 @@ class Disk2D(UI):
         """
         return self.actor.material.opacity
 
-    @opacity.setter
-    def opacity(self, opacity):
+    def _show_opacity(self, opacity):
         """
         Set the opacity of this UI component.
 
@@ -1351,6 +2281,8 @@ class Disk2D(UI):
             Degree of transparency. Must be between [0, 1].
         """
         self.actor.material.opacity = opacity
+
+    opacity = themed(_get_opacity, _show_opacity)
 
     @property
     def outer_radius(self):
@@ -1450,6 +2382,20 @@ class TextBlock2D(UI):
         Absolute coordinates (x, y) for placement.
     dynamic_bbox : bool, optional
         If True, resizes the bounding box to fit the content.
+    font_weight : int, optional
+        Weight of the text, from 100 (thin) to 900 (black). 400 is regular
+        and 600 semibold. The bundled font has one weight, so other weights
+        are drawn by thickening its glyphs.
+        Defaults to the theme item of the same name.
+    muted : bool, optional
+        If True, the default color is the theme item ``muted_color``, for
+        secondary text such as subtitles, instead of ``color``.
+
+    Notes
+    -----
+    ``background`` is a :class:`RoundedRectangle2D`, so it can take a
+    themed corner radius and border. It was a :class:`Rectangle2D` before
+    themes had box styles.
     """
 
     def __init__(
@@ -1467,8 +2413,11 @@ class TextBlock2D(UI):
         bg_color=None,
         position=(0, 0),
         dynamic_bbox=False,
+        font_weight=None,
+        muted=False,
     ):
         """Initialize the text block instance."""
+        self._color_item = "muted_color" if muted else "color"
         self.boundingbox = [0, 0, 0, 0]
         self._message = text
         self._dynamic_bbox = dynamic_bbox
@@ -1484,15 +2433,34 @@ class TextBlock2D(UI):
         self._vertical_justification = vertical_justification
         super(TextBlock2D, self).__init__(position=position)
         self.have_bg = bool(bg_color)
-        self.color = self._theme_value("color", color)
-        self.background_color = bg_color
-        self.font_family = self._theme_value("font_family", font_family)
+        self._set_style("color", self._theme_value("color", color))
+        if bg_color is not None:
+            self._theme_value("background_color", bg_color)
+        self._set_style("background_color", bg_color)
+        self._set_style("font_family", self._theme_value("font_family", font_family))
         self.bold = bold
         self.italic = italic
         self.message = text
-        self.font_size = self._theme_value("font_size", font_size)
+        self._set_style("font_size", self._theme_value("font_size", font_size))
+        self._set_style("font_weight", self._theme_value("font_weight", font_weight))
 
         self.update_bounding_box()
+
+    def _theme_item(self, item):
+        """
+        Get the name under which the theme stores an item.
+
+        Parameters
+        ----------
+        item : str
+            Item name used by this text block.
+
+        Returns
+        -------
+        str
+            ``muted_color`` for the color of muted text, otherwise ``item``.
+        """
+        return self._color_item if item == "color" else item
 
     def _setup(self):
         """Set up this UI component."""
@@ -1500,7 +2468,7 @@ class TextBlock2D(UI):
             markdown=self._message, screen_space=True, anchor="middle-center"
         )
         self.actor.material.aa = True
-        self.background = Rectangle2D()
+        self.background = RoundedRectangle2D(corner_radius=0)
         self._children.append(self.background)
         self.handle_events(self.actor)
 
@@ -1775,8 +2743,7 @@ class TextBlock2D(UI):
         self.actor.set_markdown(self.get_formatted_text(text))
         self._text_changed()
 
-    @property
-    def font_size(self):
+    def _get_font_size(self):
         """
         Get text font size.
 
@@ -1787,8 +2754,7 @@ class TextBlock2D(UI):
         """
         return self.actor.font_size
 
-    @font_size.setter
-    def font_size(self, size):
+    def _show_font_size(self, size):
         """
         Set text font size.
 
@@ -1800,8 +2766,9 @@ class TextBlock2D(UI):
         self.actor.font_size = size
         self._text_changed()
 
-    @property
-    def font_family(self):
+    font_size = themed(_get_font_size, _show_font_size)
+
+    def _get_font_family(self):
         """
         Get font family.
 
@@ -1812,8 +2779,7 @@ class TextBlock2D(UI):
         """
         return self.actor.family
 
-    @font_family.setter
-    def font_family(self, family="Arial"):
+    def _show_font_family(self, family):
         """
         Set font family.
 
@@ -1822,8 +2788,39 @@ class TextBlock2D(UI):
         family : str
             The font family.
         """
+        self._family_name = family
         self.actor.family = family
         self._text_changed()
+
+    font_family = themed(_get_font_family, _show_font_family)
+
+    def _get_font_weight(self):
+        """
+        Get the font weight.
+
+        Returns
+        -------
+        int
+            Weight from 100 to 900, 400 being regular.
+        """
+        return self._font_weight
+
+    def _show_font_weight(self, weight):
+        """
+        Set the font weight.
+
+        Parameters
+        ----------
+        weight : int
+            Weight from 100 (thin) to 900 (black). 400 is regular, 600
+            semibold and 700 bold.
+        """
+        if not 100 <= weight <= 900:
+            raise ValueError(f"font_weight must be in [100, 900], got {weight}.")
+        self._font_weight = weight
+        self.actor.material.weight_offset = weight - 400
+
+    font_weight = themed(_get_font_weight, _show_font_weight)
 
     @property
     def justification(self):
@@ -1947,8 +2944,7 @@ class TextBlock2D(UI):
         """
         self._shadow = flag
 
-    @property
-    def color(self):
+    def _get_color(self):
         """
         Get text color.
 
@@ -1959,8 +2955,7 @@ class TextBlock2D(UI):
         """
         return self.actor.material.color[:3]
 
-    @color.setter
-    def color(self, color):
+    def _show_color(self, color):
         """
         Set text color.
 
@@ -1968,16 +2963,15 @@ class TextBlock2D(UI):
         ----------
         color : str, tuple, list or ndarray
             A hex string (``"#FF0000"``), RGB(A) values in [0, 1], or
-            RGB(A) values in [0, 255]. ``None`` defaults to white.
+            RGB(A) values in [0, 255]. ``None`` uses the theme color again.
             See :func:`normalize_colors`.
         """
-        if color is None:
-            color = (1, 1, 1)
         color = normalize_colors(color)[0]
         self.actor.material.color = np.array([*color[:3], 1.0])
 
-    @property
-    def background_color(self):
+    color = themed(_get_color, _show_color, reset_on_none=True)
+
+    def _get_background_color(self):
         """
         Get the background color.
 
@@ -1991,8 +2985,7 @@ class TextBlock2D(UI):
 
         return self.background.color
 
-    @background_color.setter
-    def background_color(self, color):
+    def _show_background_color(self, color):
         """
         Set the background color.
 
@@ -2010,7 +3003,9 @@ class TextBlock2D(UI):
         else:
             self.have_bg = True
             self.background.set_visibility(True)
-            self.background.color = color
+            self._forward(self.background, "color", color)
+
+    background_color = themed(_get_background_color, _show_background_color)
 
     @property
     def dynamic_bbox(self):
@@ -2462,6 +3457,20 @@ class Slider2D(UI):
         The stacking priority.
     """
 
+    default_color = themed(
+        item="handle_color",
+        doc="Color of the handle at rest (theme item ``handle_color``).",
+    )
+    active_color = themed(
+        item="handle_active_color",
+        doc="Color of the handle while dragged (theme item ``handle_active_color``).",
+    )
+    hover_color = themed(
+        item="handle_hover_color",
+        doc="Color of the handle under the pointer, or None to keep the rest color "
+        "(theme item ``handle_hover_color``).",
+    )
+
     def __init__(
         self,
         *,
@@ -2507,8 +3516,10 @@ class Slider2D(UI):
             The stacking priority.
         """
         font_size = self._theme_value("font_size", font_size)
-        self.default_color = self._theme_value("handle_color")
-        self.active_color = self._theme_value("handle_active_color")
+        for item in ("handle_color", "handle_active_color", "handle_hover_color"):
+            self._set_style(item, self._theme_value(item))
+        self._handle_hovered = False
+        self._dragging = False
         self._value = initial_value
         range_val = max_value - min_value
         self._ratio = (initial_value - min_value) / range_val if range_val != 0 else 0
@@ -2671,7 +3682,67 @@ class Slider2D(UI):
         event : PointerEvent
             The PyGfx pointer event.
         """
-        self.handle.color = self.default_color
+        self._dragging = False
+        self._update_handle_color()
+
+    def _handle_hover(self, event):
+        """
+        Show the hover color while the pointer is over the handle.
+
+        Parameters
+        ----------
+        event : PointerEvent
+            The PyGfx pointer event.
+        """
+        self._handle_hovered = True
+        if not getattr(event, "buttons", ()):
+            self._dragging = False
+        self._update_handle_color()
+
+    def _handle_dishover(self, event):
+        """
+        Restore the handle color when the pointer leaves the handle.
+
+        Parameters
+        ----------
+        event : PointerEvent
+            The PyGfx pointer event.
+        """
+        self._handle_hovered = False
+        if not getattr(event, "buttons", ()):
+            self._dragging = False
+        self._update_handle_color()
+
+    def _reset_interaction_state(self):
+        """
+        Cancel the drag and hover feedback of the handle.
+
+        Returns
+        -------
+        None
+            State is updated in place without dispatching callbacks.
+        """
+        super()._reset_interaction_state()
+        self._dragging = False
+        self._handle_hovered = False
+        if self.handle is not None:
+            self._update_handle_color()
+
+    def _update_handle_color(self):
+        """Color the handle for its dragged, hovered or default state."""
+        if self._dragging:
+            self.handle._push_style("color", self.active_color)
+        elif self._handle_hovered and self.hover_color is not None:
+            self.handle._push_style("color", self.hover_color)
+        else:
+            self.handle._push_style("color", self.default_color)
+
+    def _refresh_style(self):
+        """Show the handle colors and the font size of the label."""
+        self._font_size = self._theme_value("font_size")
+        if self.text.font_size != self._font_size:
+            self.text._push_style("font_size", self._font_size)
+        self._update_handle_color()
 
     @abc.abstractmethod
     def _update_handle_position(self):
@@ -2706,19 +3777,32 @@ class Slider2D(UI):
             context["angle"] = np.rad2deg(self.angle)
         return self.text_template.format(**context)
 
-    def _setup(self):
-        """Set up the common slider components."""
+    def _make_handle(self):
+        """
+        Create the handle for the slider shape.
+
+        Returns
+        -------
+        UI
+            A :class:`Disk2D` for ``"disk"`` or a :class:`Rectangle2D` for
+            ``"square"``.
+        """
         if self.shape == "disk":
-            self.handle = Disk2D(
+            return Disk2D(
                 outer_radius=self._handle_outer_radius,
                 inner_radius=self._handle_inner_radius,
             )
-        elif self.shape == "square":
-            self.handle = Rectangle2D(size=(self._handle_side, self._handle_side))
-        else:
-            raise ValueError("shape must be 'disk' or 'square'")
+        if self.shape == "square":
+            return Rectangle2D(size=(self._handle_side, self._handle_side))
+        raise ValueError("shape must be 'disk' or 'square'")
+
+    def _setup(self):
+        """Set up the common slider components."""
+        self.handle = self._make_handle()
 
         self.handle.z_order = self.z_order + 1
+        self.handle.on_hover = self._handle_hover
+        self.handle.on_dishover = self._handle_dishover
 
         self.text = TextBlock2D(
             justification="center",

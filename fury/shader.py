@@ -277,7 +277,24 @@ class StreamlinesShader(LineShader):
 class RoundedRectangleShader(MeshShader):
     """
     Shader for RoundedRectangleMaterial.
+
+    Parameters
+    ----------
+    wobject : Mesh
+        The mesh object to be rendered.
     """
+
+    def __init__(self, wobject):
+        """
+        Select the box or the drop shadow variant of the shader.
+
+        Parameters
+        ----------
+        wobject : Mesh
+            The mesh object to be rendered.
+        """
+        super().__init__(wobject)
+        self["shadow_pass"] = wobject.material.shadow
 
     def get_code(self):
         """

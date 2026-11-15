@@ -1,5 +1,6 @@
 """UI context module."""
 
+from contextlib import contextmanager
 from weakref import WeakSet
 
 import numpy as np
@@ -36,6 +37,9 @@ class UIContextClass:
         self._dirty_layouts = WeakSet()
         self._theme = None
         self._theme_stack = []
+        self._global_theme_followers = WeakSet()
+        self._refresh_queue = None
+        self._last_refreshes = []
         self._initialized = True
 
     @property
@@ -62,7 +66,7 @@ class UIContextClass:
         """
         self._theme = theme
 
-    def push_theme(self, theme):
+    def push_theme(self, theme, *, inherited=False):
         """
         Use a theme for UI elements created until the matching pop.
 
@@ -70,8 +74,11 @@ class UIContextClass:
         ----------
         theme : Theme
             The scoped theme.
+        inherited : bool, optional
+            True when a UI element pushes its own theme while it creates its
+            parts, False for a user's ``theme_scope``.
         """
-        self._theme_stack.append(theme)
+        self._theme_stack.append((theme, inherited))
 
     def pop_theme(self):
         """
@@ -82,7 +89,7 @@ class UIContextClass:
         Theme
             The theme that was removed.
         """
-        return self._theme_stack.pop()
+        return self._theme_stack.pop()[0]
 
     def current_theme(self):
         """
@@ -94,8 +101,123 @@ class UIContextClass:
             The theme in use.
         """
         if self._theme_stack:
-            return self._theme_stack[-1]
+            return self._theme_stack[-1][0]
         return self._theme
+
+    def theme_source(self):
+        """
+        Tell where the theme of a UI element created now comes from.
+
+        Returns
+        -------
+        str
+            ``"global"`` outside any scope, ``"inherited"`` while a UI
+            element creates its parts, and ``"scoped"`` inside a user's
+            ``theme_scope``.
+        """
+        if not self._theme_stack:
+            return "global"
+        return "inherited" if self._theme_stack[-1][1] else "scoped"
+
+    def follow_global_theme(self, element):
+        """
+        Restyle a UI element whenever the global theme changes.
+
+        Only a weak reference is kept, so the element can still be freed.
+
+        Parameters
+        ----------
+        element : UI
+            Element created with the global theme.
+        """
+        self._global_theme_followers.add(element)
+
+    def unfollow_global_theme(self, element):
+        """
+        Stop restyling a UI element when the global theme changes.
+
+        Parameters
+        ----------
+        element : UI
+            Element that got its own theme.
+        """
+        self._global_theme_followers.discard(element)
+
+    @contextmanager
+    def style_batch(self):
+        """
+        Refresh each restyled UI element once, at the end of the block.
+
+        Elements are refreshed in the order they asked, so a parent restyled
+        before its parts is refreshed before them. Nested blocks join the
+        outer one.
+
+        Yields
+        ------
+        None
+            Nothing; the refresh happens when the outermost block ends.
+        """
+        if self._refresh_queue is not None:
+            yield
+            return
+        self._refresh_queue = {}
+        self._last_refreshes = []
+        try:
+            yield
+            while self._refresh_queue:
+                key = next(iter(self._refresh_queue))
+                element = self._refresh_queue.pop(key)
+                self._last_refreshes.append(key)
+                element._refresh_style()
+        finally:
+            self._refresh_queue = None
+
+    @property
+    def last_refreshes(self):
+        """
+        Get the elements refreshed by the last batch, in order.
+
+        This is a debugging and testing aid, not part of the styling API.
+
+        Returns
+        -------
+        list of int
+            Identity (``id``) of each refreshed element, once per refresh.
+        """
+        return list(self._last_refreshes)
+
+    def queue_refresh(self, element):
+        """
+        Ask for an element to be refreshed at the end of the current batch.
+
+        Parameters
+        ----------
+        element : UI
+            The element.
+
+        Returns
+        -------
+        bool
+            False when no batch is active, so the caller refreshes now.
+        """
+        if self._refresh_queue is None:
+            return False
+        self._refresh_queue[id(element)] = element
+        return True
+
+    @property
+    def global_theme_followers(self):
+        """
+        Get the UI elements that follow the global theme.
+
+        This is a debugging and testing aid, not part of the styling API.
+
+        Returns
+        -------
+        list of UI
+            Living elements created outside any theme scope.
+        """
+        return list(self._global_theme_followers)
 
     @property
     def hot_ui(self):

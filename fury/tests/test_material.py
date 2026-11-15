@@ -23,6 +23,7 @@ from fury.lib import (
     TextureMap,
 )
 from fury.material import (
+    RoundedRectangleMaterial,
     SphGlyphMaterial,
     StreamlinesMaterial,
     VectorFieldArrowMaterial,
@@ -1058,3 +1059,49 @@ def test_physical_only_properties_pass_through(param, value):
     # The same property must be refused by 'standard', which cannot express it.
     with pytest.raises(ValueError, match="Use material='physical'"):
         _create_mesh_material(material="standard", **{param: value})
+
+
+def test_rounded_rectangle_material_uniforms():
+    """Every style value is stored in the uniform buffer and read back."""
+    mat = RoundedRectangleMaterial(
+        size=(80, 40),
+        corner_radius=(1, 2, 3, 4),
+        border_color=(1, 0, 0, 0.5),
+        border_width=3,
+        shadow_color=(0, 0, 1, 0.25),
+        shadow_offset=(5, -6),
+        shadow_blur=12,
+        shadow_spread=-2,
+    )
+    data = mat.uniform_buffer.data
+    np.testing.assert_allclose(data["size"], (80, 40))
+    np.testing.assert_allclose(data["corner_radius"], (1, 2, 3, 4))
+    np.testing.assert_allclose(data["border_color"], (1, 0, 0, 0.5))
+    np.testing.assert_allclose(data["shadow_offset"], (5, -6))
+    assert mat.corner_radius == (1.0, 2.0, 3.0, 4.0)
+    np.testing.assert_allclose(mat.border_color, (1, 0, 0, 0.5))
+    assert mat.border_width == 3.0
+    np.testing.assert_allclose(mat.shadow_color, (0, 0, 1, 0.25))
+    np.testing.assert_allclose(mat.shadow_offset, (5, -6))
+    assert mat.shadow_blur == 12.0
+    assert mat.shadow_spread == -2.0
+    assert mat.shadow is False
+    assert mat.pick_write is True
+
+    mat.corner_radius = 7
+    assert mat.corner_radius == (7.0, 7.0, 7.0, 7.0)
+    mat.border_width = 0
+    assert mat.border_width == 0.0
+
+
+def test_rounded_rectangle_material_shadow_is_not_pickable(caplog):
+    """A shadow material never writes picks, and says so when asked to."""
+    mat = RoundedRectangleMaterial(shadow=True)
+    assert mat.shadow is True
+    assert mat.pick_write is False
+    assert mat.depth_write is False
+    assert caplog.records == []
+
+    mat = RoundedRectangleMaterial(shadow=True, pick_write=True)
+    assert mat.pick_write is False
+    assert "pick_write=True is ignored" in caplog.text

@@ -6,8 +6,15 @@ import numpy as np
 
 from fury.io import load_image
 from fury.lib import Texture
-from fury.ui.core import UI, Anchor, Rectangle2D, TextBlock2D
-from fury.ui.layout import Align, Direction, Position, place
+from fury.ui.core import (
+    UI,
+    Anchor,
+    Rectangle2D,
+    RoundedRectangle2D,
+    TextBlock2D,
+    themed,
+)
+from fury.ui.layout import Align, Direction, Edges, Position, place
 
 
 class Panel2D(UI):
@@ -34,14 +41,30 @@ class Panel2D(UI):
         Border color, same formats as ``color``.
         Defaults to the theme item of the same name.
     border_width : float, optional
-        Width of the border.
+        Width of the border. Without ``has_border``, it is only used when the
+        theme draws a border around panels.
+        Defaults to the theme item of the same name.
     has_border : bool, optional
-        If the panel should have borders.
+        If True, the border is drawn with four separate rectangles, whose
+        color and width can be set per side. When the theme rounds the
+        corners, the rectangles are hidden and the rounded background draws
+        the border with one color and width for all sides; values set per
+        side are kept and used again when the corners are square. If False,
+        the border, corner radius and shadow come from the theme's box style.
 
     Attributes
     ----------
     alignment : [left, right]
         Alignment of the panel with respect to the overall screen.
+
+    Notes
+    -----
+    The theme items ``padding`` and ``gap`` set the layout padding and gap
+    used by :meth:`add`, until :meth:`set_layout` changes them. Panels that
+    other widgets create for their own parts do not use them.
+
+    ``background`` is a :class:`RoundedRectangle2D`. It was a
+    :class:`Rectangle2D` before themes had box styles.
     """
 
     def __init__(
@@ -53,7 +76,7 @@ class Panel2D(UI):
         opacity=None,
         align="left",
         border_color=None,
-        border_width=0,
+        border_width=None,
         has_border=False,
     ):
         """Initialize class instance."""
@@ -65,17 +88,154 @@ class Panel2D(UI):
             "bottom": (0.0, 1.0),
         }
         self.has_border = has_border
+        self._panel_visible = True
+        self._last_border_side = None
         self._border_color = self._theme_value("border_color", border_color)
-        self._border_width = border_width
+        self._border_width = self._theme_value("border_width", border_width)
+        self._layout_from_theme = True
         super(Panel2D, self).__init__(position=position)
-        self.set_layout(
-            width=size[0], height=size[1], border=border_width if has_border else 0
+        self._layout_from_theme = self._theme_source != "inherited"
+        self._layout_node.style.update(
+            width=size[0],
+            height=size[1],
+            border=self._border_width if has_border else 0,
         )
+        self._apply_theme_layout()
         self.resize(size)
         self.alignment = align
-        self.color = self._theme_value("color", color)
-        self.opacity = self._theme_value("opacity", opacity)
+        self._set_style("color", self._theme_value("color", color))
+        self._set_style("opacity", self._theme_value("opacity", opacity))
+        self._style_background()
         self._drag_offset = None
+
+    def _style_background(self):
+        """
+        Apply the box style to the background and show the border.
+
+        A panel with ``has_border`` draws its border with four rectangles
+        while its corners are square. When its background has rounded
+        corners, the rectangles are hidden and the background draws the
+        border instead, with the panel border width and the color of the
+        side set last. Without ``has_border``, the background border uses the
+        theme width, or the given ``border_width`` when the theme draws a
+        border at all, as panels without ``has_border`` never drew one.
+        """
+        if not self.has_border:
+            theme_width = self._theme.get(type(self), "border_width")
+            self._apply_box_style(
+                self.background, border_width=self._border_width if theme_width else 0
+            )
+            return
+        radius = self.background._style_state()[0].get(
+            "corner_radius", self._theme_value("corner_radius")
+        )
+        if np.any(np.asarray(radius) > 0):
+            self._apply_box_style(self.background, **self._rounded_border())
+        else:
+            self._apply_box_style(self.background, border_width=0)
+        self._update_border_rects()
+
+    def _rounded_border(self):
+        """
+        Get the border drawn by the rounded background.
+
+        Returns
+        -------
+        dict
+            The panel border width and the color of the side set last, or
+            the panel border color.
+        """
+        side = self._last_border_side
+        color = self.borders[side].color if side else self._border_color
+        return {"border_width": self._border_width, "border_color": color}
+
+    def _rounded(self):
+        """
+        Tell whether the background of this panel has rounded corners.
+
+        Returns
+        -------
+        bool
+            True if any corner radius of the background is positive.
+        """
+        return bool(np.any(np.asarray(self.background.corner_radius) > 0))
+
+    def _update_border_rects(self):
+        """
+        Show each border rectangle when the panel and the side are visible.
+
+        A side is visible unless the user hid it directly. All rectangles
+        are hidden while the background has rounded corners.
+        """
+        if not self.has_border:
+            return
+        square = not self._rounded()
+        for border in self.borders.values():
+            side_visible = border._requested_visibility
+            border.actor.visible = self._panel_visible and side_visible and square
+
+    def _background_style_changed(self, item):
+        """
+        Follow a change of the background radius.
+
+        Parameters
+        ----------
+        item : str
+            Theme item of the background that changed.
+        """
+        if item == "corner_radius" and self.has_border:
+            if self._rounded():
+                for name, value in self._rounded_border().items():
+                    self.background._push_style(name, value)
+            else:
+                self.background._push_style("border_width", 0)
+            self._update_border_rects()
+
+    def _apply_theme_layout(self):
+        """Use the theme padding and gap unless set_layout changed them."""
+        if not self._layout_from_theme:
+            return
+        style = self._layout_node.style
+        padding = Edges.of(self._theme_value("padding"))
+        gap = self._theme_value("gap")
+        if style.padding != padding or style.gap != gap:
+            style.update(padding=padding, gap=gap)
+            self.mark_layout_dirty()
+
+    def set_layout(self, **properties):
+        """
+        Change the layout properties of this panel.
+
+        Parameters
+        ----------
+        **properties : dict
+            Properties of :class:`fury.ui.layout.LayoutStyle`, such as
+            ``width``, ``padding`` or ``gap``.
+
+        Returns
+        -------
+        Panel2D
+            This panel, so calls can be chained.
+        """
+        if "padding" in properties or "gap" in properties:
+            self._layout_from_theme = False
+        return super(Panel2D, self).set_layout(**properties)
+
+    def _refresh_style(self):
+        """Show the border, box style and spacing of the theme."""
+        self._border_color = self._theme_value("border_color")
+        if self.has_border:
+            for border in self.borders.values():
+                border._push_style("color", self._border_color)
+            width = self._theme_value("border_width")
+            if width != self._border_width:
+                self._border_width = width
+                self.set_layout(border=width)
+                self.resize(self.size)
+        else:
+            self._border_width = self._theme_value("border_width")
+        self._style_background()
+        self._apply_theme_layout()
 
     def _setup(self):
         """
@@ -86,7 +246,7 @@ class Panel2D(UI):
         """
         self._elements = []
         self.element_offsets = []
-        self.background = Rectangle2D(size=(1, 1))
+        self.background = RoundedRectangle2D(size=(1, 1), corner_radius=0)
 
         if self.has_border:
             self.borders = {
@@ -97,7 +257,8 @@ class Panel2D(UI):
             }
 
             for key in self.borders.keys():
-                self.borders[key].color = self._border_color
+                self.borders[key]._on_visibility_change = self._update_border_rects
+                self.borders[key]._push_style("color", self._border_color)
                 self.borders[
                     key
                 ].on_left_mouse_button_pressed = self.left_button_pressed
@@ -110,6 +271,7 @@ class Panel2D(UI):
                 )
 
         self.add_element(self.background, (0, 0), _is_internal=True)
+        self.background._on_style_change = self._background_style_changed
 
         self.background.on_left_mouse_button_pressed = self.left_button_pressed
         self.background.on_left_mouse_button_dragged = self.left_button_dragged
@@ -198,29 +360,35 @@ class Panel2D(UI):
         """
         Set visibility of this UI component.
 
+        Border sides hidden through ``borders[side].set_visibility(False)``
+        stay hidden when the panel is shown again, and border rectangles stay
+        hidden while the corners are rounded.
+
         Parameters
         ----------
         visibility : bool
             If True, the panel and its elements will be visible. If False, it will
             be hidden.
         """
+        self._panel_visible = bool(visibility)
+        borders = self.borders.values() if self.has_border else ()
         for element in self._elements:
-            element.set_visibility(visibility)
+            if not any(element is border for border in borders):
+                element.set_visibility(visibility)
+        self._update_border_rects()
 
-    @property
-    def color(self):
+    def _get_color(self):
         """
         Get the background color of the panel.
 
         Returns
         -------
-        (float, float, float)
-            RGB color of the panel background.
+        ndarray
+            RGB color of the panel background, as floats in [0, 1].
         """
         return self.background.color
 
-    @color.setter
-    def color(self, color):
+    def _show_color(self, color):
         """
         Set the background color of the panel.
 
@@ -230,10 +398,11 @@ class Panel2D(UI):
             New background color. A hex string ("#FF0000"), RGB(A) in [0, 1],
             or RGB(A) in [0, 255].
         """
-        self.background.color = color
+        self._forward(self.background, "color", color)
 
-    @property
-    def opacity(self):
+    color = themed(_get_color, _show_color)
+
+    def _get_opacity(self):
         """
         Get the opacity of the panel.
 
@@ -244,8 +413,7 @@ class Panel2D(UI):
         """
         return self.background.opacity
 
-    @opacity.setter
-    def opacity(self, opacity):
+    def _show_opacity(self, opacity):
         """
         Set the opacity of the panel.
 
@@ -254,7 +422,9 @@ class Panel2D(UI):
         opacity : float
             New opacity value.
         """
-        self.background.opacity = opacity
+        self._forward(self.background, "opacity", opacity)
+
+    opacity = themed(_get_opacity, _show_opacity)
 
     def add_element(self, element, coords, *, anchor="position", _is_internal=False):
         """
@@ -473,14 +643,19 @@ class Panel2D(UI):
 
         Returns
         -------
-        list
-            A list containing the color (RGB tuple) of the left, right, top, and bottom
-            borders, respectively.
+        list of tuple
+            The RGB color, as floats, of the left, right, top and bottom
+            borders. While the corners are rounded, every side has the
+            color of the border drawn by the background.
         """
         if not self.has_border:
             logging.warning("Border is not present, border color is not available.")
             return []
-        return [self.borders[side].color for side in self.border_sides]
+        if self._rounded():
+            colors = [self.background.border_color] * len(self.border_sides)
+        else:
+            colors = [self.borders[side].color for side in self.border_sides]
+        return [tuple(float(c) for c in color[:3]) for color in colors]
 
     @border_color.setter
     def border_color(self, side_color):
@@ -506,6 +681,27 @@ class Panel2D(UI):
             return
 
         self.borders[side].color = color
+        self._last_border_side = side
+        if self._rounded():
+            self._warn_rounded_border("border color")
+            self.background._push_style(
+                "border_color", self.borders[side].color, force=True
+            )
+
+    def _warn_rounded_border(self, item):
+        """
+        Warn that a rounded panel draws one border for all sides.
+
+        Parameters
+        ----------
+        item : str
+            ``"border color"`` or ``"border width"``.
+        """
+        logging.warning(
+            "The panel corners are rounded, so its border has one %s for all "
+            "sides; the value given for one side is used for all of them.",
+            item,
+        )
 
     @property
     def border_width(self):
@@ -521,6 +717,8 @@ class Panel2D(UI):
         if not self.has_border:
             logging.warning("Border is not present, border width is not available.")
             return []
+        if self._rounded():
+            return [self.background.border_width] * len(self.border_sides)
 
         widths = []
 
@@ -558,6 +756,10 @@ class Panel2D(UI):
             self.borders[side].height = border_width
         else:
             raise ValueError(f"{side} not a valid border side")
+        self._border_width = self._theme_value("border_width", border_width)
+        if self._rounded():
+            self._warn_rounded_border("border width")
+            self.background._push_style("border_width", border_width, force=True)
 
 
 class LayoutBox(UI):
@@ -765,17 +967,41 @@ class TabPanel2D(UI):
     ):
         """Initialize the tab panel."""
         color = self._theme_value("color", color)
-        self.content_panel = content_panel or Panel2D(size=content_size or size)
-        self.content_panel.set_visibility(content_visible)
+        self.content_panel = content_panel
+        self._content_size = content_size or size
+        self._content_visible = content_visible
         self.panel_size = size
         self._text_size = size
 
         super(TabPanel2D, self).__init__(position=position)
         self.title = title
-        self.color = color
+        self._set_style("color", color)
+        self.panel._push_styles(**self._box_style())
+
+    def _theme_children(self):
+        """
+        Get the components restyled together with this tab.
+
+        Returns
+        -------
+        list of UI
+            The header panel and the content panel.
+        """
+        children = super(TabPanel2D, self)._theme_children()
+        if self.content_panel not in children:
+            children.append(self.content_panel)
+        return children
+
+    def _refresh_style(self):
+        """Show the title color and box style of the theme."""
+        self.text_block._push_style("color", self._theme_value("text_color"))
+        self.panel._push_styles(**self._box_style())
 
     def _setup(self):
-        """Set up the tab header panel and title text."""
+        """Set up the tab header panel, title text and content panel."""
+        if self.content_panel is None:
+            self.content_panel = Panel2D(size=self._content_size)
+        self.content_panel.set_visibility(self._content_visible)
         self.panel = Panel2D(size=self.panel_size)
         self.text_block = TextBlock2D(
             text="",
@@ -830,8 +1056,7 @@ class TabPanel2D(UI):
         self.text_block.resize(size)
         self.panel.update_layout()
 
-    @property
-    def color(self):
+    def _get_color(self):
         """
         Get the tab header background color.
 
@@ -842,8 +1067,7 @@ class TabPanel2D(UI):
         """
         return self.panel.color
 
-    @color.setter
-    def color(self, color):
+    def _show_color(self, color):
         """
         Set the tab header background color.
 
@@ -853,7 +1077,9 @@ class TabPanel2D(UI):
             New tab header background color. A hex string ("#FF0000"), RGB(A)
             in [0, 1], or RGB(A) in [0, 255].
         """
-        self.panel.color = color
+        self._forward(self.panel, "color", color)
+
+    color = themed(_get_color, _show_color)
 
     @property
     def title(self):
@@ -904,8 +1130,7 @@ class TabPanel2D(UI):
         self.text_block.bold = bold
         self.text_block.message = self.text_block.message
 
-    @property
-    def title_color(self):
+    def _get_title_color(self):
         """
         Get the tab title color.
 
@@ -916,8 +1141,7 @@ class TabPanel2D(UI):
         """
         return self.text_block.color
 
-    @title_color.setter
-    def title_color(self, color):
+    def _show_title_color(self, color):
         """
         Set the tab title color.
 
@@ -927,10 +1151,11 @@ class TabPanel2D(UI):
             New tab title color. A hex string ("#FF0000"), RGB(A) in [0, 1],
             or RGB(A) in [0, 255].
         """
-        self.text_block.color = color
+        self._forward(self.text_block, "color", color)
 
-    @property
-    def title_font_size(self):
+    title_color = themed(_get_title_color, _show_title_color, item="text_color")
+
+    def _get_title_font_size(self):
         """
         Get the tab title font size.
 
@@ -941,8 +1166,7 @@ class TabPanel2D(UI):
         """
         return self.text_block.font_size
 
-    @title_font_size.setter
-    def title_font_size(self, font_size):
+    def _show_title_font_size(self, font_size):
         """
         Set the tab title font size.
 
@@ -951,7 +1175,9 @@ class TabPanel2D(UI):
         font_size : int
             New font size of the tab title.
         """
-        self.text_block.font_size = font_size
+        self._forward(self.text_block, "font_size", font_size)
+
+    title_font_size = themed(_get_title_font_size, _show_title_font_size)
 
     @property
     def title_italic(self):
@@ -1092,6 +1318,11 @@ class TabUI(UI):
 
     _VALID_TAB_BAR_POSITIONS = ["top", "bottom", "left", "right", "accordion"]
 
+    active_color = themed(item="active_color", doc="Color of the active tab header.")
+    inactive_color = themed(
+        item="inactive_color", doc="Color of the inactive tab headers."
+    )
+
     def __init__(
         self,
         *,
@@ -1123,8 +1354,8 @@ class TabUI(UI):
         self.tab_titles = tab_titles
         self.parent_size = size
         self.draggable = draggable
-        self.active_color = active_color
-        self.inactive_color = inactive_color
+        self._set_style("active_color", active_color)
+        self._set_style("inactive_color", inactive_color)
         self.font_size = font_size
         self.active_tab_idx = startup_tab_id
         self.collapsed = startup_tab_id is None
@@ -1136,6 +1367,16 @@ class TabUI(UI):
         self._drag_threshold = 3
 
         super(TabUI, self).__init__(position=position)
+
+    def _refresh_style(self):
+        """Show the tab colors and title font size."""
+        self.font_size = self._theme_value("font_size")
+        for tab_panel in self.tabs:
+            is_active = self._is_content_visible(tab_panel)
+            tab_panel._push_style(
+                "color", self.active_color if is_active else self.inactive_color
+            )
+            tab_panel._push_style("title_font_size", self.font_size)
 
     def _setup(self):
         """Set up the parent panel and tab panels."""
@@ -1153,7 +1394,7 @@ class TabUI(UI):
                 content_size=self.content_size,
                 content_visible=False,
             )
-            tab_panel.title_font_size = self.font_size
+            tab_panel._push_style("title_font_size", self.font_size)
             self.tabs.append(tab_panel)
             self._children.append(tab_panel)
 
@@ -1369,7 +1610,9 @@ class TabUI(UI):
         """
         for idx, tab_panel in enumerate(self.tabs):
             is_active = idx == tab_idx
-            tab_panel.color = self.active_color if is_active else self.inactive_color
+            tab_panel._push_style(
+                "color", self.active_color if is_active else self.inactive_color
+            )
             tab_panel.content_panel.set_visibility(is_active)
         self.active_tab_idx = tab_idx
         self.collapsed = False
@@ -1397,12 +1640,14 @@ class TabUI(UI):
 
         for idx, tab_panel in enumerate(self.tabs):
             if idx != tab_idx:
-                tab_panel.color = self.inactive_color
+                tab_panel._push_style("color", self.inactive_color)
                 tab_panel.content_panel.set_visibility(False)
                 continue
 
             visible = self._is_content_visible(tab_panel)
-            tab_panel.color = self.inactive_color if visible else self.active_color
+            tab_panel._push_style(
+                "color", self.inactive_color if visible else self.active_color
+            )
             tab_panel.content_panel.set_visibility(not visible)
 
         self.active_tab_idx = tab_idx
@@ -1419,7 +1664,7 @@ class TabUI(UI):
         """
         if self.active_tab_idx is not None:
             active_tab_panel = self.tabs[self.active_tab_idx]
-            active_tab_panel.color = self.inactive_color
+            active_tab_panel._push_style("color", self.inactive_color)
             active_tab_panel.content_panel.set_visibility(False)
 
         self.active_tab_idx = None
