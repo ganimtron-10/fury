@@ -388,6 +388,7 @@ def _classic_items():
             "inactive_color": (0.5, 0.5, 0.5),
             "font_size": 18,
         },
+        "TexturedButton2D": {"icon_color": None},
         "Loader2D": {
             "overlay_color": (0, 0, 0),
             "overlay_opacity": 0.5,
@@ -450,6 +451,7 @@ def _classic_items():
             "time_color": (1, 1, 1),
             "speed_color": (0.2, 0.2, 0.2),
             "progress_color": (1, 0, 0),
+            "icon_color": None,
         },
         "TextBox2D": {
             "color": (0, 0, 0),
@@ -479,6 +481,7 @@ def _classic_items():
             "scroll_bar_active_color": (0.6, 0.2, 0.2),
             "scroll_bar_inactive_color": (0.9, 0.0, 0.0),
             "font_size": 20,
+            "icon_color": None,
         },
         "ListBox2D": {
             "font_size": 20,
@@ -495,7 +498,11 @@ def _classic_items():
             "unselected_color": (0.9, 0.9, 0.9),
             "hover_color": None,
         },
-        "TreeNode2D": {"color": (0, 0, 0), "selected_color": (0.8, 0.3, 0.3)},
+        "TreeNode2D": {
+            "color": (0, 0, 0),
+            "selected_color": (0.8, 0.3, 0.3),
+            "icon_color": None,
+        },
         "Tree2D": {
             "color": (0, 0, 0),
             "scroll_bar_inactive_color": (0.6, 0.2, 0.2),
@@ -514,7 +521,7 @@ def _classic_items():
             "border_width": 0,
             "title_font_weight": 400,
         },
-        "SpinBox": {"panel_color": (1, 1, 1)},
+        "SpinBox": {"panel_color": (1, 1, 1), "icon_color": None},
     }
 
 
@@ -691,6 +698,7 @@ def _graphite_items(palette):
                 "time_color": text,
                 "speed_color": muted,
                 "progress_color": accent,
+                "icon_color": text,
             },
             "TextBox2D": {
                 "color": text,
@@ -721,6 +729,7 @@ def _graphite_items(palette):
                 "scroll_bar_active_color": text,
                 "scroll_bar_inactive_color": muted,
                 "font_size": 13,
+                "icon_color": text,
                 **control_box,
             },
             "ListBox2D": {
@@ -739,9 +748,13 @@ def _graphite_items(palette):
                 "hover_color": fill,
                 "corner_radius": 4,
             },
-            "TreeNode2D": {"color": text, "selected_color": selected},
+            "TreeNode2D": {
+                "color": fill,
+                "selected_color": selected,
+                "icon_color": text,
+            },
             "Tree2D": {
-                "color": text,
+                "color": bg,
                 "scroll_bar_inactive_color": muted,
                 "scroll_bar_active_color": text,
             },
@@ -757,7 +770,7 @@ def _graphite_items(palette):
                 "border_color": border,
                 "title_font_weight": 600,
             },
-            "SpinBox": {"panel_color": bg},
+            "SpinBox": {"panel_color": bg, "icon_color": text},
         },
     )
 

@@ -38,7 +38,7 @@ from fury.data import read_viz_icons
 from fury.deprecator import deprecated_params
 from fury.geometry import buffer_to_geometry
 from fury.io import get_extension, load_image, load_image_texture
-from fury.lib import EventType
+from fury.lib import EventType, Texture
 from fury.material import _create_mesh_material
 from fury.primitive import prim_ring
 from fury.ui.containers import ImageContainer2D, LayoutBox, Panel2D, Row
@@ -52,6 +52,7 @@ from fury.ui.core import (
     RoundedRectangle2D,
     Slider2D,
     TextBlock2D,
+    _to_rgba,
     themed,
 )
 from fury.ui.helpers import clip_overflow
@@ -341,7 +342,41 @@ class TexturedButton2D(Button2D):
     def __init__(self, states, position=(0, 0), size=(30, 30), is_toggle=False):
         """Initialize the textured button instance."""
         self.texture_map = self._load_textures(states)
+        self._tint = None
+        self._tinted_map = {}
         super().__init__(position=position, size=size, is_toggle=is_toggle)
+        self._set_style("icon_color", _theme_value_or_none(self, "icon_color"))
+
+    def _show_icon_color(self, color):
+        """
+        Draw the state images in one color, keeping their transparency.
+
+        Images without an alpha channel keep their own colors.
+
+        Parameters
+        ----------
+        color : str, tuple, list, ndarray or None
+            A hex string, RGB in [0, 1] or RGB in [0, 255]. None draws the
+            images in their own colors.
+        """
+        rgb = None if color is None else tuple(_to_rgba(color)[:3])
+        if rgb != self._tint:
+            self._tint = rgb
+            self._tinted_map = {}
+            if rgb is not None:
+                for name, texture in self.texture_map.items():
+                    self._tinted_map[name] = _tinted_texture(texture, rgb)
+        self.update_visual_state()
+
+    icon_color = themed(
+        fshow=_show_icon_color,
+        reset_on_none=True,
+        doc=(
+            "Color the state images are drawn in, as RGB floats, or None when "
+            "they keep their own colors. Assigning None follows the theme, or "
+            "the widget the button belongs to, again."
+        ),
+    )
 
     def _load_textures(self, states):
         """
@@ -375,7 +410,7 @@ class TexturedButton2D(Button2D):
 
         key = self.resolve_state_key(self.texture_map)
         if key:
-            tex = self.texture_map[key]
+            tex = self._tinted_map.get(key, self.texture_map[key])
 
             self.child.actor.material.map = tex
             self.child.actor.material.needs_update = True
@@ -383,6 +418,55 @@ class TexturedButton2D(Button2D):
         else:
             tint = 0.5 if self.is_pressed else (0.8 if self.is_hovered else 1.0)
             self.child._push_style("color", (tint, tint, tint))
+
+
+def _theme_value_or_none(element, item):
+    """
+    Get a themed value of an element, or None when its theme lacks the item.
+
+    Parameters
+    ----------
+    element : UI
+        The element.
+    item : str
+        Theme item name.
+
+    Returns
+    -------
+    object or None
+        The value, or None if neither the element nor its theme has it.
+    """
+    try:
+        return element._theme_value(item)
+    except KeyError:
+        return None
+
+
+def _tinted_texture(texture, color):
+    """
+    Create a copy of an image texture drawn in one color.
+
+    Parameters
+    ----------
+    texture : Texture
+        Image texture with gray, gray and alpha, RGB or RGBA data.
+    color : ndarray
+        RGB color in [0, 1].
+
+    Returns
+    -------
+    Texture
+        RGBA texture with every pixel set to ``color`` and the alpha of
+        ``texture``, or ``texture`` itself when it has no alpha channel.
+    """
+    data = np.asarray(texture.data)
+    if data.ndim != 3 or data.shape[2] not in (2, 4):
+        return texture
+    scale = np.iinfo(data.dtype).max if np.issubdtype(data.dtype, np.integer) else 1
+    tinted = np.empty(data.shape[:2] + (4,), dtype=data.dtype)
+    tinted[..., :3] = np.round(np.asarray(color) * scale).astype(data.dtype)
+    tinted[..., 3] = data[..., -1]
+    return Texture(tinted, dim=2, size=texture.size, generate_mipmaps=True)
 
 
 class TextButton2D(Button2D):
@@ -1005,6 +1089,8 @@ class PlaybackPanel(UI):
         )
         self._progress_bar._push_styles(track_color=self._theme_value("progress_color"))
 
+        self._apply_icon_color()
+
         self.panel.add_element(self._play_pause_btn, (10, 10))
         self.panel.add_element(self._stop_btn, (45, 10))
         self.panel.add_element(self._loop_btn, (80, 10))
@@ -1033,6 +1119,19 @@ class PlaybackPanel(UI):
         self.time_text._push_style("color", self._theme_value("time_color"))
         self.speed_text._push_style("color", self._theme_value("speed_color"))
         self._progress_bar._push_styles(track_color=self._theme_value("progress_color"))
+        self._apply_icon_color()
+
+    def _apply_icon_color(self):
+        """Draw the button icons in the theme ``icon_color``, if it has one."""
+        icon_color = _theme_value_or_none(self, "icon_color")
+        for button in (
+            self._play_pause_btn,
+            self._stop_btn,
+            self._loop_btn,
+            self._speed_up_btn,
+            self._slow_down_btn,
+        ):
+            button._push_style("icon_color", icon_color)
 
     def _update_actors_position(self):
         """Update internal actor positions."""
@@ -3894,6 +3993,9 @@ class ComboBox2D(UI):
         self.drop_down_button = TexturedButton2D(
             states=self._icon_files, size=self.drop_button_size, is_toggle=True
         )
+        self.drop_down_button._push_style(
+            "icon_color", _theme_value_or_none(self, "icon_color")
+        )
 
         self.drop_down_menu = ListBox2D(
             values=self.items,
@@ -3955,6 +4057,9 @@ class ComboBox2D(UI):
             unselected_color=self.unselected_color,
             scroll_bar_active_color=self.scroll_active_color,
             scroll_bar_inactive_color=self.scroll_inactive_color,
+        )
+        self.drop_down_button._push_style(
+            "icon_color", _theme_value_or_none(self, "icon_color")
         )
 
     def _setup_drag_events(self):
@@ -5141,12 +5246,13 @@ class TreeNode2D(UI):
         return children
 
     def _refresh_style(self):
-        """Show the selected or unselected title color."""
+        """Show the title color and draw the expand icon in the theme color."""
         if "title_color" not in self._style_state()[0]:
             self._set_style(
                 "title_color",
                 self.selected_color if self.selected else self.unselected_color,
             )
+        self.button._push_style("icon_color", _theme_value_or_none(self, "icon_color"))
 
     def _setup(self):
         """
@@ -5181,6 +5287,7 @@ class TreeNode2D(UI):
             size=(_btn_size, _btn_size),
             is_toggle=True,
         )
+        self.button._push_style("icon_color", _theme_value_or_none(self, "icon_color"))
 
         _btn_y = (self.child_height - _btn_size) // 2
         icon_width = self.label_image.size[0] if self.has_icon else 0
@@ -7804,6 +7911,7 @@ class SpinBox(UI):
         self.decrement_button = TexturedButton2D(
             states={"default": read_viz_icons(fname="circle-down.png")}
         )
+        self._apply_icon_color()
 
         self.panel.set_layout(padding=self.padding, gap=self.padding)
         self.panel.add(self.textbox, width=grow(), height=grow())
@@ -7870,8 +7978,15 @@ class SpinBox(UI):
         self.panel.set_position(self.get_position())
 
     def _refresh_style(self):
-        """Read the panel color again from the theme."""
+        """Read the panel and icon colors again from the theme."""
         self.panel._push_style("color", self.panel_color)
+        self._apply_icon_color()
+
+    def _apply_icon_color(self):
+        """Draw the button icons in the theme ``icon_color``, if it has one."""
+        icon_color = _theme_value_or_none(self, "icon_color")
+        for button in (self.increment_button, self.decrement_button):
+            button._push_style("icon_color", icon_color)
 
     def increment_callback(self, button):
         """

@@ -460,10 +460,10 @@ class UI(object, metaclass=_UIMeta):
         """
         user, parent, shown = self._style_state()
         if source == "parent":
+            parent[item] = value
             if item in user and not force:
                 return
             user.pop(item, None)
-            parent[item] = value
         if source != "user" and item in shown and _same_value(shown[item], value):
             return
         descriptor = _style_descriptors(type(self)).get(item)

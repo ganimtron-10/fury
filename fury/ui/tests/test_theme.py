@@ -1736,3 +1736,319 @@ def test_per_side_values_read_back_after_leaving_rounded_mode():
         (1.0, 0.0, 0.0),
     ]
     assert panel.border_width[2] == 6
+
+
+def _box(element):
+    """
+    Get the pixel box an element covers.
+
+    Parameters
+    ----------
+    element : UI
+        The element.
+
+    Returns
+    -------
+    tuple of int
+        Left, top, right and bottom edges, with y pointing down.
+    """
+    x, y = (int(round(v)) for v in element.get_position())
+    width, height = (int(round(v)) for v in element.size)
+    return x, y, x + width, y + height
+
+
+def _region(image, element, within):
+    """
+    Get the pixels an element covers inside the straight part of another.
+
+    The clipping box is inset horizontally by its corner radius, so rounded
+    corners and the scene behind them are left out.
+
+    Parameters
+    ----------
+    image : ndarray
+        RGB image with y pointing down, as rendered by ``_render_scene``.
+    element : UI
+        Element whose box is cut out.
+    within : Panel2D
+        Panel whose box clips the region.
+
+    Returns
+    -------
+    ndarray
+        Pixels of the clipped box, of shape (height, width, 3).
+    """
+    left, top, right, bottom = _box(element)
+    clip = _box(within)
+    inset = int(np.ceil(np.max(within.background.corner_radius)))
+    left, top = max(left, clip[0] + inset), max(top, clip[1])
+    right, bottom = min(right, clip[2] - inset), min(bottom, clip[3])
+    return image[top:bottom, left:right]
+
+
+def _contrast_spread(pixels, background):
+    """
+    Get how far the most different pixel is from a background color.
+
+    Parameters
+    ----------
+    pixels : ndarray
+        RGB pixels in [0, 255].
+    background : array_like
+        Rendered RGB background color in [0, 255].
+
+    Returns
+    -------
+    float
+        Largest per-pixel color distance to the background, in [0, 255].
+    """
+    difference = pixels.reshape(-1, 3) - np.asarray(background, dtype=float)[:3]
+    return float(np.abs(difference).max())
+
+
+@pytest.mark.parametrize("name", ["graphite", "graphite_light"])
+def test_graphite_tree_labels_contrast_with_title_background(name):
+    """Tree node labels and expand icons stand out from their title bars."""
+    with ui.theme_scope(name):
+        tree = ui.elements.Tree2D(
+            structure=[{"Root": ["Child1", "Child2"]}],
+            tree_name="Tree",
+            position=(20, 20),
+            size=(300, 200),
+        )
+
+    image = _render_scene(tree)
+    for node in [tree.base_node, *tree.base_node.child_nodes]:
+        title = node.title_panel
+        left, top, right, bottom = _box(title)
+        inset = int(np.ceil(np.max(title.background.corner_radius)))
+        background = image[(top + bottom) // 2, right - inset - 2]
+        label = _region(image, node.label_text, title)
+        assert _contrast_spread(label, background) > 180
+        if node is not tree.base_node:
+            icon = _region(image, node.button, title)
+            assert _contrast_spread(icon, background) > 150
+
+
+def _playback_buttons(playback):
+    """
+    Get the textured buttons of a playback panel.
+
+    Parameters
+    ----------
+    playback : PlaybackPanel
+        The panel.
+
+    Returns
+    -------
+    list of TexturedButton2D
+        Play or pause, stop, loop, slower and faster buttons.
+    """
+    return [
+        playback._play_pause_btn,
+        playback._stop_btn,
+        playback._loop_btn,
+        playback._slow_down_btn,
+        playback._speed_up_btn,
+    ]
+
+
+def _playback_icon_spreads(playback):
+    """
+    Render a playback panel and measure how its icons stand out.
+
+    Parameters
+    ----------
+    playback : PlaybackPanel
+        The panel.
+
+    Returns
+    -------
+    list of float
+        Contrast spread of each play, stop and loop icon against the panel.
+    """
+    image = _render_scene(playback)
+    panel = playback.panel
+    left, top, _, bottom = _box(panel)
+    background = image[(top + bottom) // 2, left + 4]
+    return [
+        _contrast_spread(_region(image, button, panel), background)
+        for button in _playback_buttons(playback)[:3]
+    ]
+
+
+@pytest.mark.parametrize("name", ["graphite", "graphite_light"])
+def test_graphite_playback_icons_contrast_with_panel(name):
+    """Playback button icons are drawn in a color that contrasts the panel."""
+    with ui.theme_scope(name):
+        playback = ui.PlaybackPanel(position=(10, 50), width=380)
+
+    for spread in _playback_icon_spreads(playback):
+        assert spread > 150
+
+
+def test_playback_icons_follow_live_theme_change():
+    """set_theme tints the icons of an existing classic playback panel."""
+    playback = ui.PlaybackPanel(position=(10, 50), width=380)
+    assert playback._stop_btn.icon_color is None
+
+    ui.set_theme("graphite")
+
+    expected = tuple(_hex("#ECEDEF"))
+    for button in _playback_buttons(playback):
+        npt.assert_allclose(button.icon_color, expected)
+    for spread in _playback_icon_spreads(playback):
+        assert spread > 150
+
+    ui.set_theme("classic")
+    for button in _playback_buttons(playback):
+        assert button.icon_color is None
+
+
+def test_icon_color_is_an_rgb_tuple_and_restores_image_colors():
+    """icon_color reads back as RGB floats; None shows the images again."""
+    fetch_viz_icons()
+    button = ui.TexturedButton2D(states={"default": read_viz_icons(fname="stop2.png")})
+    original = button.child.actor.material.map.texture
+    assert button.icon_color is None
+
+    button.icon_color = "#FF0000"
+    assert button.icon_color == (1.0, 0.0, 0.0)
+    tinted = button.child.actor.material.map.texture
+    assert tinted is not original
+    tinted_data = np.asarray(tinted.data)
+    npt.assert_array_equal(tinted_data[..., 3], np.asarray(original.data)[..., 3])
+    visible = tinted_data[..., 3] > 0
+    npt.assert_array_equal(tinted_data[visible][:, :3], [[255, 0, 0]] * visible.sum())
+
+    button.icon_color = (255, 0, 0)
+    assert button.child.actor.material.map.texture is tinted
+
+    button.icon_color = None
+    assert button.child.actor.material.map.texture is original
+    assert button.icon_color is None
+
+
+def test_icon_tint_is_kept_when_the_button_changes_state():
+    """A toggled or pressed button still shows tinted images."""
+    with ui.theme_scope("graphite"):
+        playback = ui.PlaybackPanel(width=380)
+    button = playback._play_pause_btn
+    tinted = set(map(id, button._tinted_map.values()))
+
+    button.do_click()
+    assert button.toggled
+    assert id(button.child.actor.material.map.texture) in tinted
+    button.is_pressed = True
+    button.update_visual_state()
+    assert id(button.child.actor.material.map.texture) in tinted
+
+
+@pytest.mark.parametrize("theme_name", ["graphite", "classic"])
+def test_user_icon_color_survives_set_theme(theme_name):
+    """An icon color set by the user is kept when the global theme changes."""
+    playback = ui.PlaybackPanel(width=380)
+    with ui.theme_scope("graphite"):
+        tree = ui.elements.Tree2D(
+            structure=[{"Root": ["Child"]}], tree_name="Tree", size=(200, 100)
+        )
+    node = tree.base_node.child_nodes[0]
+    playback._stop_btn.icon_color = (0, 1, 0)
+    node.button.icon_color = (0, 0, 1)
+
+    ui.set_theme("graphite" if theme_name == "classic" else "classic")
+    ui.set_theme(theme_name)
+    node.selected_color = (0.5, 0.1, 0.1)
+
+    assert playback._stop_btn.icon_color == (0.0, 1.0, 0.0)
+    assert node.button.icon_color == (0.0, 0.0, 1.0)
+
+
+def test_icon_color_defaults_to_none_without_theme_item():
+    """A theme without icon_color draws images in their own colors."""
+    fetch_viz_icons()
+    bare = ui.Theme(name="bare", items={"UI": {"font_family": "Noto Sans"}})
+    with ui.theme_scope(bare):
+        button = ui.TexturedButton2D(
+            states={"default": read_viz_icons(fname="stop2.png")}
+        )
+
+    assert button.icon_color is None
+
+
+def test_icon_color_none_after_theme_change_matches_siblings():
+    """Clearing a user icon color shows the color the parent last pushed."""
+    playback = ui.PlaybackPanel(width=380)
+    tree = ui.elements.Tree2D(
+        structure=[{"A": ["a1"]}, {"B": ["b1"]}], tree_name="Tree", size=(200, 100)
+    )
+    first, second = tree.base_node.child_nodes[:2]
+    playback._stop_btn.icon_color = (0, 1, 0)
+    first.button.icon_color = (0, 0, 1)
+
+    ui.set_theme("graphite")
+    playback._stop_btn.icon_color = None
+    first.button.icon_color = None
+
+    assert playback._stop_btn.icon_color == playback._play_pause_btn.icon_color
+    npt.assert_allclose(playback._stop_btn.icon_color, _hex("#ECEDEF"))
+    assert first.button.icon_color == second.button.icon_color
+    npt.assert_allclose(first.button.icon_color, _hex("#ECEDEF"))
+
+
+@pytest.mark.parametrize("name", ["graphite", "graphite_light"])
+def test_graphite_spinbox_icons_contrast_with_panel(name):
+    """SpinBox arrow icons are drawn in a color that contrasts the panel."""
+    with ui.theme_scope(name):
+        spinbox = ui.SpinBox(position=(50, 50))
+
+    spinbox.panel.update_layout()
+    image = _render_scene(spinbox)
+    left, top, _, bottom = _box(spinbox.panel)
+    background = image[(top + bottom) // 2, left + 2]
+    for button in (spinbox.increment_button, spinbox.decrement_button):
+        assert button.icon_color is not None
+        assert _contrast_spread(_region(image, button, spinbox.panel), background) > 150
+
+
+@pytest.mark.parametrize("name", ["graphite", "graphite_light"])
+def test_graphite_combobox_arrow_uses_text_color(name):
+    """The ComboBox arrow is drawn in the theme text color."""
+    with ui.theme_scope(name):
+        combo = ui.ComboBox2D(items=["x", "y"], position=(50, 50))
+    text = ui.builtin_theme(name).get(ui.TextBlock2D, "color")
+
+    button = combo.drop_down_button
+    npt.assert_allclose(button.icon_color, _hex(text))
+    data = np.asarray(button.child.actor.material.map.texture.data)
+    visible = data[..., 3] > 0
+    npt.assert_allclose(
+        data[visible][:, :3] / 255, [_hex(text)] * visible.sum(), atol=1 / 255
+    )
+
+
+def test_tinted_texture_handles_gray_alpha_images():
+    """A gray and alpha image is tinted into an RGBA image with its alpha."""
+    alpha = np.array([[0, 128], [255, 64]], dtype=np.uint8)
+    gray_alpha = np.stack([np.full((2, 2), 40, dtype=np.uint8), alpha], axis=-1)
+    texture = ui.elements._tinted_texture(
+        ui.elements.Texture(gray_alpha, dim=2), (1.0, 0.0, 0.0)
+    )
+
+    data = np.asarray(texture.data)
+    assert data.shape == (2, 2, 4)
+    npt.assert_array_equal(data[..., 3], alpha)
+    npt.assert_array_equal(data[..., :3], [[[255, 0, 0]] * 2] * 2)
+
+
+def test_text_color_none_after_theme_change_follows_button():
+    """Clearing a user text color shows the color the button last pushed."""
+    button = ui.TextButton2D("Go")
+    button.child.color = (1, 0, 0)
+
+    ui.set_theme("graphite")
+    button.child.color = None
+
+    expected = ui.TextButton2D("Go").child.color
+    npt.assert_allclose(button.child.color, expected)
+    npt.assert_allclose(button.child.color, _hex("#141518"))
