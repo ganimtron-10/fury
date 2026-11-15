@@ -1742,7 +1742,6 @@ class TextBlock2D(UI):
         """Update the text actor alignment within the bounding box."""
         updated_text_position = [0, 0]
 
-        horiz_anchor = ""
         if self.justification.lower() == "left":
             self.actor.text_align = "left"
             horiz_anchor = "left"
@@ -1761,7 +1760,6 @@ class TextBlock2D(UI):
             msg = "Text can only be justified left, center and right."
             raise ValueError(msg)
 
-        vert_anchor = ""
         if self.vertical_justification.lower() == "top":
             vert_anchor = "top"
             updated_text_position[1] = self.boundingbox[1]

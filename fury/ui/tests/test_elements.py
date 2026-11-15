@@ -3082,7 +3082,7 @@ def test_ui_tree2d_add_content_keeps_node_reachable(ui_scene):
     assert _shown(content)
     npt.assert_array_equal(
         content.get_position() - b1_node.content_panel.get_position(),
-        (b1_node.indent + b1_node.child_indent + 10, 5),
+        (25 + 10, 5),
     )
 
     leaf_content = ui.Rectangle2D(size=(60, 40), color=(0, 1, 0))
@@ -3370,6 +3370,79 @@ def test_ui_tree2d_body_spans_full_width(ui_scene):
     npt.assert_allclose(strip_pixel, np.array((0.1, 0.3, 0.5)) * 255, atol=3)
 
 
+def test_ui_tree2d_multi_word_labels_stay_on_one_line(ui_scene):
+    """A long label with spaces is shortened instead of wrapping."""
+    show_manager, scene = ui_scene
+    long_label = "Brain tumor segmentation results for subject"
+    tree = ui.Tree2D(
+        structure=[{"A": [long_label, "Next row"]}],
+        position=TREE_POSITION,
+        size=(300, 200),
+    )
+    scene.add(tree)
+    tree.get_node("A").toggle_view()
+
+    label_text = tree.get_node(long_label).label_text
+    width, height = label_text.get_text_actor_size()
+    assert label_text.message.endswith("...")
+    assert height <= tree.get_node(long_label).child_height
+    assert width <= label_text.size[0]
+
+
+def test_ui_tree2d_expanding_after_moving_places_rows(ui_scene):
+    """Rows of a node expanded after the tree moved or scrolled line up."""
+    show_manager, scene = ui_scene
+    tree = ui.Tree2D(
+        structure=[{"R": ["A"] + [f"r{i}" for i in range(12)]}, {"A": ["a1"]}],
+        position=TREE_POSITION,
+        size=TREE_SIZE,
+    )
+    scene.add(tree)
+    tree.get_node("R").toggle_view()
+    _wheel_at(show_manager, TREE_POSITION[0] + 10, TREE_POSITION[1] + 100, dy=100)
+    tree.set_position((80, 90))
+
+    tree.get_node("A").toggle_view()
+
+    a_node, a1_node = tree.get_node("A"), tree.get_node("a1")
+    npt.assert_array_equal(
+        a1_node.get_position(),
+        a_node.get_position() + (25, a_node.child_height),
+    )
+
+
+def test_ui_treenode2d_rejects_cycles_and_nodes_as_elements():
+    """A node cannot be added below itself or as a plain UI element."""
+    parent = ui.TreeNode2D(label="P")
+    child = ui.TreeNode2D(label="C")
+    parent.add_node(child)
+
+    with npt.assert_raises(ValueError):
+        parent.add_node(parent)
+    with npt.assert_raises(ValueError):
+        child.add_node(parent)
+    with npt.assert_raises(TypeError):
+        ui.TreeNode2D(label="Q").add_element(ui.TreeNode2D(label="R"))
+
+
+def test_ui_tree2d_settings_apply_after_construction():
+    """Changing expandable, colors and the tree name updates the tree."""
+    tree = ui.Tree2D(structure=[{"A": ["a1"]}], tree_name="Old")
+    node = tree.get_node("A")
+
+    tree.tree_name = "New"
+    node.expandable = False
+    node.unselected_color = (0, 0, 1)
+    node.selected = True
+    node.selected_color = (0, 1, 0)
+
+    assert tree.base_node.label_text.message == "New"
+    assert not _shown(node.button)
+    npt.assert_array_almost_equal(node.color, (0, 1, 0))
+    node.selected = False
+    npt.assert_array_almost_equal(node.color, (0, 0, 1))
+
+
 def test_ui_tree2d_click_selects_one_node_without_multiselect(ui_scene):
     """With multiselect off, a click deselects nodes in other branches too."""
     show_manager, scene = ui_scene
@@ -3537,7 +3610,7 @@ def test_ui_tree2d_applies_z_order(ui_scene):
     row_orders = [
         element.z_order
         for element in ui.elements._collect_ui_elements(tree.base_node)
-        if element is not tree.base_node
+        if element.actors and all(actor.visible for actor in element.actors)
     ]
     npt.assert_equal(tree.base_node.z_order, 7)
     assert min(row_orders) >= 7
@@ -3892,7 +3965,7 @@ def test_line_double_slider_2d_layers_follow_z_order():
 
 
 def test_listbox2d_empty_slot_click_and_size(ui_scene, caplog):
-    """Empty ListBox2D slots keep their size and ignore clicks without errors."""
+    """Empty ListBox2D slots stay collapsed and ignore clicks without errors."""
     show_manager, scene = ui_scene
     listbox = ui.ListBox2D(values=["One"], size=(150, 150))
     scene.add(listbox)
@@ -3900,10 +3973,14 @@ def test_listbox2d_empty_slot_click_and_size(ui_scene, caplog):
     selections = []
     listbox.on_change = lambda: selections.append(list(listbox.selected))
 
-    npt.assert_array_equal(empty_slot.size, (listbox.slot_width, listbox.slot_height))
-    empty_slot.set_visibility(True)
+    listbox.set_visibility(False)
+    listbox.set_visibility(True)
+    assert empty_slot.size[1] <= 1
+    x, y = _center(empty_slot)
+    _render(show_manager)
     with caplog.at_level(logging.ERROR):
-        _click_at(show_manager, *_center(empty_slot))
+        for event_type in (window.EventType.POINTER_DOWN, window.EventType.POINTER_UP):
+            _pointer(show_manager, event_type, x, y, empty_slot.background.actor)
 
     npt.assert_equal(listbox.selected, [])
     npt.assert_equal(selections, [])
