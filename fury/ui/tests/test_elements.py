@@ -3261,15 +3261,16 @@ def test_ui_tree2d_lookup_follows_renames_and_added_nodes():
     assert tree.get_node("a1").label == "a1"
 
 
-def test_ui_tree2d_indent_applies_to_every_level():
+@pytest.mark.parametrize("indent", [25, 40, 80])
+def test_ui_tree2d_indent_applies_to_every_level(indent):
     """Each nesting level is indented by the tree's indent."""
-    tree = ui.Tree2D(structure=[{"A": ["a1"]}, {"a1": ["x"]}], indent=40)
+    tree = ui.Tree2D(structure=[{"A": ["a1"]}, {"a1": ["x"]}], indent=indent)
     tree.get_node("A").toggle_view()
     tree.get_node("a1").toggle_view()
 
     x_positions = [tree.get_node(label).get_position()[0] for label in ("A", "a1", "x")]
 
-    npt.assert_array_equal(np.diff(x_positions), [40, 40])
+    npt.assert_array_equal(np.diff(x_positions), [indent, indent])
 
 
 def test_ui_tree2d_wide_content_leaves_scroll_bar_clickable(ui_scene):
@@ -3294,6 +3295,79 @@ def test_ui_tree2d_wide_content_leaves_scroll_bar_clickable(ui_scene):
     pick = show_manager.renderer.get_pick_info((x, y))["world_object"]
 
     assert pick is tree.scroll_bar.actor
+
+
+def test_ui_tree2d_click_on_unselectable_node_expands_it(ui_scene):
+    """Clicking the label of an unselectable node expands it, not selects it."""
+    show_manager, scene = ui_scene
+    tree = ui.Tree2D(
+        structure=[{"A": ["a1"]}],
+        position=TREE_POSITION,
+        size=TREE_SIZE,
+        multiselect=False,
+    )
+    scene.add(tree)
+    a_node = tree.get_node("A")
+    a_node.selectable = False
+
+    _click_at(show_manager, *_label_point(a_node))
+    assert a_node.expanded
+    _click_at(show_manager, *_label_point(tree.get_node("a1")))
+    _click_at(show_manager, *_label_point(a_node))
+
+    assert not a_node.expanded
+    npt.assert_equal([node.label for node in tree.selected_nodes], ["a1"])
+
+
+def test_ui_tree2d_turning_multiselect_off_keeps_one_selection():
+    """Turning multiselect off keeps only the first selected node."""
+    tree = ui.Tree2D(structure=[{"A": ["a1"]}, {"B": []}])
+    for label in ("a1", "B"):
+        tree.get_node(label).selected = True
+
+    tree.multiselect = False
+
+    npt.assert_equal([node.label for node in tree.selected_nodes], ["a1"])
+    tree.get_node("B").selected = True
+    npt.assert_equal([node.label for node in tree.selected_nodes], ["B"])
+
+
+def test_ui_treenode2d_rejects_same_child_twice():
+    """A node cannot be added twice to the same parent."""
+    parent = ui.TreeNode2D(label="P")
+    child = ui.TreeNode2D(label="C")
+    parent.add_node(child)
+
+    with npt.assert_raises(ValueError):
+        parent.add_node(child)
+
+
+def test_ui_tree2d_warns_when_coords_is_unused(caplog):
+    """coords given with a TreeNode2D is reported as unused."""
+    tree = ui.Tree2D(structure=[{"A": []}])
+
+    with caplog.at_level(logging.WARNING):
+        tree.add_content("A", ui.TreeNode2D(label="B"), coords=(10, 10))
+
+    assert any("coords" in record.getMessage() for record in caplog.records)
+
+
+def test_ui_tree2d_body_spans_full_width(ui_scene):
+    """Without a scroll bar the body fills the strip it would use."""
+    show_manager, scene = ui_scene
+    tree = ui.Tree2D(
+        structure=[{"A": []}],
+        position=TREE_POSITION,
+        size=TREE_SIZE,
+        color=(0.1, 0.3, 0.5),
+        opacity=1.0,
+    )
+    scene.add(tree)
+
+    image = _render(show_manager)
+    left, top = TREE_POSITION
+    strip_pixel = image[top + 100, left + TREE_SIZE[0] - 2, :3]
+    npt.assert_allclose(strip_pixel, np.array((0.1, 0.3, 0.5)) * 255, atol=3)
 
 
 def test_ui_tree2d_click_selects_one_node_without_multiselect(ui_scene):
@@ -3450,7 +3524,7 @@ def test_ui_tree2d_wheel_over_listbox_scrolls_only_listbox(ui_scene):
 
 
 def test_ui_tree2d_applies_z_order(ui_scene):
-    """The z_order of a Tree2D reaches its rows and keeps the scroll bar above."""
+    """The z_order of a Tree2D is the lowest layer of its rows and scroll bar."""
     _, scene = ui_scene
     tree = ui.Tree2D(
         structure=[{"A": [f"a{i}" for i in range(20)]}],

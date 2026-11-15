@@ -24,6 +24,7 @@ __all__ = [
 
 
 import inspect
+import logging
 from numbers import Number
 from string import printable
 import textwrap
@@ -1624,8 +1625,9 @@ class LineDoubleSlider2D(UI):
         z_order : int
             The new Z-order.
         """
+        changed = z_order != getattr(self, "_z_order", None)
         UI.z_order.fset(self, z_order)
-        if len(getattr(self, "texts", [])) == 2:
+        if changed and len(getattr(self, "texts", [])) == 2:
             self._update_actors_position()
 
     def _update_actors_position(self):
@@ -4001,11 +4003,9 @@ class TreeNode2D(UI):
     size : (int, int), optional
         Width and height of the node in pixels.
     indent : int, optional
-        Indentation of the content, in pixels. It is clipped to
-        [0, width / 4].
+        Indentation of the content, in pixels.
     child_indent : int, optional
-        Extra indentation of the content, in pixels. It is clipped to
-        [0, width / 4].
+        Extra indentation of the content, in pixels.
     child_height : int, optional
         Height of the title row of this node and of its child nodes.
     color : list of 3 floats, optional
@@ -4019,7 +4019,8 @@ class TreeNode2D(UI):
     selected_color : list of 3 floats, optional
         Background color of the title row while the node is selected.
     selectable : bool, optional
-        Whether clicking the title row selects the node.
+        Whether clicking the title row selects the node. If False, clicking
+        the title row of a node with children expands or collapses it.
     auto_resize : bool, optional
         If True, the node changes its height to fit its content.
     multiselect : bool, optional
@@ -4090,8 +4091,8 @@ class TreeNode2D(UI):
         }
 
         self._child_nodes = []
-        self.indent = int(np.clip(indent, 0, int(size[0] * 0.25)))
-        self.child_indent = int(np.clip(child_indent, 0, int(size[0] * 0.25)))
+        self.indent = int(indent)
+        self.child_indent = int(child_indent)
         self._label = label
         self._child_height = child_height
         self.content_size = size
@@ -4159,7 +4160,7 @@ class TreeNode2D(UI):
             self.label_image,
             self.title_panel.background,
         ):
-            element.on_left_mouse_button_clicked = lambda event: self.toggle_selection()
+            element.on_left_mouse_button_clicked = lambda event: self._title_clicked()
         for element in (
             self.label_text,
             self.label_image,
@@ -4215,6 +4216,8 @@ class TreeNode2D(UI):
         z_order : int
             The new Z-order.
         """
+        if z_order == getattr(self, "_z_order", None):
+            return
         UI.z_order.fset(self, z_order)
         if hasattr(self, "title_panel"):
             self._update_actors_position()
@@ -4233,8 +4236,20 @@ class TreeNode2D(UI):
     def _update_actors_position(self):
         """Position the title row and the content area."""
         self.title_panel.set_position(self.get_position())
+        self.content_panel.set_position(self._content_position())
+
+    def _content_position(self):
+        """
+        Return where the content area belongs.
+
+        Returns
+        -------
+        ndarray
+            Top-left corner of the content area, below the title row while
+            the node is expanded.
+        """
         content_y = self.title_panel.size[1] if self.expanded else 0
-        self.content_panel.set_position(self.get_position() + np.array([0, content_y]))
+        return self.get_position() + np.array([0, content_y])
 
     def _get_size(self):
         """
@@ -4379,7 +4394,10 @@ class TreeNode2D(UI):
             raise TypeError("node must be a TreeNode2D instance.")
         if self._ui_elements():
             raise ValueError("A tree node with UI elements cannot have child nodes.")
+        if any(child is node for child in self._child_nodes):
+            raise ValueError(f"{node.label!r} is already a child of {self.label!r}.")
 
+        node.child_height = self.child_height
         self._child_nodes.append(node)
 
         node.on_size_change = self._on_child_size_change
@@ -4392,14 +4410,15 @@ class TreeNode2D(UI):
         )
         node.on_wheel = lambda event: self.on_wheel(event)
 
+        child_width = self.title_panel.size[0] - self.right_margin - self._content_x()
+        node.resize((max(child_width, 1), node.children_size() + node.child_height))
         self.content_panel.add_element(
             node, (self._content_x(), self.children_size() - node.size[1])
         )
-        node.child_height = self.child_height
         self._attach_to_scene(node)
         node.set_visibility(self._visible and self.expanded)
         self._update_title_visibility()
-        self._fit_to_content()
+        self._on_child_size_change(node)
         for added in [node, *node.iter_nodes()]:
             if added.selected:
                 self.on_selection_change(added)
@@ -4456,6 +4475,10 @@ class TreeNode2D(UI):
         self.content_panel.resize((size[0], max(size[1] - self.child_height, 1)))
         self._layout_title(width)
 
+        offsets = {
+            id(element): offset
+            for element, offset in self.content_panel.element_offsets
+        }
         current_y = 0
         for child in self._child_nodes:
             if not isinstance(child, TreeNode2D):
@@ -4467,10 +4490,15 @@ class TreeNode2D(UI):
                         child.children_size() + child.child_height,
                     )
                 )
-            self.content_panel.update_element(child, (self._content_x(), current_y))
+            child_offset = (self._content_x(), current_y)
+            if not np.array_equal(offsets[id(child)], child_offset):
+                self.content_panel.update_element(child, child_offset)
             current_y += child.size[1]
 
-        self._update_actors_position()
+        if not np.array_equal(
+            self.content_panel.get_position(), self._content_position()
+        ):
+            self._update_actors_position()
 
     def _layout_title(self, width):
         """
@@ -4733,7 +4761,8 @@ class TreeNode2D(UI):
         """
         Set the label text of the node.
 
-        Text wider than the title row is shortened with an ellipsis.
+        Text wider than the title row is shortened with an ellipsis. In a
+        Tree2D, nodes are looked up by label, so keep labels unique.
 
         Parameters
         ----------
@@ -4765,6 +4794,8 @@ class TreeNode2D(UI):
         height : int
             New height of the title panels.
         """
+        if height == self._child_height:
+            return
         self._child_height = height
 
         for node in self._child_nodes:
@@ -4910,6 +4941,13 @@ class TreeNode2D(UI):
         """
         return [node for node in self.iter_nodes() if node.selected]
 
+    def _title_clicked(self):
+        """Select a selectable node, or expand or collapse any other node."""
+        if self.selectable:
+            self.toggle_selection()
+        elif self.expandable and self._child_nodes:
+            self.toggle_view()
+
     def toggle_selection(self):
         """Select the node if it is not selected, and deselect it otherwise."""
         if self.selectable:
@@ -5003,7 +5041,8 @@ class Tree2D(UI):
     scroll_bar_active_color : list of 3 floats, optional
         Color of the scroll bar while it is being dragged.
     z_order : int, optional
-        Stacking order of the Tree2D.
+        Stacking order of the Tree2D. Nested rows are drawn two layers above
+        the node holding them, as elements of a nested Panel2D are.
 
     Attributes
     ----------
@@ -5131,8 +5170,9 @@ class Tree2D(UI):
         z_order : int
             The new Z-order.
         """
+        changed = z_order != getattr(self, "_z_order", None)
         UI.z_order.fset(self, z_order)
-        if hasattr(self, "scroll_bar"):
+        if changed and hasattr(self, "scroll_bar"):
             self.scroll_bar.z_order = z_order + 1
             self.update_scrollbar()
 
@@ -5156,11 +5196,15 @@ class Tree2D(UI):
         Parameters
         ----------
         multiselect : bool
-            If False, selecting a node deselects every other node.
+            If False, selecting a node deselects every other node, and only
+            the first selected node is kept.
         """
         self._multiselect = multiselect
         if hasattr(self, "base_node"):
             self.base_node.multiselect = multiselect
+            if not multiselect:
+                for node in self.selected_nodes[1:]:
+                    node.selected = False
 
     def _get_actors(self):
         """
@@ -5208,7 +5252,9 @@ class Tree2D(UI):
         top = self.get_position()[1]
         bottom = top + self.content_size[1]
         title_elements = _collect_ui_elements(self.base_node.title_panel)
-        title_ids = {id(element) for element in title_elements}
+        body = self.base_node.content_panel.background
+        full_width = [*title_elements, body, self.base_node.content_panel]
+        title_ids = {id(element) for element in full_width}
         row_elements = [
             element
             for element in _collect_ui_elements(self.base_node)
@@ -5216,6 +5262,7 @@ class Tree2D(UI):
         ]
         right = self.get_position()[0] + self.content_size[0]
         self._clip_elements(title_elements, top, bottom, right)
+        self._clip_elements([body], top + self.base_node.child_height, bottom, right)
         self._clip_elements(
             row_elements,
             top + self.base_node.child_height,
@@ -5547,6 +5594,8 @@ class Tree2D(UI):
         """
         target = self.get_node(node)
         if isinstance(content, TreeNode2D):
+            if tuple(coords) != (0, 0):
+                logging.warning("coords is not used when adding a TreeNode2D.")
             self._check_labels(content)
             target.add_node(content)
         else:

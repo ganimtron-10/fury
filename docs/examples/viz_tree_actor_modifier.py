@@ -144,6 +144,12 @@ def setup_actor_controls(actor_obj, name):
     ###########################################################################
     # Show the actor only while its node is selected.
 
+    # The control rows are not selectable, so clicking them opens them
+    # without deselecting the actor.
+
+    for part in ("position", "color"):
+        tree.get_node(f"{name} {part}").selectable = False
+
     node = tree.get_node(name)
     node.on_node_select = lambda node: setattr(actor_obj, "visible", True)
     node.on_node_deselect = lambda node: setattr(actor_obj, "visible", False)
