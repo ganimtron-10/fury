@@ -23,6 +23,7 @@ __all__ = [
 ]
 
 
+import inspect
 from numbers import Number
 from string import printable
 import textwrap
@@ -3887,75 +3888,147 @@ def _collect_ui_elements(ui_element):
             continue
         seen.add(id(element))
         elements.append(element)
-        pending.extend(element._children)
-        pending.extend(child for child, _ in getattr(element, "element_offsets", []))
+        pending.extend(_sub_elements(element))
     return elements
+
+
+def _sub_elements(ui_element):
+    """
+    Return the UI elements directly inside a UI element.
+
+    Parameters
+    ----------
+    ui_element : UI
+        The UI element to look into.
+
+    Returns
+    -------
+    list
+        Its children and, for a panel, the elements placed on it.
+    """
+    elements = list(ui_element._children)
+    elements.extend(child for child, _ in getattr(ui_element, "element_offsets", []))
+    return elements
+
+
+def _handles_wheel(ui_element):
+    """
+    Check whether a UI element reacts to wheel events itself.
+
+    Parameters
+    ----------
+    ui_element : UI
+        The UI element to check.
+
+    Returns
+    -------
+    bool
+        True if the element overrides the wheel handling of ``UI`` or has a
+        method bound as its wheel callback, like ``ListBox2D`` and
+        ``TextBox2D``.
+    """
+    overrides_wheel = type(ui_element).wheel_callback is not UI.wheel_callback
+    return overrides_wheel or inspect.ismethod(ui_element.on_wheel)
+
+
+def _load_icon(icon):
+    """
+    Load an icon image.
+
+    Parameters
+    ----------
+    icon : str or ndarray or None
+        Path or URL of the image, or the image data.
+
+    Returns
+    -------
+    ndarray or None
+        The image data, or None when no icon is given.
+    """
+    if icon is None or isinstance(icon, np.ndarray):
+        return icon
+    return load_image(icon)
 
 
 class TreeNode2D(UI):
     """
-    Node/Leaf of a Tree2D UI.
+    Node of a Tree2D UI.
+
+    A node has a title row, with an expand/collapse button, an optional icon
+    and a label, and a content area below it. The content area holds either
+    child nodes or other UI elements, and is shown while the node is
+    expanded.
 
     Parameters
     ----------
     label : str
-        Label text of the current node.
-    parent : TreeNode2D, optional
-        Parent node of the current node.
+        Label text of the node.
     children : list of TreeNode2D, optional
-        Sub nodes of the current node.
-    icon : str, optional
-        Path/URl to the icon placed next to the label for unselected state.
-    selected_icon : str, optional
-        Path/URl to the icon placed next to the label for selected state.
+        Child nodes of the node.
+    icon : str or ndarray, optional
+        Path, URL or image data of the icon placed next to the label.
+    selected_icon : str or ndarray, optional
+        Icon shown while the node is selected. When not given, ``icon`` is
+        shown in both states.
     position : (float, float), optional
-        Absolute coordinates (x, y) of the UI component.
+        Absolute coordinates (x, y) of the top-left corner of the node.
     size : (int, int), optional
-        Width and height of the pixels of this UI component.
+        Width and height of the node in pixels.
     indent : int, optional
-        Indentation of the current node.
+        Indentation of the content, in pixels. It is clipped to
+        [0, width / 4].
     child_indent : int, optional
-        Indentation of the child nodes.
+        Extra indentation of the content, in pixels. It is clipped to
+        [0, width / 4].
     child_height : int, optional
-        Space taken by each sub-node vertically.
+        Height of the title row of this node and of its child nodes.
     color : list of 3 floats, optional
-        Background color of current node.
+        Background color of the title row.
     opacity : float, optional
-        Background opacity of the current node.
+        Background opacity of the title row.
     expandable : bool, optional
-        If the node should expand/collapse.
+        Whether the node can be expanded and collapsed.
     expanded : bool, optional
-        Whether the current node is expanded or not.
+        Whether the node starts expanded.
     selected_color : list of 3 floats, optional
-        Color of the selected node.
+        Background color of the title row while the node is selected.
+    selectable : bool, optional
+        Whether clicking the title row selects the node.
     auto_resize : bool, optional
-        If the node should automatically resize to fit its content.
+        If True, the node changes its height to fit its content.
     multiselect : bool, optional
-        If multiple nodes can be selected.
+        If False, selecting a node deselects every other node of the tree.
+        Only the value of the topmost node is used.
     button_position : str, optional
-        Position of the collapse/expand button ('start' or 'end').
+        Position of the expand/collapse button, either 'start' or 'end'.
     z_order : int, optional
         Stacking order of the TreeNode2D.
 
     Attributes
     ----------
-    children: list of :class: `TreeNode2D`
-        Sub nodes of the current node.
-    parent: :class: `TreeNode2D`
-        Parent node of the current node.
-    indent: int
-        Indentation of the current node.
-    label: str
-        Label text of the current node.
-    expanded: bool
-        Whether the current node is expanded or not.
+    label : str
+        Label text of the node.
+    expanded : bool
+        Whether the node is expanded.
+    selected : bool
+        Whether the node is selected.
+    on_node_select : callable
+        Called with the node after it is selected.
+    on_node_deselect : callable
+        Called with the node after it is deselected.
+    on_size_change : callable
+        Called with the node after its height changes, so that the node or
+        Tree2D holding it can lay itself out again.
+    on_selection_change : callable
+        Called with a node of this subtree after its selection changes. The
+        node holding this one uses it to pass the change up. On the topmost
+        node it applies ``multiselect``.
     """
 
     def __init__(
         self,
         label,
         *,
-        parent=None,
         children=None,
         icon=None,
         selected_icon=None,
@@ -3969,6 +4042,7 @@ class TreeNode2D(UI):
         expandable=True,
         expanded=False,
         selected_color=(0.8, 0.3, 0.3),
+        selectable=True,
         auto_resize=True,
         multiselect=True,
         button_position="start",
@@ -3977,43 +4051,48 @@ class TreeNode2D(UI):
         """
         Initialize the UI element.
         """
+        if button_position not in ("start", "end"):
+            raise ValueError(
+                f"button_position must be 'start' or 'end', not {button_position!r}."
+            )
         self.button_position = button_position
         self._initial_children = children or []
-        self.node_icons = {
-            "unselected": icon,
-            "selected": selected_icon,
+        self.node_icons = {"unselected": icon, "selected": selected_icon}
+        self._icon_images = {
+            "unselected": _load_icon(icon),
+            "selected": _load_icon(selected_icon),
         }
-        self._icon = self.node_icons["unselected"]
 
         self._child_nodes = []
-        self._normalized_children = []
-        self.has_ui = False
-        self.parent = parent
-        self.indent = np.clip(indent, 0, int(size[0] * 0.25))
-
+        self.indent = int(np.clip(indent, 0, int(size[0] * 0.25)))
+        self.child_indent = int(np.clip(child_indent, 0, int(size[0] * 0.25)))
         self.label = label
-
-        self.child_indent = np.clip(child_indent, 0, int(size[0] * 0.25))
-        self.child_height = child_height
+        self._child_height = child_height
         self.content_size = size
         self.expandable = expandable
         self._expanded = expanded
+        self._visible = True
 
-        self.selected = False
-        self.selected_nodes = []
+        self._selected = False
+        self.selectable = selectable
         self.selected_color = selected_color
         self.unselected_color = color
         self._initial_opacity = opacity
         self.multiselect = multiselect
 
         self.auto_resize = auto_resize
-        self.scroll_offset = 0
         self.right_margin = 0
+        self._drag_offset = None
+
+        self.on_node_select = lambda node: None
+        self.on_node_deselect = lambda node: None
+        self.on_size_change = lambda node: None
+        self.on_selection_change = self._apply_selection_policy
 
         super().__init__(position=position, z_order=z_order)
 
-        self.on_node_select = lambda ui: None
-        self.on_node_deselect = lambda ui: None
+        self.on_left_mouse_button_pressed = self.left_button_pressed
+        self.on_left_mouse_button_dragged = self.left_button_dragged
 
     def _setup(self):
         """
@@ -4024,96 +4103,71 @@ class TreeNode2D(UI):
             color=self.unselected_color,
             opacity=self._initial_opacity,
         )
-
         self.content_panel = Panel2D(size=self.content_size)
         self.label_text = TextBlock2D(
             text=self.label, size=(self.content_size[0], self.child_height)
         )
-        self.has_icon = self._icon is not None
-        if self.has_icon:
-            self.label_image = ImageContainer2D(
-                img_path=self._icon, size=(self.child_height, self.child_height)
-            )
-        else:
-            self.label_image = None
-
-        self.button_icons = {
-            "pressed": read_viz_icons(fname="minus.png"),
-            "default": read_viz_icons(fname="plus.png"),
-        }
-
-        _btn_size = max(int(self.child_height * 0.7), 10)
+        self.label_image = ImageContainer2D(
+            img_path=np.zeros((1, 1, 4), dtype=np.uint8),
+            size=(self.child_height, self.child_height),
+        )
         self.button = TexturedButton2D(
-            states=self.button_icons,
-            size=(_btn_size, _btn_size),
+            states={
+                "pressed": read_viz_icons(fname="minus.png"),
+                "default": read_viz_icons(fname="plus.png"),
+            },
+            size=(self._button_size(), self._button_size()),
             is_toggle=True,
         )
 
-        _btn_y = (self.child_height - _btn_size) // 2
-        icon_width = self.label_image.size[0] if self.has_icon else 0
-
-        if self.button_position == "start":
-            self.title_panel.add_element(self.button, (0, _btn_y))
-            if self.has_icon:
-                self.title_panel.add_element(
-                    self.label_image, (int(self.button.size[0] + 5), 0)
-                )
-
-            x_offset = int(
-                self.button.size[0] + icon_width + (15 if self.has_icon else 10)
-            )
-            self.title_panel.add_element(self.label_text, (x_offset, 0))
-        else:
-            if self.has_icon:
-                self.title_panel.add_element(self.label_image, (0, 0))
-
-            x_offset = int(icon_width + (10 if self.has_icon else 5))
-            self.title_panel.add_element(self.label_text, (x_offset, 0))
-
-            button_pos = (
-                int(self.title_panel.size[0] - self.button.size[0] - 10),
-                _btn_y,
-            )
-            self.title_panel.add_element(self.button, button_pos)
+        for element in (self.button, self.label_image, self.label_text):
+            self.title_panel.add_element(element, (0, 0))
 
         self._children.extend([self.title_panel, self.content_panel])
+        self.title_panel.z_order = self.z_order
+        self.content_panel.z_order = self.z_order
 
-        if self._initial_children:
-            for child in self._initial_children:
-                self.add_node(child)
+        self.button.on_clicked = lambda button: self.toggle_view()
+        for element in (
+            self.label_text,
+            self.label_image,
+            self.title_panel.background,
+        ):
+            element.on_left_mouse_button_clicked = lambda event: self.toggle_selection(
+                event=event
+            )
+        for element in (
+            self.label_text,
+            self.label_image,
+            self.title_panel.background,
+            self.content_panel.background,
+        ):
+            element.on_left_mouse_button_pressed = lambda event: (
+                self.on_left_mouse_button_pressed(event)
+            )
+            element.on_left_mouse_button_dragged = lambda event: (
+                self.on_left_mouse_button_dragged(event)
+            )
+        for element in (
+            self.label_text,
+            self.label_image,
+            self.title_panel.background,
+            self.content_panel.background,
+            self.button,
+            self.button.child,
+        ):
+            element.on_wheel = lambda event: self.on_wheel(event)
 
-        if not self.expandable:
-            self.button.set_visibility(False)
-
-        self.button.on_clicked = lambda btn: self.toggle_view()
-        self.label_text.on_left_mouse_button_pressed = self.left_button_pressed
-
-        self.label_text.on_left_mouse_button_clicked = self.select_node
-
-        if self.has_icon:
-            self.label_image.on_left_mouse_button_pressed = self.left_button_pressed
-            self.label_image.on_left_mouse_button_clicked = self.select_node
-
-        self.title_panel.background.on_left_mouse_button_clicked = self.select_node
-        self.title_panel.background.on_left_mouse_button_pressed = (
-            self.left_button_pressed
-        )
-        self.content_panel.background.on_left_mouse_button_pressed = (
-            self.left_button_pressed
-        )
-
-        self.label_text.on_left_mouse_button_dragged = self.left_button_dragged
-        if self.has_icon:
-            self.label_image.on_left_mouse_button_dragged = self.left_button_dragged
-        self.title_panel.background.on_left_mouse_button_dragged = (
-            self.left_button_dragged
-        )
-        self.content_panel.background.on_left_mouse_button_dragged = (
-            self.left_button_dragged
-        )
+        self._show_icon()
+        for child in self._initial_children:
+            self.add_node(child)
 
         self.expanded = self._expanded
-        self.resize(self.content_size)
+        self._update_title_visibility()
+        height = self.content_size[1]
+        if self.auto_resize:
+            height = self.children_size() + self.child_height
+        self.resize((self.content_size[0], height))
 
     def _get_actors(self):
         """
@@ -4127,15 +4181,10 @@ class TreeNode2D(UI):
         return []
 
     def _update_actors_position(self):
-        """Position the upper-left corner of this UI component."""
-        if self.expanded:
-            self.title_panel.set_position(self.get_position())
-            self.content_panel.set_position(
-                self.get_position() + np.array([0, self.title_panel.size[1]])
-            )
-        else:
-            self.title_panel.set_position(self.get_position())
-            self.content_panel.set_position(self.get_position())
+        """Position the title row and the content area."""
+        self.title_panel.set_position(self.get_position())
+        content_y = self.title_panel.size[1] if self.expanded else 0
+        self.content_panel.set_position(self.get_position() + np.array([0, content_y]))
 
     def _get_size(self):
         """
@@ -4154,29 +4203,99 @@ class TreeNode2D(UI):
 
         return (self.title_panel.size[0], self.title_panel.size[1])
 
-    def _apply_wheel_callback(self, ui_element):
+    def _button_size(self):
         """
-        Recursively apply the wheel scroll callback to a UI element.
+        Return the side of the expand/collapse button.
+
+        Returns
+        -------
+        int
+            Side of the button in pixels, 0 if the node is not expandable.
+        """
+        if not self.expandable:
+            return 0
+        return max(int(self.child_height * 0.7), 10)
+
+    def _content_x(self):
+        """
+        Return the horizontal offset of the content.
+
+        Returns
+        -------
+        int
+            Offset in pixels from the left edge of the content area.
+        """
+        return self.indent + self.child_indent
+
+    def _ui_elements(self):
+        """
+        Return the UI elements added to this node.
+
+        Returns
+        -------
+        list
+            UI elements that are not child nodes.
+        """
+        return [
+            child for child in self._child_nodes if not isinstance(child, TreeNode2D)
+        ]
+
+    def _forward_wheel(self, ui_element):
+        """
+        Pass wheel events over a UI element and its sub-elements to this node.
+
+        Elements that scroll on wheel events themselves, and the elements
+        inside them, keep their own handling.
 
         Parameters
         ----------
         ui_element : UI
-            The UI element to which the wheel callback will be applied.
+            The UI element added to the node.
         """
-        if not hasattr(self, "_wheel_callback"):
-            return
-        if hasattr(ui_element, "on_wheel"):
-            ui_element.on_wheel = self._wheel_callback
-        if hasattr(ui_element, "_children"):
-            for child in ui_element._children:
-                self._apply_wheel_callback(child)
-        if hasattr(ui_element, "element_offsets"):
-            for child, _ in ui_element.element_offsets:
-                self._apply_wheel_callback(child)
+        pending = [ui_element]
+        seen = set()
+        while pending:
+            element = pending.pop()
+            if id(element) in seen or _handles_wheel(element):
+                continue
+            seen.add(id(element))
+            element.on_wheel = lambda event: self.on_wheel(event)
+            pending.extend(_sub_elements(element))
+
+    def _fit_to_content(self):
+        """Lay out the node again and report the change in height."""
+        if self.auto_resize:
+            height = self.children_size() + self.child_height
+        else:
+            height = self.title_panel.size[1] + self.content_panel.size[1]
+        self.resize((self.title_panel.size[0], height))
+        self.on_size_change(self)
+
+    def _on_child_size_change(self, node):
+        """
+        Lay out the node again after a child node changed its height.
+
+        Parameters
+        ----------
+        node : TreeNode2D
+            The child node whose height changed.
+        """
+        if self.auto_resize:
+            height = self.children_size() + self.child_height
+        else:
+            height = self.title_panel.size[1] + self.content_panel.size[1]
+        self.resize((self.title_panel.size[0], height), recursive=False)
+        self.on_size_change(self)
+
+    def _update_title_visibility(self):
+        """Show the button and icon only when they apply and the row is shown."""
+        has_content = bool(self._child_nodes)
+        self.button.set_visibility(self._visible and self.expandable and has_content)
+        self.label_image.set_visibility(self._visible and self.has_icon)
 
     def add_node(self, node):
         """
-        Add a child node in the current node.
+        Add a child node to the current node.
 
         Parameters
         ----------
@@ -4184,40 +4303,32 @@ class TreeNode2D(UI):
             Node element that is to be added.
         """
         if not isinstance(node, TreeNode2D):
-            raise ValueError("node must be a TreeNode2D instance")
-        if self.has_ui:
-            raise ValueError("A tree node with UI elements cannot have child nodes")
+            raise TypeError("node must be a TreeNode2D instance.")
+        if self._ui_elements():
+            raise ValueError("A tree node with UI elements cannot have child nodes.")
 
         self._child_nodes.append(node)
 
-        node.parent = self
         node.expanded = False
         node.child_height = self.child_height
-
-        _node_coords = (
-            self.indent + self.child_indent,
-            self.children_size() - self.child_height,
+        node.on_size_change = self._on_child_size_change
+        node.on_selection_change = lambda changed: self.on_selection_change(changed)
+        node.on_left_mouse_button_pressed = lambda event: (
+            self.on_left_mouse_button_pressed(event)
         )
+        node.on_left_mouse_button_dragged = lambda event: (
+            self.on_left_mouse_button_dragged(event)
+        )
+        node.on_wheel = lambda event: self.on_wheel(event)
 
-        self.content_panel.add_element(node, _node_coords)
+        self.content_panel.add_element(
+            node, (self._content_x(), self.children_size() - node.size[1])
+        )
+        node.set_visibility(self._visible and self.expanded)
+        self._update_title_visibility()
+        self._fit_to_content()
 
-        _node_size = (self.size[0], self.children_size() + node.size[1])
-        self.resize(_node_size)
-
-        parent = self.parent
-        while parent is not None:
-            if getattr(parent, "auto_resize", False):
-                new_size = (
-                    parent.size[0],
-                    parent.children_size() + parent.child_height,
-                )
-                parent.resize(new_size, recursive=False)
-            parent = parent.parent
-
-        self._apply_wheel_callback(node)
-        node._wheel_callback = getattr(self, "_wheel_callback", None)
-
-    def add_element(self, element, *, coords=(0.0, 0.0)):
+    def add_element(self, element, *, coords=(0, 0)):
         """
         Add a UI element to the current node.
 
@@ -4225,41 +4336,27 @@ class TreeNode2D(UI):
         ----------
         element : UI
             UI element that is to be added.
-        coords : tuple of float or tuple of int, optional
-            If float, normalized coordinates are assumed and they must be
-            between [0,1].
-            If int, pixels coordinates are assumed and it must fit within the
-            content panel's size.
+        coords : (int, int), optional
+            Offset in pixels of the element's top-left corner from the
+            top-left corner of the indented content area. The content area
+            grows to fit the element.
         """
-        self._child_nodes.append(element)
-        self.has_ui = True
-        is_floating = np.issubdtype(np.array(coords).dtype, np.floating)
-
-        if is_floating:
-            self._normalized_children.append({element: coords})
-            _node_coords = (0, 0)
-        else:
-            _node_coords = (
-                int(coords[0] + self.indent + self.child_indent),
-                int(coords[1]),
+        if any(isinstance(child, TreeNode2D) for child in self._child_nodes):
+            raise ValueError("A tree node with child nodes cannot have UI elements.")
+        coords = np.asarray(coords, dtype=float)
+        if coords.shape != (2,) or np.any(coords < 0) or np.any(coords % 1):
+            raise ValueError(
+                f"coords must be two non-negative pixel values, not {coords}."
             )
 
-        self.content_panel.add_element(element, _node_coords)
-
-        _node_size = (self.size[0], self.children_size() + self.child_height)
-        self.resize(_node_size)
-
-        parent = self.parent
-        while parent is not None:
-            if getattr(parent, "auto_resize", False):
-                new_size = (
-                    parent.size[0],
-                    parent.children_size() + parent.child_height,
-                )
-                parent.resize(new_size, recursive=False)
-            parent = parent.parent
-
-        self._apply_wheel_callback(element)
+        self._child_nodes.append(element)
+        self.content_panel.add_element(
+            element, (self._content_x() + int(coords[0]), int(coords[1]))
+        )
+        self._forward_wheel(element)
+        element.set_visibility(self._visible and self.expanded)
+        self._update_title_visibility()
+        self._fit_to_content()
 
     def resize(self, size, *, recursive=True):
         """
@@ -4272,96 +4369,58 @@ class TreeNode2D(UI):
         recursive : bool, optional
             If True, all the children nodes are resized as well.
         """
-        width = size[0] - getattr(self, "right_margin", 0)
+        width = size[0] - self.right_margin
 
         self.title_panel.resize((size[0], self.child_height))
-        self.content_panel.resize((size[0], size[1] - self.child_height))
+        self.content_panel.resize((size[0], max(size[1] - self.child_height, 1)))
+        self._layout_title(width)
 
-        _btn_size = max(int(self.child_height * 0.7), 10)
-        _btn_y = (self.child_height - _btn_size) // 2
-        if self.expandable:
-            self.button.resize((_btn_size, _btn_size))
-        else:
-            self.button.resize((0, 0))
-
-        if width >= 200:
-            if self.has_icon:
-                self.label_image.resize((self.child_height, self.child_height))
-        else:
-            if self.has_icon:
-                self.label_image.resize((0, 0))
-
-        icon_width = self.label_image.size[0] if self.has_icon else 0
-        self.label_text.resize(
-            (
-                width - self.button.size[0] - icon_width,
-                self.child_height,
-            )
-        )
-
-        if self.button_position == "start":
-            self.title_panel.update_element(self.button, (0, _btn_y))
-            if self.has_icon:
-                self.title_panel.update_element(
-                    self.label_image, (int(self.button.size[0] + 5), 0)
+        current_y = 0
+        for child in self._child_nodes:
+            if not isinstance(child, TreeNode2D):
+                continue
+            if recursive:
+                child.resize(
+                    (
+                        width - self._content_x(),
+                        child.children_size() + child.child_height,
+                    )
                 )
-
-            x_offset = int(
-                self.button.size[0] + icon_width + (15 if self.has_icon else 10)
-            )
-            self.title_panel.update_element(self.label_text, (x_offset, 0))
-        else:
-            if self.has_icon:
-                self.title_panel.update_element(self.label_image, (0, 0))
-
-            x_offset = int(icon_width + (10 if self.has_icon else 5))
-            self.title_panel.update_element(self.label_text, (x_offset, 0))
-
-            self.title_panel.update_element(
-                self.button, (width - self.button.size[0] - 10, _btn_y)
-            )
-
-        _current_y = 0
-        if self._child_nodes:
-            for child in self._child_nodes:
-                if isinstance(child, TreeNode2D):
-                    if recursive:
-                        _child_size = (
-                            size[0]
-                            - self.indent
-                            - self.child_indent
-                            - getattr(self, "right_margin", 0),
-                            child.children_size() + child.child_height,
-                        )
-
-                        child.resize(_child_size)
-
-                    _child_y = _current_y
-                    _child_coords = (self.indent + self.child_indent, _child_y)
-
-                    self.content_panel.update_element(child, _child_coords)
-                    _current_y += child.size[1]
-                else:
-                    for norm_child in self._normalized_children:
-                        if child in norm_child:
-                            coords = norm_child[child]
-                            pixel_coords = (
-                                int(
-                                    self.indent
-                                    + self.child_indent
-                                    + coords[0]
-                                    * (
-                                        self.content_panel.size[0]
-                                        - self.indent
-                                        - self.child_indent
-                                    )
-                                ),
-                                int(coords[1] * self.child_height) + 35,
-                            )
-                            self.content_panel.update_element(child, pixel_coords)
-                            break
+            self.content_panel.update_element(child, (self._content_x(), current_y))
+            current_y += child.size[1]
 
         self._update_actors_position()
+
+    def _layout_title(self, width):
+        """
+        Place the button, icon and label in the title row.
+
+        Parameters
+        ----------
+        width : int
+            Width of the title row available to them, in pixels.
+        """
+        button_size = self._button_size()
+        button_y = (self.child_height - button_size) // 2
+        icon_size = self.child_height if self.has_icon else 0
+        self.button.resize((button_size, button_size))
+        self.label_image.resize((max(icon_size, 1), max(icon_size, 1)))
+
+        if self.button_position == "start":
+            button_x = 0
+            icon_x = button_size + 5
+            text_x = button_size + (icon_size + 15 if self.has_icon else 10)
+            text_width = width - text_x
+        else:
+            button_x = width - button_size - 10
+            icon_x = 0
+            text_x = icon_size + 10 if self.has_icon else 5
+            text_width = button_x - text_x
+
+        self.label_text.resize((max(text_width, 1), self.child_height))
+        self.title_panel.update_element(self.button, (int(button_x), int(button_y)))
+        self.title_panel.update_element(self.label_image, (int(icon_x), 0))
+        self.title_panel.update_element(self.label_text, (int(text_x), 0))
 
     def toggle_view(self, *, event=None):
         """
@@ -4372,27 +4431,11 @@ class TreeNode2D(UI):
         event : PointerEvent, optional
             The pygfx pointer event.
         """
-        if event is not None and hasattr(event, "stop_propagation"):
+        if event is not None:
             event.stop_propagation()
         self.expanded = not self.expanded
-
-        self_size = (self.size[0], self.children_size() + self.child_height)
-        self.resize(self_size, recursive=False)
-
-        parent = self.parent
-        while parent is not None:
-            if getattr(parent, "auto_resize", False):
-                new_size = (
-                    parent.size[0],
-                    parent.children_size() + parent.child_height,
-                )
-                parent.resize(new_size, recursive=False)
-            if hasattr(parent, "on_resize_callback"):
-                parent.on_resize_callback()
-            parent = parent.parent
-
-        if hasattr(self, "on_resize_callback"):
-            self.on_resize_callback()
+        self._update_actors_position()
+        self.on_size_change(self)
 
     def children_size(self):
         """
@@ -4403,35 +4446,15 @@ class TreeNode2D(UI):
         int
             Size occupied by the children.
         """
-        if self.has_ui:
-            max_h = 0
-            for child in self._child_nodes:
-                if not isinstance(child, TreeNode2D):
-                    norm_coords = None
-                    if hasattr(self, "_normalized_children"):
-                        for norm_child in self._normalized_children:
-                            if child in norm_child:
-                                norm_coords = norm_child[child]
-                                break
+        elements = self._ui_elements()
+        if not elements:
+            return int(sum(child.size[1] for child in self._child_nodes))
 
-                    if norm_coords is not None:
-                        req_h = (
-                            child.size[1] + int(norm_coords[1] * self.child_height) + 35
-                        )
-                        max_h = max(max_h, req_h)
-                    else:
-                        offset_y = 0
-                        if hasattr(self, "content_panel"):
-                            for el, offset in self.content_panel.element_offsets:
-                                if el == child:
-                                    offset_y = offset[1]
-                                    break
-                        max_h = max(max_h, offset_y + child.size[1])
-            if max_h > 0:
-                max_h += self.child_indent
-            return int(max_h)
-
-        return sum([child.size[1] for child in self._child_nodes])
+        bottom = 0
+        for element, offset in self.content_panel.element_offsets:
+            if any(element is added for added in elements):
+                bottom = max(bottom, offset[1] + element.size[1])
+        return int(bottom + self.child_indent)
 
     def set_visibility(self, visibility):
         """
@@ -4442,15 +4465,16 @@ class TreeNode2D(UI):
         visibility : bool
             True if the component is to be visible, False otherwise.
         """
+        self._visible = visibility
         self.title_panel.set_visibility(visibility)
-        if visibility:
-            self.set_content_visibility(self.expanded)
-        else:
-            self.set_content_visibility(False)
+        self._update_title_visibility()
+        self.set_content_visibility(visibility and self.expanded)
 
     def set_content_visibility(self, visibility):
         """
         Set content's visibility of this UI component.
+
+        Child nodes keep their own content hidden while they are collapsed.
 
         Parameters
         ----------
@@ -4459,64 +4483,67 @@ class TreeNode2D(UI):
         """
         self.content_panel.set_visibility(visibility)
 
-        for element in self.content_panel._elements:
-            if isinstance(element, TreeNode2D):
-                element.set_content_visibility(element.expanded and visibility)
-
-    def select_child(self, child_label):
+    def get_child(self, child_label):
         """
-        Get the instance of a particular child node.
+        Get the child node with a given label.
 
         Parameters
         ----------
         child_label : str
-            Label of the child node to be selected.
+            Label of the child node.
 
         Returns
         -------
         TreeNode2D
-            The selected child node.
+            The child node.
+
+        Raises
+        ------
+        ValueError
+            If no child node has this label.
         """
-        labels = [
-            child.label for child in self._child_nodes if isinstance(child, TreeNode2D)
-        ]
-        idx = labels.index(child_label)
-        return self._child_nodes[idx]
+        for child in self._child_nodes:
+            if isinstance(child, TreeNode2D) and child.label == child_label:
+                return child
+        raise ValueError(f"{self.label!r} has no child node {child_label!r}.")
 
-    def _largest_child_size(self):
+    def iter_nodes(self):
         """
-        Return the size occupied by the largest child element.
+        Iterate over all the nodes below this node, depth first.
 
-        Returns
-        -------
-        int
-            Size of the largest child.
+        Yields
+        ------
+        TreeNode2D
+            Each node of the subtree, not including this node.
         """
-        rel_sizes = []
-
-        for child in self._normalized_children:
-            child_node = list(child.keys())[0]
-            coords = list(child.values())[0]
-            relative_size = child_node.size[1] + self.content_panel.size[1] * coords[1]
-
-            rel_sizes.append(relative_size)
-
-        if not len(rel_sizes):
-            rel_sizes = [0]
-
-        return int(max(rel_sizes))
+        for child in self._child_nodes:
+            if isinstance(child, TreeNode2D):
+                yield child
+                yield from child.iter_nodes()
 
     @property
     def child_nodes(self):
         """
-        Return all the child nodes of the current node.
+        Return the children of the current node.
 
         Returns
         -------
         list
-            List of child nodes.
+            Child nodes, or the UI elements added to this node.
         """
         return self._child_nodes
+
+    @property
+    def has_icon(self):
+        """
+        Check whether the node shows an icon.
+
+        Returns
+        -------
+        bool
+            True if an icon is set.
+        """
+        return self._icon_images["unselected"] is not None
 
     @property
     def color(self):
@@ -4659,24 +4686,21 @@ class TreeNode2D(UI):
         """
         Set the expanded state of the node.
 
+        Collapsing a node also collapses its child nodes.
+
         Parameters
         ----------
         expanded : bool
             True if the node is to be expanded, False otherwise.
         """
         self._expanded = expanded
-
-        if expanded:
-            self.set_content_visibility(True)
-            if self.expandable:
-                self.button.toggled = True
-        else:
-            self.set_content_visibility(False)
-            if self.expandable:
-                self.button.toggled = False
+        if self.expandable:
+            self.button.toggled = expanded
+        if not expanded:
             for child in self._child_nodes:
                 if isinstance(child, TreeNode2D):
                     child.expanded = False
+        self.set_content_visibility(self._visible and expanded)
 
     @property
     def icon(self):
@@ -4685,10 +4709,10 @@ class TreeNode2D(UI):
 
         Returns
         -------
-        str
-            Path to the icon.
+        str or ndarray or None
+            Path or image data of the icon.
         """
-        return self._icon
+        return self.node_icons["unselected"]
 
     @icon.setter
     def icon(self, icon):
@@ -4697,8 +4721,8 @@ class TreeNode2D(UI):
 
         Parameters
         ----------
-        icon : str
-            Path to the icon image for unselected state.
+        icon : str or ndarray or None
+            Path, URL or image data of the icon. None removes the icon.
         """
         self.set_icon(icon)
 
@@ -4708,145 +4732,154 @@ class TreeNode2D(UI):
 
         Parameters
         ----------
-        icon : str
-            Path to the icon image for unselected state.
-        selected_icon : str, optional
-            Path to the icon image for selected state.
+        icon : str or ndarray or None
+            Path, URL or image data of the icon. None removes the icon.
+        selected_icon : str or ndarray, optional
+            Icon shown while the node is selected. When not given, the
+            current selected icon is kept.
         """
-        self._icon = icon
         self.node_icons["unselected"] = icon
+        self._icon_images["unselected"] = _load_icon(icon)
         if selected_icon is not None:
             self.node_icons["selected"] = selected_icon
+            self._icon_images["selected"] = _load_icon(selected_icon)
 
-        if not self.has_icon:
-            return
+        self._show_icon()
+        self._update_title_visibility()
+        self._layout_title(self.title_panel.size[0] - self.right_margin)
 
-        if self.selected:
-            icon_data = self.node_icons["selected"]
-            self.label_image.set_img(
-                icon_data
-                if isinstance(icon_data, np.ndarray)
-                else load_image(icon_data)
-            )
-        else:
-            icon_data = self.node_icons["unselected"]
-            self.label_image.set_img(
-                icon_data
-                if isinstance(icon_data, np.ndarray)
-                else load_image(icon_data)
-            )
+    def _show_icon(self):
+        """Display the icon matching the selection state."""
+        image = self._icon_images["unselected"]
+        if self._selected and self._icon_images["selected"] is not None:
+            image = self._icon_images["selected"]
+        if image is not None:
+            self.label_image.set_img(image)
 
-    def clear_selections(self):
-        """Clear all the selected nodes."""
-        for selected_node in self.selected_nodes:
-            selected_node.color = selected_node.unselected_color
-
-            if selected_node.has_icon:
-                icon_data = selected_node.node_icons["unselected"]
-                selected_node.label_image.set_img(
-                    icon_data
-                    if isinstance(icon_data, np.ndarray)
-                    else load_image(icon_data)
-                )
-
-            selected_node.on_node_deselect(selected_node)
-            selected_node.selected = False
-            selected_node.clear_selections()
-
-        self.selected_nodes.clear()
-
-    def select_node(self, event):
+    @property
+    def selected(self):
         """
-        Callback for when the node is clicked on.
+        Get the selection state of the node.
+
+        Returns
+        -------
+        bool
+            True if the node is selected.
+        """
+        return self._selected
+
+    @selected.setter
+    def selected(self, selected):
+        """
+        Select or deselect the node.
 
         Parameters
         ----------
-        event : PointerEvent
-            The pygfx pointer event.
+        selected : bool
+            True to select the node, False to deselect it.
         """
-        self.selected = not self.selected
+        selected = bool(selected)
+        if selected == self._selected:
+            return
 
-        if self.selected:
-            if self.parent:
-                if not self.multiselect:
-                    self.parent.clear_selections()
-
-                self.parent.selected_nodes.append(self)
-
-            self.color = self.selected_color
-            if self.has_icon:
-                icon_data = self.node_icons["selected"]
-                self.label_image.set_img(
-                    icon_data
-                    if isinstance(icon_data, np.ndarray)
-                    else load_image(icon_data)
-                )
+        self._selected = selected
+        self.color = self.selected_color if selected else self.unselected_color
+        self._show_icon()
+        if selected:
             self.on_node_select(self)
         else:
-            if self.parent:
-                self.parent.selected_nodes.remove(self)
-
-                if not self.multiselect:
-                    self.parent.clear_selections()
-
-            self.color = self.unselected_color
-            if self.has_icon:
-                icon_data = self.node_icons["unselected"]
-                self.label_image.set_img(
-                    icon_data
-                    if isinstance(icon_data, np.ndarray)
-                    else load_image(icon_data)
-                )
             self.on_node_deselect(self)
+        self.on_selection_change(self)
+
+    @property
+    def selected_nodes(self):
+        """
+        Get the selected nodes below this node.
+
+        Returns
+        -------
+        list of TreeNode2D
+            Selected nodes of the subtree, depth first.
+        """
+        return [node for node in self.iter_nodes() if node.selected]
+
+    def toggle_selection(self, *, event=None):
+        """
+        Select the node if it is not selected, and deselect it otherwise.
+
+        Parameters
+        ----------
+        event : PointerEvent, optional
+            The pygfx pointer event.
+        """
+        if self.selectable:
+            self.selected = not self.selected
+
+    def clear_selections(self):
+        """Deselect every node below this node."""
+        for node in self.selected_nodes:
+            node.selected = False
+
+    def _apply_selection_policy(self, node):
+        """
+        Deselect the other nodes when only one node may be selected.
+
+        Parameters
+        ----------
+        node : TreeNode2D
+            The node whose selection changed.
+        """
+        if self.multiselect or not node.selected:
+            return
+        for other in [self, *self.iter_nodes()]:
+            if other is not node and other.selected:
+                other.selected = False
 
     def left_button_pressed(self, event):
         """
-        Callback for when the left mouse button is pressed.
+        Start dragging the node.
 
         Parameters
         ----------
         event : PointerEvent
             The pygfx pointer event.
         """
-        if self.parent is not None:
-            self.parent.left_button_pressed(event)
-            return
-        click_pos = np.array([event.x, event.y])
-        self._drag_offset = click_pos - self.get_position()
+        self._drag_offset = np.array([event.x, event.y]) - self.get_position()
 
     def left_button_dragged(self, event):
         """
-        Callback for when the left mouse button is dragged.
+        Move the node with the pointer.
 
         Parameters
         ----------
         event : PointerEvent
             The pygfx pointer event.
         """
-        if self.parent is not None:
-            self.parent.left_button_dragged(event)
-            return
-        if getattr(self, "_drag_offset", None) is not None:
-            click_position = np.array([event.x, event.y])
-            new_position = click_position - self._drag_offset
-            self.set_position(new_position)
+        if self._drag_offset is not None:
+            self.set_position(np.array([event.x, event.y]) - self._drag_offset)
 
 
 class Tree2D(UI):
     """
     Render nodes in tree form.
 
+    Rows that do not fit in the visible area are hidden, and the tree can be
+    scrolled with the mouse wheel or the scroll bar.
+
     Parameters
     ----------
     structure : list of dicts
-        [{'node': ['child', 'child']}, .....].
+        [{'node': ['child', 'child']}, .....]. A key that is already the
+        label of a node adds the children to that node. Labels must be
+        unique, since nodes are looked up by label.
     tree_name : str, optional
         Label for the tree.
     position : (float, float), optional
-        Absolute coordinates (x, y) of the lower-left corner of the
+        Absolute coordinates (x, y) of the top-left corner of the
         UI component.
     size : (int, int), optional
-        Width and height of the pixels of this UI component.
+        Width and height of the visible area in pixels, not counting the
+        scroll bar.
     node_height : int, optional
         Space taken by each node vertically.
     color : list of 3 floats, optional
@@ -4856,40 +4889,41 @@ class Tree2D(UI):
     indent : int, optional
         Global indentation for the parent/child nodes.
     multiselect : bool, optional
-        If multiple nodes can be selected.
+        If False, selecting a node deselects every other node of the tree.
     button_position : str, optional
-        Position of the collapse/expand button ('start' or 'end').
-    icon : str, optional
-        Path/URl to the icon placed next to the label for unselected state.
-    selected_icon : str, optional
-        Path/URl to the icon placed next to the label for selected state.
+        Position of the collapse/expand button, either 'start' or 'end'.
+    icon : str or ndarray, optional
+        Path, URL or image data of the icon placed next to each label.
+    selected_icon : str or ndarray, optional
+        Icon shown while a node is selected. When not given, ``icon`` is
+        shown in both states.
     scroll_bar_inactive_color : list of 3 floats, optional
-        Color of the scroll bar when inactive.
+        Color of the scroll bar when it is not being dragged.
     scroll_bar_active_color : list of 3 floats, optional
-        Color of the scroll bar when actively dragged.
+        Color of the scroll bar while it is being dragged.
     z_order : int, optional
         Stacking order of the Tree2D.
 
     Attributes
     ----------
-    structure: list of dicts
+    structure : list of dicts
         [{'node': ['child', 'child']}, .....]
-    tree_name: str
+    tree_name : str
         Name of the tree.
-    node_height: int
+    node_height : int
         Space taken by each node vertically.
-    indent: int
+    indent : int
         Global indentation for the parent/child nodes.
-    nodes: list of :class: `TreeNode2D`
-        List of all parent nodes present in Tree2D.
-    nodes_dict: dict
-        Dict with label, nodes as key/value pairs.
+    nodes : list of :class: `TreeNode2D`
+        Top-level nodes of the Tree2D.
+    nodes_dict : dict
+        All nodes of the Tree2D by label.
     button_position : str
         Position of the collapse/expand button ('start' or 'end').
-    icon : str
-        Path/URl to the icon placed next to the label for unselected state.
-    selected_icon : str
-        Path/URl to the icon placed next to the label for selected state.
+    icon : str or ndarray
+        Icon placed next to each label.
+    selected_icon : str or ndarray
+        Icon shown while a node is selected.
     """
 
     def __init__(
@@ -4933,6 +4967,8 @@ class Tree2D(UI):
         self.scroll_init_position = 0
         self.scroll_step_size = 0
         self._last_wheel_event = None
+        self._drag_offset = None
+        self._visible = True
 
         super().__init__(position=position, z_order=z_order)
 
@@ -4940,11 +4976,13 @@ class Tree2D(UI):
         """Setup this UI element."""
         self.generate_tree(self.structure)
 
+        sb_width = int(self.content_size[0] / 30)
         self.base_node = TreeNode2D(
             label=self.tree_name,
             children=self._nodes,
             expandable=False,
             expanded=True,
+            selectable=False,
             indent=self.indent,
             child_indent=self.indent,
             child_height=self.node_height,
@@ -4956,21 +4994,12 @@ class Tree2D(UI):
             button_position=self.button_position,
             icon=self.icon,
             selected_icon=self.selected_icon,
+            z_order=self.z_order,
         )
-
-        actual_height = self.base_node.children_size() + self.base_node.child_height
-        self.base_node.resize((self.content_size[0], actual_height))
-
         self._children.append(self.base_node)
 
-        sb_width = int(self.content_size[0] / 30)
-        self.content_size = (self.content_size[0] + sb_width, self.content_size[1])
-
         self.scroll_bar = Rectangle2D(
-            size=(
-                sb_width,
-                self.base_node.children_size() - self.base_node.child_height,
-            ),
+            size=(sb_width, self.node_height),
             color=self.scroll_bar_inactive_color,
             opacity=1.0,
         )
@@ -4980,65 +5009,14 @@ class Tree2D(UI):
         self.scroll_bar.on_left_mouse_button_pressed = self.scroll_click_callback
         self.scroll_bar.on_left_mouse_button_released = self.scroll_release_callback
         self.scroll_bar.on_left_mouse_button_dragged = self.scroll_drag_callback
-
         self.scroll_bar.on_wheel = self.wheel_scroll
 
-        self.base_node.on_resize_callback = self.update_scrollbar
-        self.base_node.right_margin = sb_width
-        self.base_node.resize(
-            (
-                self.content_size[0],
-                self.base_node.children_size() + self.base_node.child_height,
-            )
-        )
-        self.update_scrollbar()
+        self.base_node.on_size_change = lambda node: self.update_scrollbar()
+        self.base_node.on_wheel = self.wheel_scroll
+        self.base_node.on_left_mouse_button_pressed = self.left_button_pressed
+        self.base_node.on_left_mouse_button_dragged = self.left_button_dragged
 
-        self.base_node.left_button_dragged = self._tree_drag_callback
-        self.base_node.label_text.on_left_mouse_button_dragged = (
-            self._tree_drag_callback
-        )
-        if self.base_node.has_icon:
-            self.base_node.label_image.on_left_mouse_button_dragged = (
-                self._tree_drag_callback
-            )
-        self.base_node.title_panel.background.on_left_mouse_button_dragged = (
-            self._tree_drag_callback
-        )
-        self.base_node.content_panel.background.on_left_mouse_button_dragged = (
-            self._tree_drag_callback
-        )
-
-        def bind_node_wheel(node):
-            """
-            Recursively bind the wheel scroll event to a node and its children.
-
-            Parameters
-            ----------
-            node : TreeNode2D
-                The node to bind the wheel scroll event to.
-            """
-            node._wheel_callback = self.wheel_scroll
-            node.on_wheel = self.wheel_scroll
-            node.title_panel.on_wheel = self.wheel_scroll
-            node.content_panel.on_wheel = self.wheel_scroll
-            node.title_panel.background.on_wheel = self.wheel_scroll
-            node.content_panel.background.on_wheel = self.wheel_scroll
-            node.label_text.on_wheel = self.wheel_scroll
-            if node.has_icon:
-                node.label_image.on_wheel = self.wheel_scroll
-            node.button.on_wheel = self.wheel_scroll
-            node.button.child.on_wheel = self.wheel_scroll
-
-            if node.parent is not None and node.parent != self.base_node:
-                node.set_visibility(False)
-            elif node != self.base_node:
-                node.set_visibility(True)
-
-            for child in getattr(node, "_child_nodes", []):
-                if isinstance(child, TreeNode2D):
-                    bind_node_wheel(child)
-
-        bind_node_wheel(self.base_node)
+        self.resize(self.content_size)
 
     def _get_actors(self):
         """
@@ -5052,10 +5030,11 @@ class Tree2D(UI):
         return []
 
     def _update_actors_position(self):
-        """Position the lower-left corner of this UI component."""
+        """Position the rows, the fixed title row and the scroll bar."""
         self.base_node.set_position(
             self.get_position() - np.array([0, self.view_offset])
         )
+        self.base_node.title_panel.set_position(self.get_position())
 
         scroll_x = int(
             self.get_position()[0] + self.content_size[0] - self.scroll_bar.size[0]
@@ -5065,14 +5044,13 @@ class Tree2D(UI):
         visible_height = self.content_size[1] - self.base_node.child_height
         actual_height = self.base_node.children_size()
 
+        handle_y = track_y
         if actual_height > visible_height:
             fraction = self.view_offset / (actual_height - visible_height)
             handle_y = int(
                 track_y + fraction * (visible_height - self.scroll_bar.size[1])
             )
-            self.scroll_bar.set_position((scroll_x, handle_y))
-        else:
-            self.scroll_bar.set_position((scroll_x, track_y))
+        self.scroll_bar.set_position((scroll_x, handle_y))
 
         self._clip_to_viewport()
 
@@ -5080,23 +5058,51 @@ class Tree2D(UI):
         """
         Hide the parts of the tree content outside the visible area.
 
+        The title row of the tree stays in place, and the rows scrolling
+        under it are hidden.
+        """
+        top = self.get_position()[1]
+        bottom = top + self.content_size[1]
+        title_elements = _collect_ui_elements(self.base_node.title_panel)
+        title_ids = {id(element) for element in title_elements}
+        row_elements = [
+            element
+            for element in _collect_ui_elements(self.base_node)
+            if id(element) not in title_ids
+        ]
+        self._clip_elements(title_elements, top, bottom)
+        self._clip_elements(row_elements, top + self.base_node.child_height, bottom)
+
+    def _clip_elements(self, elements, top, bottom):
+        """
+        Hide the parts of UI elements outside a horizontal band of the tree.
+
         Text is drawn in screen space, so the clipping test only sees its
         anchor point. Its vertical planes are moved by the distance from the
         anchor to the edges of the text block, which hides a label unless its
-        whole row is inside the visible area.
+        whole row is inside the band.
+
+        Parameters
+        ----------
+        elements : list of UI
+            The UI elements to clip.
+        top : float
+            Top of the band, in canvas pixels from the top.
+        bottom : float
+            Bottom of the band, in canvas pixels from the top.
         """
-        left, top = self.get_position()
-        width, height = self.content_size
+        left = self.get_position()[0]
+        width = self.content_size[0]
         canvas_height = UIContext.canvas_size[1]
         canvas_top = canvas_height - top
-        canvas_bottom = canvas_top - height
+        canvas_bottom = canvas_height - bottom
         clipping_planes = [
             (1, 0, 0, left),
             (-1, 0, 0, -(left + width)),
             (0, 1, 0, canvas_bottom),
             (0, -1, 0, -canvas_top),
         ]
-        for element in _collect_ui_elements(self.base_node):
+        for element in elements:
             if isinstance(element, TextBlock2D):
                 anchor_y = element.actor.world.position[1]
                 block_top = canvas_height - element.get_position()[1]
@@ -5111,45 +5117,61 @@ class Tree2D(UI):
                 actor.material.clipping_planes = clipping_planes
 
     def update_scrollbar(self):
-        """Update scrollbar geometry and visibility."""
+        """Update the scroll bar, and show it only when the rows overflow."""
         visible_height = self.content_size[1] - self.base_node.child_height
         actual_height = self.base_node.children_size()
 
-        if actual_height <= visible_height:
-            self.scroll_bar.height = actual_height
-            self.view_offset = 0
-            self.scroll_bar.color = self.scroll_bar_inactive_color
-
-            self.scroll_step_size = 0
-        else:
-            self.scroll_bar.color = self.scroll_bar_active_color
+        overflows = actual_height > visible_height
+        if overflows:
             self.scroll_bar.height = int(
                 max(20, visible_height * visible_height / actual_height)
             )
-
-            denom = visible_height - self.scroll_bar.size[1]
-            if denom == 0:
-                denom = 1
-            self.scroll_step_size = (actual_height - visible_height) / denom
-
+            track_space = max(visible_height - self.scroll_bar.size[1], 1)
+            self.scroll_step_size = (actual_height - visible_height) / track_space
             self.view_offset = min(self.view_offset, actual_height - visible_height)
             self.view_offset = max(0, self.view_offset)
+        else:
+            self.view_offset = 0
+            self.scroll_step_size = 0
 
+        self.scroll_bar.set_visibility(self._visible and overflows)
         self._update_actors_position()
 
-    def _tree_drag_callback(self, event):
+    def set_visibility(self, visibility):
         """
-        Handle dragging for the entire Tree2D UI.
+        Set visibility of this UI component.
+
+        Parameters
+        ----------
+        visibility : bool
+            True if the component is to be visible, False otherwise.
+        """
+        self._visible = visibility
+        self.base_node.set_visibility(visibility)
+        self.update_scrollbar()
+
+    def left_button_pressed(self, event):
+        """
+        Start dragging the Tree2D.
 
         Parameters
         ----------
         event : PointerEvent
             The pygfx pointer event.
         """
-        TreeNode2D.left_button_dragged(self.base_node, event)
-        self.set_position(
-            self.base_node.get_position() + np.array([0, self.view_offset])
-        )
+        self._drag_offset = np.array([event.x, event.y]) - self.get_position()
+
+    def left_button_dragged(self, event):
+        """
+        Move the Tree2D with the pointer.
+
+        Parameters
+        ----------
+        event : PointerEvent
+            The pygfx pointer event.
+        """
+        if self._drag_offset is not None:
+            self.set_position(np.array([event.x, event.y]) - self._drag_offset)
 
     def scroll_click_callback(self, event):
         """
@@ -5194,9 +5216,10 @@ class Tree2D(UI):
         """
         Handle mouse wheel scroll events.
 
-        Scrolls the tree view by one row. A button registers handlers on its
-        image's actor as well as the image itself, so the same event can
-        arrive twice; it is applied only once.
+        Scrolls the tree view by one row. ``TexturedButton2D`` registers
+        handlers on its image's actor as well as the image itself, so the
+        same event can arrive twice from a node's button; it is applied only
+        once.
 
         Parameters
         ----------
@@ -5209,10 +5232,9 @@ class Tree2D(UI):
         if self.scroll_step_size == 0:
             return
 
-        dy = event.dy
-        if dy > 0:
+        if event.dy > 0:
             self.view_offset += self.base_node.child_height
-        elif dy < 0:
+        elif event.dy < 0:
             self.view_offset -= self.base_node.child_height
 
         self.update_scrollbar()
@@ -5228,6 +5250,41 @@ class Tree2D(UI):
         """
         return self.content_size
 
+    def _check_labels(self, node):
+        """
+        Check that a node and the nodes below it have unused labels.
+
+        Parameters
+        ----------
+        node : TreeNode2D
+            The node to check.
+
+        Raises
+        ------
+        ValueError
+            If a label is already used by a node of the tree, or twice in
+            the given subtree.
+        """
+        labels = [new_node.label for new_node in [node, *node.iter_nodes()]]
+        for label in labels:
+            if label in self._nodes_dict or labels.count(label) > 1:
+                raise ValueError(
+                    f"The label {label!r} is already used in the tree. "
+                    "Node labels must be unique."
+                )
+
+    def _register_node(self, node):
+        """
+        Add a node and the nodes below it to ``nodes_dict``.
+
+        Parameters
+        ----------
+        node : TreeNode2D
+            The node to register.
+        """
+        for new_node in [node, *node.iter_nodes()]:
+            self._nodes_dict[new_node.label] = new_node
+
     def generate_tree(self, structure):
         """
         Generate the structure of the Tree2D.
@@ -5237,38 +5294,45 @@ class Tree2D(UI):
         structure : list of dicts
             [{'node': ['child', 'child']}, .....].
         """
-        for obj in structure:
-            parent_label = list(obj.keys())[0]
-            child_labels = list(obj.values())[0]
+        for entry in structure:
+            parent_label = list(entry.keys())[0]
+            child_labels = list(entry.values())[0]
 
-            if parent_label in self.nodes_dict.keys():
-                parent_node = self.nodes_dict[parent_label]
+            if parent_label in self._nodes_dict:
+                parent_node = self._nodes_dict[parent_label]
             else:
-                parent_node = TreeNode2D(
-                    label=parent_label,
-                    multiselect=self.multiselect,
-                    button_position=self.button_position,
-                    icon=self.icon,
-                    selected_icon=self.selected_icon,
-                )
-
+                parent_node = self._make_node(parent_label)
+                self._check_labels(parent_node)
+                self._register_node(parent_node)
                 self._nodes.append(parent_node)
-                self._nodes_dict[parent_label] = parent_node
 
-            child_nodes = [
-                TreeNode2D(
-                    label=child_label,
-                    multiselect=self.multiselect,
-                    button_position=self.button_position,
-                    icon=self.icon,
-                    selected_icon=self.selected_icon,
-                )
-                for child_label in child_labels
-            ]
-
-            for child_node, child_label in zip(child_nodes, child_labels, strict=True):
-                self._nodes_dict[child_label] = child_node
+            for child_label in child_labels:
+                child_node = self._make_node(child_label)
+                self._check_labels(child_node)
                 parent_node.add_node(child_node)
+                self._register_node(child_node)
+
+    def _make_node(self, label):
+        """
+        Create a node with the settings of the tree.
+
+        Parameters
+        ----------
+        label : str
+            Label of the node.
+
+        Returns
+        -------
+        TreeNode2D
+            The new node.
+        """
+        return TreeNode2D(
+            label=label,
+            multiselect=self.multiselect,
+            button_position=self.button_position,
+            icon=self.icon,
+            selected_icon=self.selected_icon,
+        )
 
     def resize(self, size):
         """
@@ -5294,7 +5358,7 @@ class Tree2D(UI):
         )
         self.update_scrollbar()
 
-    def add_content(self, node, content, *, coords=(0.0, 0.0)):
+    def add_content(self, node, content, *, coords=(0, 0)):
         """
         Add content to a specific node.
 
@@ -5304,24 +5368,22 @@ class Tree2D(UI):
             Label of the node.
         content : UI or TreeNode2D
             The content that is to be added in the node.
-        coords : tuple of float or tuple of int, optional
-            If float, normalized coordinates are assumed and they must be
-            between [0,1].
-            If int, pixels coordinates are assumed and it must fit within the
-            content panel's size.
+        coords : (int, int), optional
+            Offset in pixels of a UI element's top-left corner from the
+            top-left corner of the node's indented content area. Not used for
+            a TreeNode2D.
         """
-        _node = self.select_node(node)
+        target = self.get_node(node)
         if isinstance(content, TreeNode2D):
-            _node.add_node(content)
+            self._check_labels(content)
+            target.add_node(content)
+            self._register_node(content)
         else:
-            _node.add_element(content, coords=coords)
+            target.add_element(content, coords=coords)
 
-        _node.set_visibility(False)
-        self.update_scrollbar()
-
-    def select_node(self, node):
+    def get_node(self, node):
         """
-        Get the instance of a specific node.
+        Get the node with a given label.
 
         Parameters
         ----------
@@ -5331,15 +5393,26 @@ class Tree2D(UI):
         Returns
         -------
         TreeNode2D
-            The selected node.
+            The node.
         """
-        _node = self.nodes_dict[node]
-        return _node
+        return self._nodes_dict[node]
+
+    @property
+    def selected_nodes(self):
+        """
+        Get the selected nodes of the tree.
+
+        Returns
+        -------
+        list of TreeNode2D
+            Selected nodes, depth first.
+        """
+        return self.base_node.selected_nodes
 
     @property
     def nodes(self):
         """
-        Get all the nodes present in the Tree2D.
+        Get the top-level nodes of the Tree2D.
 
         Returns
         -------
@@ -5351,7 +5424,7 @@ class Tree2D(UI):
     @property
     def nodes_dict(self):
         """
-        Get all the nodes present in the Tree2D in dict format.
+        Get all the nodes of the Tree2D by label.
 
         Returns
         -------

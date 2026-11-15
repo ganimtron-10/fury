@@ -741,7 +741,6 @@ class Rectangle2D(UI):
         """
         w = max(size[0], 1)
         h = max(size[1], 1)
-        size = (w, h)
         self.actor.geometry = plane_geometry(width=w, height=h)
         self._update_actors_position()
 
