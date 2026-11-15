@@ -1881,7 +1881,7 @@ class Button2D(UI):
         if self.child:
             if not isinstance(self.child, UI):
                 return [self.child]
-            else:
+            elif self.child not in self._children:
                 self._children.append(self.child)
         return []
 
