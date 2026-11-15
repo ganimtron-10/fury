@@ -10,6 +10,7 @@ import platform
 from shutil import copyfileobj
 import sys
 import tarfile
+from urllib.error import URLError
 from urllib.request import urlopen
 import warnings
 import zipfile
@@ -46,6 +47,21 @@ TEXTURE_DATA_URL = (
 )
 
 DMRI_DATA_URL = "https://raw.githubusercontent.com/fury-gl/fury-data/master/dmri/"
+
+UI_THEMES_DATA_URL = (
+    "https://raw.githubusercontent.com/fury-gl/fury-data/master/ui_themes/"
+)
+
+# Checksums of the theme files in ``ui_themes`` of fury-data, by theme name.
+UI_THEME_SHA256 = {
+    "slate": "2a81c2d9c95610191a13d52cfc2d1bda0053c62d27591c1538cf56c4227006fa",
+    "lab_notebook": "4c7600117279df6c07e537d3ac56c7709348860754481501222e34d3fef62d1c",
+    "instrument": "299beab3bb6dc92f1813b0e654a43c822e7148d6460c5df6e4fe254b29ccc4b8",
+    "inspector": "ffd90045de6513d847f4fdd818c6a83a2428762b7094732d5c1abe3b982ab212",
+    "glass": "92033b49150f6384b835eff9f3992a9ea64fcf318fa5f7af817d908fcbf5d5f3",
+    "chromeless": "dda509d3cf95ac41d7fc534921f912ab0df1981d793df89aa90ac3380e071566",
+    "high_contrast": "e785707432800640a469cd9d14b344bbabf6f2f5e06bba5775e16e1ebdb2debd",
+}
 
 GLTF_DATA_URL = (
     "https://api.github.com/repos/KhronosGroup/glTF-Sample-Models/contents/2.0/"  # noqa
@@ -295,7 +311,7 @@ def _make_fetcher(
             for f in local_fnames:
                 ext1 = get_extension(f)
                 if ext1 == "gz" or ext1 == "bz2":
-                    root1 = f[:-(len(ext1)+1)] if f.endswith(f".{ext1}") else f
+                    root1 = f[: -(len(ext1) + 1)] if f.endswith(f".{ext1}") else f
                     ext2 = get_extension(root1)
                     if ext2 == "tar":
                         ar = tarfile.open(pjoin(folder, f))
@@ -459,9 +475,7 @@ def fetch_gltf(*, name=None, mode="glTF"):
     process-wide asyncio event-loop policy.
     """
     loop_factory = (
-        asyncio.SelectorEventLoop
-        if platform.system().lower() == "windows"
-        else None
+        asyncio.SelectorEventLoop if platform.system().lower() == "windows" else None
     )
     filenames = asyncio.run(_fetch_gltf(name, mode), loop_factory=loop_factory)
     return filenames
@@ -720,6 +734,128 @@ fetch_viz_textures = _make_fetcher(
     ],
     doc="Download textures for fury",
 )
+
+
+def _check_ui_theme_name(name):
+    """
+    Check that a UI theme name is a plain file name.
+
+    Parameters
+    ----------
+    name : str
+        Name of the theme.
+
+    Raises
+    ------
+    ValueError
+        If the name is empty, contains a folder or a drive, or a colon.
+    """
+    if not name or os.path.basename(name) != name or ":" in name:
+        msg = (
+            f"Invalid UI theme name {name!r}: use a plain name without folders, "
+            "drives or colons."
+        )
+        raise ValueError(msg)
+
+
+def fetch_ui_themes(
+    names=None, *, base_url=UI_THEMES_DATA_URL, folder=None, sha256=None
+):
+    """
+    Download UI theme files.
+
+    Each theme is the JSON file ``<name>.json`` in ``base_url``. A file
+    already in ``folder`` with the right checksum is not downloaded again.
+    Load a downloaded theme with :func:`fury.ui.load_theme`.
+
+    Parameters
+    ----------
+    names : str or list of str, optional
+        Names of the themes. None downloads every theme of ``sha256``.
+    base_url : str, optional
+        Address of the folder that holds the theme files. The default is the
+        ``ui_themes`` folder of the FURY data repository.
+    folder : str, optional
+        Folder to save the files in. None uses ``$FURY_HOME/ui_themes``, by
+        default ``~/.fury/ui_themes``.
+    sha256 : dict, optional
+        SHA-256 checksum of each theme file, by theme name. None uses
+        ``UI_THEME_SHA256``, the themes FURY lists. Pass it to download
+        themes from another ``base_url``.
+
+    Returns
+    -------
+    files : dict
+        URL and checksum of each downloaded file, by file name.
+    folder : str
+        Folder that holds the files.
+
+    Raises
+    ------
+    ValueError
+        If a name is not a plain file name, or has no checksum in ``sha256``.
+    FetcherError
+        If a download fails, or a file does not match its checksum. A file
+        that does not match is deleted.
+    """
+    checksums = UI_THEME_SHA256 if sha256 is None else sha256
+    if names is None:
+        names = list(checksums)
+    elif isinstance(names, str):
+        names = [names]
+    for name in names:
+        _check_ui_theme_name(name)
+    unknown = [name for name in names if name not in checksums]
+    if unknown:
+        msg = (
+            f"Unknown UI themes: {', '.join(unknown)}. Downloadable themes: "
+            f"{', '.join(checksums) or 'none'}."
+        )
+        raise ValueError(msg)
+
+    file_names = [f"{name}.json" for name in names]
+    folder = folder or pjoin(fury_home, "ui_themes")
+    fetcher = _make_fetcher(
+        "fetch_ui_themes",
+        folder,
+        base_url.rstrip("/") + "/",
+        file_names,
+        file_names,
+        sha_list=[checksums[name] for name in names],
+    )
+    try:
+        return fetcher()
+    except (URLError, TimeoutError) as error:
+        msg = (
+            f"Could not download UI themes {', '.join(names)} from {base_url}: "
+            f"{error}. Check the network connection, or load a local theme "
+            "file instead."
+        )
+        raise FetcherError(msg) from error
+    except FetcherError:
+        _remove_mismatched_files(folder, file_names, checksums, names)
+        raise
+
+
+def _remove_mismatched_files(folder, file_names, checksums, names):
+    """
+    Delete downloaded files that do not match their checksum.
+
+    Parameters
+    ----------
+    folder : str
+        Folder that holds the files.
+    file_names : list of str
+        Names of the files.
+    checksums : dict
+        SHA-256 checksum of each file, by theme name.
+    names : list of str
+        Theme name of each file, in the order of ``file_names``.
+    """
+    for file_name, name in zip(file_names, names, strict=True):
+        path = pjoin(folder, file_name)
+        if os.path.exists(path) and _get_file_sha(path) != checksums[name].lower():
+            os.remove(path)
 
 
 @warn_on_args_to_kwargs()

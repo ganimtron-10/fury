@@ -10,17 +10,22 @@ translucent panel for light scenes) and Ember (Graphite with a warm accent).
 ``ui.theme_names()`` lists every built-in theme, including ``classic``, the
 original look of FURY widgets.
 
-Density is an option of any theme rather than a theme of its own. The last
+Density is an option of any theme rather than a theme of its own. One
 panel uses Graphite with ``density="compact"``, which scales font sizes,
-padding, gaps, corner radii and slider sizes down.
+padding, gaps, corner radii and slider sizes down. The last panel uses a
+theme saved to a file and loaded back with ``ui.load_theme``.
 """
 
 ##############################################################################
 # First, a bunch of imports.
 
+import os
+import tempfile
+
 from fury import ui, window
 
 print("Built-in themes:", ", ".join(ui.theme_names()))
+print("Downloadable themes:", ", ".join(ui.theme_names(downloadable=True)))
 
 ##############################################################################
 # The settings panel. Colors, fonts, corner radii, borders, shadows, slider
@@ -138,6 +143,34 @@ blue_disk = ui.Disk2D(26, center=(3 * COLUMN - 70, BOTTOM + 60), color="#1D4ED8"
 orange_disk = ui.Disk2D(15, center=(3 * COLUMN - 47, BOTTOM + 150), color="#EA580C")
 blue_disk.z_order = orange_disk.z_order = -1
 backdrop = [light_side, blue_disk, orange_disk]
+
+##############################################################################
+# Themes can be shared as JSON files. ``Theme.save`` writes every item of a
+# theme, including those it inherits, and ``ui.load_theme`` reads the file
+# back. Here, a square cornered Ember is saved to a temporary file and loaded
+# again.
+#
+# ``ui.load_theme`` also takes the name of a theme from the FURY data
+# repository, such as ``ui.load_theme("slate")``, once the theme files are
+# published there: the file is downloaded once, checked against its checksum
+# and kept in ``~/.fury/ui_themes``. With
+# ``folder=``, it reads ``<folder>/<name>.json`` from a folder of theme files.
+
+square_ember = ui.builtin_theme("ember").derive(
+    name="square_ember",
+    items={
+        "Panel2D": {"corner_radius": 0},
+        "TextButton2D": {"corner_radius": 0},
+        "TextBox2D": {"corner_radius": 0},
+    },
+)
+with tempfile.TemporaryDirectory() as theme_folder:
+    theme_path = os.path.join(theme_folder, "square_ember.json")
+    square_ember.save(theme_path)
+    loaded_theme = ui.load_theme(theme_path)
+
+with ui.theme_scope(loaded_theme):
+    panels.append(settings_panel("Loaded file", (15 + 3 * COLUMN, BOTTOM)))
 
 ##############################################################################
 # Add everything to a dark scene and show it.
