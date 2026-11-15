@@ -43,8 +43,8 @@ tree = ui.Tree2D(
 # Creating the Actors
 #
 # The actors share one center, to the right of the scene's origin, and only
-# the selected one is shown. Axes mark the origin, so the camera frames the
-# actors beside the tree.
+# the selected one is shown. The axes at the origin give the camera a frame
+# that places the actors beside the tree.
 
 center = np.array([4.0, 0.0, 0.0])
 initial_colors = {
@@ -141,11 +141,9 @@ def setup_actor_controls(actor_obj, name):
     for channel, slider in enumerate(color_sliders):
         tree.add_content(f"{name} color", slider, coords=(20 + 110 * channel, 10))
 
-    # Show the actor only while its node is selected.
-
     # The control rows are not selectable, so clicking them opens them
-    # without deselecting the actor.
-
+    # without deselecting the actor. The actor is shown only while its own
+    # node is selected.
     for part in ("position", "color"):
         tree.get_node(f"{name} {part}").selectable = False
 

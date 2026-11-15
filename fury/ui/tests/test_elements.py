@@ -3519,6 +3519,53 @@ def test_ui_treenode2d_selected_icon_without_icon():
     assert not _shown(node.label_image)
 
 
+def test_ui_tree2d_fixed_height_node_grows_for_larger_content(ui_scene):
+    """A fixed-height node taller content pushes later rows down."""
+    show_manager, scene = ui_scene
+    tree = ui.Tree2D(structure=[{"A": []}], position=TREE_POSITION, size=(300, 400))
+    fixed = ui.TreeNode2D(label="F", size=(200, 60), auto_resize=False, expanded=True)
+    for i in range(6):
+        fixed.add_node(ui.TreeNode2D(label=f"f{i}"))
+    tree.add_content("A", fixed)
+    tree.add_content("A", ui.TreeNode2D(label="Z"))
+    scene.add(tree)
+    tree.get_node("A").toggle_view()
+
+    z_node = tree.get_node("Z")
+    last_child = tree.get_node("f5")
+    assert z_node.get_position()[1] >= last_child.get_position()[1] + 25
+    _click_at(show_manager, *_label_point(z_node))
+    npt.assert_equal([node.label for node in tree.selected_nodes], ["Z"])
+
+
+def test_ui_tree2d_structure_is_built_once():
+    """Tree2D builds its structure at construction and has no public rebuild."""
+    tree = ui.Tree2D(structure=[{"A": ["a1"]}])
+
+    assert not hasattr(tree, "generate_tree")
+    npt.assert_equal([node.label for node in tree.base_node.child_nodes], ["A"])
+
+
+def test_ui_treenode2d_expandable_and_selected_icon_setters():
+    """Re-enabling expandable shows the right button, and selected_icon can go."""
+    minus = read_viz_icons(fname="minus.png")
+    plus = read_viz_icons(fname="plus.png")
+    node = ui.TreeNode2D(
+        label="N", children=[ui.TreeNode2D(label="c")], icon=plus, selected_icon=minus
+    )
+    node.expanded = True
+    node.expandable = False
+    node.expanded = False
+    node.expandable = True
+    assert node.button.toggled is False
+
+    node.selected = True
+    npt.assert_array_equal(node.label_image.img, load_image(minus))
+    node.selected_icon = None
+    npt.assert_array_equal(node.label_image.img, load_image(plus))
+    assert node.selected_icon is None
+
+
 def test_ui_tree2d_click_selects_one_node_without_multiselect(ui_scene):
     """With multiselect off, a click deselects nodes in other branches too."""
     show_manager, scene = ui_scene

@@ -2266,44 +2266,38 @@ class RangeSlider(UI):
         numpy.ndarray
             The width and height of the component.
         """
-        w1, h1 = self.range_slider.size
-        w2, h2 = self.value_slider.size
+        range_offset, value_offset = self._slider_offsets()
+        width = max(
+            range_offset[0] + self.range_slider.size[0],
+            value_offset[0] + self.value_slider.size[0],
+        )
+        height = max(
+            range_offset[1] + self.range_slider.size[1],
+            value_offset[1] + self.value_slider.size[1],
+        )
+        return np.array([width, height])
 
-        orig_pos_x = min(self.range_slider_center[0], self.value_slider_center[0])
-        orig_pos_y = min(self.range_slider_center[1], self.value_slider_center[1])
+    def _slider_offsets(self):
+        """
+        Return where the two sliders sit relative to the component.
 
-        rel_range_x = self.range_slider_center[0] - orig_pos_x
-        rel_range_y = self.range_slider_center[1] - orig_pos_y
-
-        rel_value_x = self.value_slider_center[0] - orig_pos_x
-        rel_value_y = self.value_slider_center[1] - orig_pos_y
-
-        w = max(rel_range_x + w1, rel_value_x + w2)
-        h = max(rel_range_y + h1, rel_value_y + h2)
-
-        return np.array([w, h])
+        Returns
+        -------
+        tuple of ndarray
+            Offsets of the range slider and the value slider from the
+            top-left corner of the component.
+        """
+        range_center = np.asarray(self.range_slider_center, dtype=float)
+        value_center = np.asarray(self.value_slider_center, dtype=float)
+        origin = np.minimum(range_center, value_center)
+        return range_center - origin, value_center - origin
 
     def _update_actors_position(self):
         """Update the position of the internal sliders."""
         pos = self.get_position(x_anchor=Anchor.LEFT, y_anchor=Anchor.TOP)
-        orig_pos_x = min(self.range_slider_center[0], self.value_slider_center[0])
-        orig_pos_y = min(self.range_slider_center[1], self.value_slider_center[1])
-
-        rel_range = np.array(
-            [
-                self.range_slider_center[0] - orig_pos_x,
-                self.range_slider_center[1] - orig_pos_y,
-            ]
-        )
-        rel_value = np.array(
-            [
-                self.value_slider_center[0] - orig_pos_x,
-                self.value_slider_center[1] - orig_pos_y,
-            ]
-        )
-
-        self.range_slider.set_position(pos + rel_range)
-        self.value_slider.set_position(pos + rel_value)
+        range_offset, value_offset = self._slider_offsets()
+        self.range_slider.set_position(pos + range_offset)
+        self.value_slider.set_position(pos + value_offset)
 
     def range_slider_handle_move_callback(self, ui):
         """
@@ -4030,7 +4024,9 @@ class TreeNode2D(UI):
         Whether clicking the title row selects the node. If False, clicking
         the title row of a node with children expands or collapses it.
     auto_resize : bool, optional
-        If True, the node changes its height to fit its content.
+        If True, the node changes its height to fit its content. If False,
+        the node keeps the height it is given and grows only when its
+        content needs more room.
     multiselect : bool, optional
         If False, selecting a node deselects every other node of the tree.
         Only the value of the topmost node is used.
@@ -4092,7 +4088,7 @@ class TreeNode2D(UI):
             )
         self._button_position = button_position
         self._initial_children = children or []
-        self.node_icons = {"unselected": icon, "selected": selected_icon}
+        self._icon_paths = {"unselected": icon, "selected": selected_icon}
         self._icon_images = {
             "unselected": _load_icon(icon),
             "selected": _load_icon(selected_icon),
@@ -4347,12 +4343,15 @@ class TreeNode2D(UI):
         Returns
         -------
         int
-            Height of the content plus the title row with ``auto_resize``,
-            or the current height otherwise.
+            Height of the content plus the title row with ``auto_resize``.
+            Otherwise the current height, or more when the content needs it.
         """
+        content_height = self.children_size() + self.child_height
         if self._auto_resize:
-            return self.children_size() + self.child_height
-        return self.title_panel.size[1] + self.content_panel.size[1]
+            return content_height
+        return max(
+            self.title_panel.size[1] + self.content_panel.size[1], content_height
+        )
 
     def _fit_to_content(self):
         """Lay out the node again and report the change in height."""
@@ -4844,6 +4843,7 @@ class TreeNode2D(UI):
             True to show the expand/collapse button.
         """
         self._expandable = expandable
+        self.button.toggled = self.expanded
         self._update_title_visibility()
         self._layout_title(self.title_panel.size[0] - self.right_margin)
 
@@ -5005,7 +5005,35 @@ class TreeNode2D(UI):
         str or ndarray or None
             Path or image data of the icon.
         """
-        return self.node_icons["unselected"]
+        return self._icon_paths["unselected"]
+
+    @property
+    def selected_icon(self):
+        """
+        Get the icon shown while the node is selected.
+
+        Returns
+        -------
+        str or ndarray or None
+            Path or image data of the selected icon.
+        """
+        return self._icon_paths["selected"]
+
+    @selected_icon.setter
+    def selected_icon(self, selected_icon):
+        """
+        Set the icon shown while the node is selected.
+
+        Parameters
+        ----------
+        selected_icon : str or ndarray or None
+            Path, URL or image data of the selected icon. None removes it,
+            so ``icon`` is shown in both states.
+        """
+        self._icon_paths["selected"] = selected_icon
+        self._icon_images["selected"] = _load_icon(selected_icon)
+        self._show_icon()
+        self._layout_title(self.title_panel.size[0] - self.right_margin)
 
     @icon.setter
     def icon(self, icon):
@@ -5031,10 +5059,10 @@ class TreeNode2D(UI):
             Icon shown while the node is selected. When not given, the
             current selected icon is kept.
         """
-        self.node_icons["unselected"] = icon
+        self._icon_paths["unselected"] = icon
         self._icon_images["unselected"] = _load_icon(icon)
         if selected_icon is not None:
-            self.node_icons["selected"] = selected_icon
+            self._icon_paths["selected"] = selected_icon
             self._icon_images["selected"] = _load_icon(selected_icon)
 
         self._show_icon()
@@ -5188,7 +5216,7 @@ class Tree2D(UI):
     size : (int, int), optional
         Width and height of the Tree2D in pixels, including the scroll bar.
     node_height : int, optional
-        Space taken by each node vertically.
+        Height of the title row of each node, in pixels.
     color : list of 3 floats, optional
         Background color of the title row and body of the Tree2D. Node rows
         keep the TreeNode2D default color.
@@ -5272,7 +5300,7 @@ class Tree2D(UI):
 
     def _setup(self):
         """Setup this UI element."""
-        self.generate_tree(self._structure)
+        self._generate_tree(self._structure)
 
         self.base_node = TreeNode2D(
             label=self._tree_name,
@@ -5686,7 +5714,7 @@ class Tree2D(UI):
                     "Node labels must be unique."
                 )
 
-    def generate_tree(self, structure):
+    def _generate_tree(self, structure):
         """
         Generate the structure of the Tree2D.
 
@@ -5810,7 +5838,9 @@ class Tree2D(UI):
         KeyError
             If no node has the label ``node``.
         ValueError
-            If a label of the added nodes is already used in the tree.
+            If a label of the added nodes is already used in the tree, the
+            node would hold both child nodes and UI elements, or ``coords``
+            are not whole pixel values.
         """
         target = self.get_node(node)
         if isinstance(content, TreeNode2D):
