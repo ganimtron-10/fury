@@ -3933,9 +3933,14 @@ def _sub_elements(ui_element):
     Returns
     -------
     list
-        Its children and, for a panel, the elements placed on it.
+        Its children, the elements placed on it for a panel, and the UI
+        child of a button, which a button only lists once its actors are
+        read.
     """
     elements = list(ui_element._children)
+    child = getattr(ui_element, "child", None)
+    if isinstance(child, UI):
+        elements.append(child)
     elements.extend(child for child, _ in getattr(ui_element, "element_offsets", []))
     return elements
 
@@ -5760,7 +5765,8 @@ class Tree2D(UI):
         node : str
             Label of the node.
         content : UI or TreeNode2D
-            The content that is to be added in the node.
+            The content that is to be added in the node. A TreeNode2D keeps
+            its own indent, button position and icon.
         coords : (int, int), optional
             Offset in pixels of a UI element's top-left corner from the
             top-left corner of the node's indented content area. Not used for

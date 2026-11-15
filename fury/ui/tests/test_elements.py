@@ -3117,6 +3117,31 @@ def test_ui_tree2d_content_added_after_show_is_drawn(ui_scene):
     assert image[top : top + 20, left : left + 60, :3].max() > 200
 
 
+def test_ui_tree2d_buttons_added_after_show_are_drawn(ui_scene):
+    """Widgets with textured buttons added to a shown tree draw their buttons."""
+    show_manager, scene = ui_scene
+    tree = ui.Tree2D(
+        structure=[{"Root": ["Combo", "Button"]}],
+        position=TREE_POSITION,
+        size=(300, 400),
+    )
+    scene.add(tree)
+    combobox = ui.ComboBox2D(items=["A", "B"], size=(200, 100))
+    button = ui.TexturedButton2D(
+        states={"default": read_viz_icons(fname="plus.png")}, size=(30, 30)
+    )
+    tree.add_content("Combo", combobox)
+    tree.add_content("Button", button)
+    for label in ("Root", "Combo", "Button"):
+        tree.get_node(label).toggle_view()
+
+    _render(show_manager)
+    for widget in (combobox.drop_down_button, button):
+        x, y = _center(widget)
+        pick = show_manager.renderer.get_pick_info((x, y))["world_object"]
+        assert pick is widget.child.actor
+
+
 def test_ui_tree2d_long_labels_stay_in_their_row(ui_scene):
     """Long labels and deep rows are shortened instead of overflowing."""
     show_manager, scene = ui_scene
