@@ -4426,10 +4426,8 @@ class TreeNode2D(UI):
         if any(isinstance(child, TreeNode2D) for child in self._child_nodes):
             raise ValueError("A tree node with child nodes cannot have UI elements.")
         coords = np.asarray(coords, dtype=float)
-        if coords.shape != (2,) or np.any(coords < 0) or np.any(coords % 1):
-            raise ValueError(
-                f"coords must be two non-negative pixel values, not {coords}."
-            )
+        if coords.shape != (2,) or np.any(coords % 1):
+            raise ValueError(f"coords must be two whole pixel values, not {coords}.")
 
         self._child_nodes.append(element)
         self.content_panel.add_element(
@@ -4510,20 +4508,9 @@ class TreeNode2D(UI):
         self.title_panel.update_element(self.label_image, (int(icon_x), 0))
         self.title_panel.update_element(self.label_text, (int(text_x), 0))
 
-    def toggle_view(self, *, event=None):
-        """
-        Toggle the view of the node.
-
-        Parameters
-        ----------
-        event : PointerEvent, optional
-            The pygfx pointer event.
-        """
-        if event is not None:
-            event.stop_propagation()
+    def toggle_view(self):
+        """Expand the node if it is collapsed, and collapse it otherwise."""
         self.expanded = not self.expanded
-        self._update_actors_position()
-        self.on_size_change(self)
 
     def children_size(self):
         """
@@ -4542,7 +4529,7 @@ class TreeNode2D(UI):
         for element, offset in self.content_panel.element_offsets:
             if any(element is added for added in elements):
                 bottom = max(bottom, offset[1] + element.size[1])
-        return int(bottom + self.child_indent)
+        return int(bottom + self.child_height // 2)
 
     def set_visibility(self, visibility):
         """
@@ -4803,7 +4790,8 @@ class TreeNode2D(UI):
         """
         Set the expanded state of the node.
 
-        Collapsing a node also collapses its child nodes.
+        Collapsing a node also collapses its child nodes. The node holding
+        this one is told about the change in height.
 
         Parameters
         ----------
@@ -4818,6 +4806,8 @@ class TreeNode2D(UI):
                 if isinstance(child, TreeNode2D):
                     child.expanded = False
         self.set_content_visibility(self._visible and expanded)
+        self._update_actors_position()
+        self.on_size_change(self)
 
     @property
     def icon(self):
@@ -5017,15 +5007,7 @@ class Tree2D(UI):
 
     Attributes
     ----------
-    structure : list of dicts
-        [{'node': ['child', 'child']}, .....]
-    tree_name : str
-        Name of the tree.
-    node_height : int
-        Space taken by each node vertically.
-    indent : int
-        Global indentation for the parent/child nodes.
-    nodes : list of :class: `TreeNode2D`
+    nodes : list of TreeNode2D
         Top-level nodes of the Tree2D.
     nodes_dict : dict
         All nodes of the Tree2D by label.
@@ -5061,7 +5043,6 @@ class Tree2D(UI):
         self.tree_name = tree_name
         self.indent = indent
         self._nodes = []
-        self._nodes_dict = {}
         self.node_height = node_height
         self.content_size = size
         self._multiselect = multiselect
@@ -5092,7 +5073,7 @@ class Tree2D(UI):
             expanded=True,
             selectable=False,
             indent=self.indent,
-            child_indent=self.indent,
+            child_indent=0,
             child_height=self.node_height,
             color=self._tree_color,
             opacity=self._tree_opacity,
@@ -5233,12 +5214,18 @@ class Tree2D(UI):
             for element in _collect_ui_elements(self.base_node)
             if id(element) not in title_ids
         ]
-        self._clip_elements(title_elements, top, bottom)
-        self._clip_elements(row_elements, top + self.base_node.child_height, bottom)
+        right = self.get_position()[0] + self.content_size[0]
+        self._clip_elements(title_elements, top, bottom, right)
+        self._clip_elements(
+            row_elements,
+            top + self.base_node.child_height,
+            bottom,
+            right - self.scroll_bar.size[0],
+        )
 
-    def _clip_elements(self, elements, top, bottom):
+    def _clip_elements(self, elements, top, bottom, right):
         """
-        Hide the parts of UI elements outside a horizontal band of the tree.
+        Hide the parts of UI elements outside a band of the tree.
 
         Text is drawn in screen space, so the clipping test only sees its
         anchor point. Its vertical planes are moved by the distance from the
@@ -5253,15 +5240,16 @@ class Tree2D(UI):
             Top of the band, in canvas pixels from the top.
         bottom : float
             Bottom of the band, in canvas pixels from the top.
+        right : float
+            Right edge of the band, in canvas pixels from the left.
         """
         left = self.get_position()[0]
-        width = self.content_size[0]
         canvas_height = UIContext.canvas_size[1]
         canvas_top = canvas_height - top
         canvas_bottom = canvas_height - bottom
         clipping_planes = [
             (1, 0, 0, left),
-            (-1, 0, 0, -(left + width)),
+            (-1, 0, 0, -right),
             (0, 1, 0, canvas_bottom),
             (0, -1, 0, -canvas_top),
         ]
@@ -5433,23 +5421,11 @@ class Tree2D(UI):
         """
         labels = [new_node.label for new_node in [node, *node.iter_nodes()]]
         for label in labels:
-            if label in self._nodes_dict or labels.count(label) > 1:
+            if label in self.nodes_dict or labels.count(label) > 1:
                 raise ValueError(
                     f"The label {label!r} is already used in the tree. "
                     "Node labels must be unique."
                 )
-
-    def _register_node(self, node):
-        """
-        Add a node and the nodes below it to ``nodes_dict``.
-
-        Parameters
-        ----------
-        node : TreeNode2D
-            The node to register.
-        """
-        for new_node in [node, *node.iter_nodes()]:
-            self._nodes_dict[new_node.label] = new_node
 
     def generate_tree(self, structure):
         """
@@ -5478,19 +5454,17 @@ class Tree2D(UI):
                 )
             parent_label, child_labels = next(iter(entry.items()))
 
-            if parent_label in self._nodes_dict:
-                parent_node = self._nodes_dict[parent_label]
+            if parent_label in self.nodes_dict:
+                parent_node = self.nodes_dict[parent_label]
             else:
                 parent_node = self._make_node(parent_label)
                 self._check_labels(parent_node)
-                self._register_node(parent_node)
                 self._nodes.append(parent_node)
 
             for child_label in child_labels:
                 child_node = self._make_node(child_label)
                 self._check_labels(child_node)
                 parent_node.add_node(child_node)
-                self._register_node(child_node)
 
     def _make_node(self, label):
         """
@@ -5508,6 +5482,8 @@ class Tree2D(UI):
         """
         return TreeNode2D(
             label=label,
+            indent=self.indent,
+            child_indent=0,
             multiselect=self.multiselect,
             button_position=self.button_position,
             icon=self._icon,
@@ -5573,7 +5549,6 @@ class Tree2D(UI):
         if isinstance(content, TreeNode2D):
             self._check_labels(content)
             target.add_node(content)
-            self._register_node(content)
         else:
             target.add_element(content, coords=coords)
 
@@ -5596,7 +5571,7 @@ class Tree2D(UI):
         KeyError
             If no node has this label.
         """
-        return self._nodes_dict[node]
+        return self.nodes_dict[node]
 
     @property
     def selected_nodes(self):
@@ -5632,7 +5607,11 @@ class Tree2D(UI):
         dict
             Dict with label, node as key, value.
         """
-        return self._nodes_dict
+        return {
+            node.label: node
+            for top_node in self._nodes
+            for node in [top_node, *top_node.iter_nodes()]
+        }
 
 
 # class FileMenu2D(UI):

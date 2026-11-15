@@ -7,6 +7,7 @@ import pytest
 
 from fury import ui, window
 from fury.actor import Mesh
+from fury.data import read_viz_icons
 from fury.testing import assert_visibility
 from fury.ui.helpers import Anchor
 
@@ -818,3 +819,15 @@ def test_textblock2d_solid_text_over_background_snapshot():
 
     assert white_box > 0
     assert dark_text > 0
+
+
+def test_button2d_lists_ui_child_once():
+    """Reading a button's actors does not add its UI child again."""
+    button = ui.TexturedButton2D(
+        states={"default": read_viz_icons(fname="plus.png")}, size=(20, 20)
+    )
+
+    for _ in range(3):
+        _ = button.actors
+
+    npt.assert_equal(button._children.count(button.child), 1)

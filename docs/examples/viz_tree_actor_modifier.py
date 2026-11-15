@@ -42,8 +42,9 @@ tree = ui.Tree2D(
 ###############################################################################
 # Creating the Actors
 #
-# The actors share one center, and only the selected one is shown. Axes at the
-# origin of the scene show where the actors are.
+# The actors share one center, to the right of the scene's origin, and only
+# the selected one is shown. Axes mark the origin, so the camera frames the
+# actors beside the tree.
 
 center = np.array([4.0, 0.0, 0.0])
 initial_colors = {

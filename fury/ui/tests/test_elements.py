@@ -3050,8 +3050,6 @@ def test_ui_treenode2d_rejects_bad_arguments():
         node.add_node(ui.Rectangle2D(size=(10, 10)))
     with npt.assert_raises(ValueError):
         node.add_element(ui.Rectangle2D(size=(10, 10)), coords=(0.5, 0.5))
-    with npt.assert_raises(ValueError):
-        node.add_element(ui.Rectangle2D(size=(10, 10)), coords=(-5, 0))
 
     node.add_element(ui.Rectangle2D(size=(10, 10)), coords=(5, 5))
     with npt.assert_raises(ValueError):
@@ -3084,7 +3082,7 @@ def test_ui_tree2d_add_content_keeps_node_reachable(ui_scene):
     assert _shown(content)
     npt.assert_array_equal(
         content.get_position() - b1_node.content_panel.get_position(),
-        (b1_node._content_x() + 10, 5),
+        (b1_node.indent + b1_node.child_indent + 10, 5),
     )
 
     leaf_content = ui.Rectangle2D(size=(60, 40), color=(0, 1, 0))
@@ -3138,8 +3136,9 @@ def test_ui_tree2d_long_labels_stay_in_their_row(ui_scene):
     assert node.label_text.message != long_label
     npt.assert_equal(node.size[1], node.child_height)
 
-    tree.get_node("L0").label = "New"
-    assert tree.get_node("L0").label_text.message == "New"
+    top_node = tree.get_node("L0")
+    top_node.label = "New"
+    assert top_node.label_text.message == "New"
 
 
 def test_ui_treenode2d_child_height_relayouts():
@@ -3209,6 +3208,92 @@ def test_ui_tree2d_body_fills_visible_area(ui_scene):
     left, top = TREE_POSITION
     bottom_pixel = image[top + TREE_SIZE[1] - 5, left + 5, :3]
     npt.assert_allclose(bottom_pixel, np.array((0.1, 0.3, 0.5)) * 255, atol=3)
+
+
+def test_ui_tree2d_collapse_and_expand_keep_rows_packed(ui_scene):
+    """Rows stay packed after collapsing an ancestor and expanding it again."""
+    show_manager, scene = ui_scene
+    tree = ui.Tree2D(
+        structure=[{"R": ["A", "B"]}, {"A": ["a1", "a2", "a3"]}],
+        position=TREE_POSITION,
+        size=TREE_SIZE,
+    )
+    scene.add(tree)
+    r_node, a_node, b_node = (tree.get_node(label) for label in ("R", "A", "B"))
+
+    for node in (r_node, a_node, r_node, r_node):
+        _click_at(show_manager, *_center(node.button))
+
+    assert r_node.expanded and not a_node.expanded
+    npt.assert_equal(
+        b_node.get_position()[1], a_node.get_position()[1] + a_node.child_height
+    )
+    npt.assert_equal(r_node.size[1], 3 * r_node.child_height)
+
+
+def test_ui_tree2d_expanded_setter_updates_layout_and_scrolling():
+    """Setting expanded in code moves later rows and turns scrolling on."""
+    tree = ui.Tree2D(
+        structure=[{"R": ["A", "B"] + [f"C{i}" for i in range(12)]}, {"A": ["a1"]}],
+        size=TREE_SIZE,
+    )
+    r_node, a_node, b_node = (tree.get_node(label) for label in ("R", "A", "B"))
+
+    r_node.expanded = True
+    a_node.expanded = True
+
+    npt.assert_equal(
+        b_node.get_position()[1], a_node.get_position()[1] + 2 * a_node.child_height
+    )
+    assert tree.scroll_step_size > 0
+    assert _shown(tree.scroll_bar)
+
+
+def test_ui_tree2d_lookup_follows_renames_and_added_nodes():
+    """nodes_dict follows renamed nodes and nodes added through TreeNode2D."""
+    tree = ui.Tree2D(structure=[{"A": ["a1"]}])
+
+    tree.get_node("a1").label = "renamed"
+    tree.get_node("A").add_node(ui.TreeNode2D(label="direct"))
+
+    npt.assert_equal(sorted(tree.nodes_dict), ["A", "direct", "renamed"])
+    tree.add_content("A", ui.TreeNode2D(label="a1"))
+    assert tree.get_node("a1").label == "a1"
+
+
+def test_ui_tree2d_indent_applies_to_every_level():
+    """Each nesting level is indented by the tree's indent."""
+    tree = ui.Tree2D(structure=[{"A": ["a1"]}, {"a1": ["x"]}], indent=40)
+    tree.get_node("A").toggle_view()
+    tree.get_node("a1").toggle_view()
+
+    x_positions = [tree.get_node(label).get_position()[0] for label in ("A", "a1", "x")]
+
+    npt.assert_array_equal(np.diff(x_positions), [40, 40])
+
+
+def test_ui_tree2d_wide_content_leaves_scroll_bar_clickable(ui_scene):
+    """Content wider than the tree is clipped before the scroll bar."""
+    show_manager, scene = ui_scene
+    tree = ui.Tree2D(
+        structure=[{"Root": ["Wide"] + [f"Row {i}" for i in range(12)]}],
+        position=TREE_POSITION,
+        size=TREE_SIZE,
+    )
+    wide = ui.Rectangle2D(size=(400, 300), color=(0, 1, 0))
+    tree.add_content("Wide", wide)
+    scene.add(tree)
+    tree.get_node("Root").toggle_view()
+    tree.get_node("Wide").toggle_view()
+
+    for _ in range(2):
+        _wheel_at(show_manager, *(wide.get_position() + (10, 60)), dy=100)
+    x, y = _center(tree.scroll_bar)
+    assert wide.get_position()[1] < y < wide.get_position()[1] + wide.size[1]
+    _render(show_manager)
+    pick = show_manager.renderer.get_pick_info((x, y))["world_object"]
+
+    assert pick is tree.scroll_bar.actor
 
 
 def test_ui_tree2d_click_selects_one_node_without_multiselect(ui_scene):
