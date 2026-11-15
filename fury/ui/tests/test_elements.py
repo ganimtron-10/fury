@@ -5,10 +5,11 @@ import warnings
 
 import numpy as np
 import numpy.testing as npt
+import pytest
 
 from fury import ui, window
 from fury.data import DATA_DIR, fetch_viz_icons, fetch_viz_new_icons, read_viz_icons
-from fury.lib import KeyboardEvent
+from fury.lib import KeyboardEvent, WheelEvent
 from fury.testing import VisualTest
 from fury.ui.helpers import Anchor
 
@@ -2829,19 +2830,188 @@ def test_ui_tree2d_wheel_scrolling_logic():
 
     npt.assert_equal(tree.view_offset, 0)
 
-    class MockWheelEvent:
-        def __init__(self, dy):
-            self.dy = dy
-
-    event_up = MockWheelEvent(dy=1)
+    event_up = WheelEvent(type=window.EventType.WHEEL, x=0, y=0, dx=0, dy=1)
     tree.wheel_scroll(event_up)
 
     assert tree.view_offset == tree.base_node.child_height
 
-    event_down = MockWheelEvent(dy=-1)
+    event_down = WheelEvent(type=window.EventType.WHEEL, x=0, y=0, dx=0, dy=-1)
     tree.wheel_scroll(event_down)
 
     npt.assert_equal(tree.view_offset, 0)
+
+
+TREE_POSITION = (50, 50)
+TREE_SIZE = (240, 200)
+
+
+@pytest.fixture
+def expanded_tree():
+    """Yield an offscreen ShowManager with an expanded 15-row Tree2D."""
+    ui.UIContext.hot_ui = None
+    ui.UIContext.active_ui = None
+    scene = window.Scene(background=(0, 0, 0))
+    show_manager = window.ShowManager(
+        scene=scene, size=(400, 600), window_type="offscreen", pixel_ratio=1
+    )
+    tree = ui.elements.Tree2D(
+        structure=[{"Root": [f"Child {i}" for i in range(15)]}],
+        tree_name="Tree",
+        position=TREE_POSITION,
+        size=TREE_SIZE,
+        color=(0.1, 0.3, 0.5),
+        opacity=1.0,
+    )
+    scene.add(tree)
+    tree.select_node("Root").toggle_view()
+    yield show_manager, tree
+    show_manager.close()
+    ui.UIContext.hot_ui = None
+    ui.UIContext.active_ui = None
+
+
+def _render(show_manager):
+    """Render the scene and return the snapshot."""
+    show_manager.render()
+    show_manager.window.draw()
+    return show_manager.snapshot()
+
+
+def _wheel_at(show_manager, x, y, dy):
+    """Hover (x, y), then dispatch one wheel event to what is drawn there."""
+    _render(show_manager)
+    target = show_manager.renderer.get_pick_info((x, y))["world_object"]
+    show_manager.renderer.dispatch_event(
+        window.PointerEvent(
+            type=window.EventType.POINTER_ENTER, x=x, y=y, target=target
+        )
+    )
+    show_manager.renderer.dispatch_event(
+        WheelEvent(type=window.EventType.WHEEL, x=x, y=y, dx=0, dy=dy, target=target)
+    )
+
+
+def test_ui_tree2d_clips_rows_to_viewport(expanded_tree):
+    """Rows past the bottom of the Tree2D are not drawn or picked."""
+    show_manager, tree = expanded_tree
+    left, top = TREE_POSITION
+    width, height = TREE_SIZE
+    tree_actors = {
+        actor
+        for element in ui.elements._collect_ui_elements(tree)
+        for actor in element.actors
+    }
+
+    image = _render(show_manager)
+    below = image[top + height + 2 :, left : left + width, :3]
+    inside = image[top : top + height, left : left + width, :3]
+
+    assert tree.scroll_step_size > 0
+    assert inside.any()
+    assert not below.any()
+    pick_below = show_manager.renderer.get_pick_info(
+        (left + width / 2, top + height + 20)
+    )
+    assert pick_below["world_object"] not in tree_actors
+
+
+@pytest.mark.parametrize("target", ["label", "button", "background", "scrollbar"])
+def test_ui_tree2d_one_wheel_event_scrolls_one_row(expanded_tree, target):
+    """One wheel event over any part of the tree scrolls exactly one row."""
+    show_manager, tree = expanded_tree
+    child = tree.select_node("Child 0")
+    if target == "label":
+        x, y = child.label_text.get_position() + (10, child.label_text.size[1] / 2)
+    elif target == "button":
+        x, y = child.button.get_position() + child.button.size / 2
+    elif target == "background":
+        x, y = tree.get_position() + (10, tree.size[1] - 10)
+    else:
+        x, y = tree.scroll_bar.get_position() + tree.scroll_bar.size / 2
+
+    _wheel_at(show_manager, x, y, dy=100)
+
+    npt.assert_equal(tree.view_offset, tree.base_node.child_height)
+
+
+def test_ui_tree2d_scrolling_keeps_button_children(expanded_tree):
+    """Scrolling does not grow the internal child list of node buttons."""
+    show_manager, tree = expanded_tree
+    button = tree.select_node("Child 0").button
+    children_before = len(button._children)
+
+    for dy in (100, 100, -100, -100):
+        _wheel_at(show_manager, *(tree.get_position() + (10, 100)), dy=dy)
+
+    npt.assert_equal(len(button._children), children_before)
+
+
+def test_ui_tree2d_drag_while_scrolled_keeps_position(expanded_tree):
+    """Dragging a scrolled tree moves it by the pointer distance only."""
+    show_manager, tree = expanded_tree
+    _wheel_at(show_manager, *(tree.get_position() + (10, 100)), dy=100)
+    start = tree.get_position().copy()
+
+    press = window.PointerEvent(
+        x=60, y=60, type=window.EventType.POINTER_DOWN, target="target"
+    )
+    tree.base_node.left_button_pressed(press)
+    drag = window.PointerEvent(
+        x=70, y=75, type=window.EventType.POINTER_MOVE, target="target"
+    )
+    tree._tree_drag_callback(drag)
+
+    npt.assert_array_almost_equal(tree.get_position(), start + (10, 15))
+    npt.assert_equal(tree.view_offset, tree.base_node.child_height)
+
+
+def test_ui_tree2d_added_content_is_scrollable_and_clipped():
+    """Content added after construction updates scrolling and is clipped."""
+    ui.UIContext.hot_ui = None
+    tree = ui.elements.Tree2D(
+        structure=[{"Root": ["Leaf"]}],
+        tree_name="Tree",
+        position=TREE_POSITION,
+        size=TREE_SIZE,
+    )
+    tree.select_node("Root").toggle_view()
+    tree.select_node("Leaf").toggle_view()
+    assert tree.scroll_step_size == 0
+    content = ui.Rectangle2D(size=(100, 400), color=(1, 0, 0))
+
+    tree.add_content("Leaf", content, (10, 0))
+
+    assert tree.scroll_step_size > 0
+    assert len(content.actor.material.clipping_planes) == 4
+    tree.wheel_scroll(WheelEvent(type=window.EventType.WHEEL, x=0, y=0, dx=0, dy=1))
+    npt.assert_equal(tree.view_offset, tree.base_node.child_height)
+
+
+def test_ui_tree2d_resize_updates_viewport_and_scrollbar(expanded_tree):
+    """Resizing the tree updates its visible area and turns scrolling on or off."""
+    show_manager, tree = expanded_tree
+    width = TREE_SIZE[0]
+    sb_width = int(width / 30)
+    rows_height = tree.base_node.size[1]
+    _wheel_at(show_manager, *(tree.get_position() + (10, 100)), dy=100)
+    assert tree.view_offset > 0
+
+    tree.resize((width, rows_height + 20))
+    _wheel_at(show_manager, *(tree.get_position() + (10, 100)), dy=100)
+
+    npt.assert_array_equal(tree.size, (width + sb_width, rows_height + 20))
+    npt.assert_equal(tree.scroll_step_size, 0)
+    npt.assert_equal(tree.view_offset, 0)
+    image = _render(show_manager)
+    left, top = tree.get_position()
+    last_row = image[int(top + rows_height) - 12, int(left) : int(left + width), :3]
+    assert last_row.any()
+
+    tree.resize((width, 100))
+    _wheel_at(show_manager, *(tree.get_position() + (10, 50)), dy=100)
+
+    assert tree.scroll_step_size > 0
+    npt.assert_equal(tree.view_offset, tree.base_node.child_height)
 
 
 def _click_event():
