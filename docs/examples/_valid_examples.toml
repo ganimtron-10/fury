@@ -54,6 +54,7 @@ files = [
     "viz_billboard_spheres.py",
     "viz_ellipsoids.py",
     "viz_streamtube.py",
+    "viz_city_drone_shot.py",
 ]
 
 [ui]
