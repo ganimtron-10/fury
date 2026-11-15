@@ -59,54 +59,57 @@ classic_panel = settings_panel("Classic", (15, 40))
 # slider. ``set_theme`` makes it the global theme for elements created
 # afterwards.
 
-graphite = ui.builtin_theme("classic").derive(
-    name="graphite",
+dark = ui.builtin_theme("classic").derive(
+    name="dark",
     items={
         "UI": {"font_family": "Noto Sans"},
-        "Panel2D": {"color": "#17191E", "opacity": 1.0},
-        "TextBlock2D": {"color": "#E6E8EB", "font_size": 16},
+        "Panel2D": {"color": "#1C1D20", "opacity": 1.0},
+        "TextBlock2D": {"color": "#ECEDEF", "font_size": 16},
         "TextButton2D": {
             "font_size": 15,
-            "text_color": "#0B1020",
+            "text_color": "#141518",
             "states": {
-                "default": "#8AB4FF",
-                "hover": "#A5C5FF",
-                "pressed": "#6E96E0",
-                "disabled": "#3A3F4A",
+                "default": "#F2F3F5",
+                "hover": "#FFFFFF",
+                "pressed": "#C9CBD0",
+                "disabled": "#2C2E33",
             },
         },
         "Slider2D": {
-            "track_color": "#3A3F4A",
-            "handle_color": "#E6E8EB",
-            "handle_active_color": "#8AB4FF",
+            "track_color": "#2C2E33",
+            "handle_color": "#ECEDEF",
+            "handle_active_color": "#FFFFFF",
             "font_size": 13,
         },
     },
 )
-ui.set_theme(graphite)
-graphite_panel = settings_panel("Graphite", (225, 40))
+ui.set_theme(dark)
+dark_panel = settings_panel("Dark", (225, 40))
 
 ##############################################################################
 # ``theme_scope`` applies a theme only to elements created inside the
 # ``with`` block, like a temporary style in an immediate mode UI. Sub-widgets
 # built by a composite widget use the same theme.
 
-ember = graphite.derive(
-    name="ember",
+warm = dark.derive(
+    name="warm",
     items={
-        "Slider2D": {"handle_active_color": "#FF8A3D", "track_color": "#5A3420"},
+        "Panel2D": {"color": "#1A1716"},
+        "TextBlock2D": {"color": "#F2ECE8"},
+        "Slider2D": {"handle_active_color": "#FF7A45", "track_color": "#2E2926"},
         "TextButton2D": {
+            "text_color": "#1A0A03",
             "states": {
-                "default": "#FF8A3D",
-                "hover": "#FFA466",
-                "pressed": "#D96E26",
-                "disabled": "#3A3F4A",
+                "default": "#FF7A45",
+                "hover": "#FF9466",
+                "pressed": "#D9622F",
+                "disabled": "#2E2926",
             },
         },
     },
 )
-with ui.theme_scope(ember):
-    ember_panel = settings_panel("Ember", (435, 40))
+with ui.theme_scope(warm):
+    warm_panel = settings_panel("Warm", (435, 40))
 
 ##############################################################################
 # ``Theme.save`` and ``Theme.load`` store a theme in a JSON file, which makes
@@ -118,7 +121,7 @@ ui.set_theme("classic")
 # Add the panels to a scene and show it.
 
 scene = Scene()
-scene.add(classic_panel, graphite_panel, ember_panel)
+scene.add(classic_panel, dark_panel, warm_panel)
 
 show_manager = ShowManager(scene=scene, size=(640, 300), title="FURY UI Themes Example")
 show_manager.start()
