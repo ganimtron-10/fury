@@ -4055,3 +4055,629 @@ def test_graphite_list_item_hover(offscreen):
     npt.assert_allclose(_draw(show_m)[55, 150], _hex(GRAPHITE["fill"]), atol=2)
     send_pointer(show_m, "pointer_move", (5, 5))
     npt.assert_allclose(_draw(show_m)[55, 150], _hex(GRAPHITE["background"]), atol=2)
+
+
+def _pixel(image, point):
+    """
+    Read a pixel of an image at a canvas point.
+
+    Parameters
+    ----------
+    image : ndarray
+        Image indexed as ``image[y, x]``.
+    point : array_like
+        Point (x, y), rounded to whole pixels.
+
+    Returns
+    -------
+    ndarray
+        RGB values in [0, 255].
+    """
+    x, y = (int(round(value)) for value in point)
+    return image[y, x]
+
+
+def _track_ends(switch):
+    """
+    Get a point near each end of a switch track, where the knob may sit.
+
+    Parameters
+    ----------
+    switch : Switch2D
+        The switch.
+
+    Returns
+    -------
+    tuple of ndarray
+        The left and right points (x, y).
+    """
+    left, top = switch.track.get_position()
+    width, height = switch.track.size
+    middle = top + height / 2
+    inset = switch.knob.size[0] / 2 + 3
+    return np.array([left + inset, middle]), np.array([left + width - inset, middle])
+
+
+def test_switch_click_on_track_toggles(offscreen):
+    """A real click on the track turns the switch on, then off again."""
+    changes = []
+    with ui.theme_scope("graphite"):
+        switch = ui.Switch2D(position=(40, 40))
+    switch.on_change = lambda widget: changes.append(widget.checked)
+    show_m = offscreen(switch)
+    left, right = _track_ends(switch)
+
+    image = _draw(show_m)
+    npt.assert_allclose(_pixel(image, left), _hex(GRAPHITE["muted"]), atol=3)
+    npt.assert_allclose(_pixel(image, right), _hex(GRAPHITE["fill"]), atol=3)
+
+    click(show_m, _center(switch.track))
+    assert switch.checked
+    assert changes == [True]
+    image = _draw(show_m)
+    npt.assert_allclose(_pixel(image, left), _hex("#FFFFFF"), atol=3)
+    npt.assert_allclose(_pixel(image, right), _hex("#141518"), atol=3)
+
+    click(show_m, _center(switch.knob))
+    assert not switch.checked
+    assert changes == [True, False]
+
+
+def test_switch_click_on_label_toggles(offscreen):
+    """Clicking the label toggles the switch like clicking the track."""
+    changes = []
+    switch = ui.Switch2D(label="Shading", position=(20, 40))
+    switch.on_change = changes.append
+    show_m = offscreen(switch)
+
+    click(show_m, _center(switch.label))
+    assert switch.checked
+    assert changes == [switch]
+    click(show_m, _center(switch.label))
+    assert not switch.checked
+    assert len(changes) == 2
+
+
+def test_switch_setter_fires_once_and_updates_render(offscreen):
+    """Setting the state redraws the knob and calls on_change only on change."""
+    changes = []
+    switch = ui.Switch2D(position=(40, 40))
+    switch.on_change = changes.append
+    show_m = offscreen(switch)
+    left, right = _track_ends(switch)
+
+    switch.checked = False
+    assert changes == []
+    switch.checked = True
+    switch.checked = True
+    assert changes == [switch]
+
+    image = _draw(show_m)
+    npt.assert_allclose(_pixel(image, right), (255, 255, 255), atol=3)
+    npt.assert_allclose(_pixel(image, left), (0, 0, 255), atol=3)
+
+
+def test_switch_disabled_ignores_clicks(offscreen):
+    """A disabled switch keeps its state and shows the disabled colors."""
+    changes = []
+    with ui.theme_scope("graphite"):
+        switch = ui.Switch2D(label="Axes", enabled=False, position=(40, 40))
+    switch.on_change = changes.append
+    show_m = offscreen(switch)
+    _, right = _track_ends(switch)
+
+    click(show_m, _center(switch.track))
+    click(show_m, _center(switch.label))
+    assert not switch.checked
+    assert changes == []
+    npt.assert_allclose(
+        _pixel(_draw(show_m), right), _hex(GRAPHITE["background"]), atol=3
+    )
+    npt.assert_allclose(switch.label.color, _hex(GRAPHITE["muted"]) / 255, atol=1e-3)
+
+    switch.enabled = True
+    click(show_m, _center(switch.track))
+    assert switch.checked
+    assert changes == [switch]
+
+
+def test_switch_hover_styles_track(offscreen):
+    """The track shows the hover color while the pointer is over the switch."""
+    switch = ui.Switch2D(label="Shading", position=(40, 40))
+    show_m = offscreen(switch)
+    _, right = _track_ends(switch)
+
+    npt.assert_allclose(_pixel(_draw(show_m), right), (128, 128, 128), atol=3)
+    send_pointer(show_m, "pointer_move", _center(switch.label))
+    npt.assert_allclose(_pixel(_draw(show_m), right), (153, 153, 153), atol=3)
+    send_pointer(show_m, "pointer_move", _center(switch.track))
+    npt.assert_allclose(_pixel(_draw(show_m), right), (153, 153, 153), atol=3)
+    send_pointer(show_m, "pointer_move", (5, 5))
+    npt.assert_allclose(_pixel(_draw(show_m), right), (128, 128, 128), atol=3)
+
+
+def test_switch_label_side_and_size():
+    """The size covers the track, the gap and the label, on either side."""
+    right = ui.Switch2D(label="Shading", position=(10, 10))
+    left = ui.Switch2D(label="Shading", label_side="left", position=(10, 10))
+    bare = ui.Switch2D()
+
+    npt.assert_array_equal(bare.size, (40, 20))
+    label_width = right.label.size[0]
+    assert right.size[0] == 40 + 8 + label_width
+    assert right.size[1] == max(20, right.label.size[1])
+    assert right.track.get_position()[0] == 10
+    assert right.label.get_position()[0] == 10 + 40 + 8
+    assert left.label.get_position()[0] == 10
+    assert left.track.get_position()[0] == 10 + label_width + 8
+
+
+def test_switch_explicit_track_size_is_kept_by_restyle():
+    """A track size given to the constructor is kept when the theme changes."""
+    switch = ui.Switch2D(track_size=(50, 24))
+    ui.set_theme("graphite")
+    try:
+        npt.assert_array_equal(switch.track.size, (50, 24))
+        npt.assert_array_equal(switch.knob.size, (18, 18))
+        assert ui.Switch2D().track.size[0] == 30
+    finally:
+        ui.set_theme("classic")
+
+
+@pytest.mark.parametrize(
+    "kwargs, error",
+    [
+        ({"label_side": "top"}, ValueError),
+        ({"label": 3}, TypeError),
+        ({"track_size": (0, 10)}, ValueError),
+        ({"track_size": 10}, ValueError),
+    ],
+)
+def test_switch_invalid_arguments(kwargs, error):
+    """Invalid switch arguments raise clear errors."""
+    with pytest.raises(error):
+        ui.Switch2D(**kwargs)
+
+
+def test_switch_in_a_row_layout(offscreen):
+    """A switch takes its natural size in a row and is clickable where placed."""
+    switch = ui.Switch2D(label="Axes")
+    row = ui.Row(ui.Rectangle2D(size=(30, 30)), switch, gap=10)
+    row.set_position((20, 20))
+    show_m = offscreen(row)
+
+    assert switch.get_position()[0] == 60
+    npt.assert_array_equal(row.size, (40 + switch.size[0], 30))
+    click(show_m, _center(switch.track))
+    assert switch.checked
+
+
+def _segment_point(control, index):
+    """
+    Get a point inside a segment box, away from its text.
+
+    Parameters
+    ----------
+    control : SegmentedControl2D
+        The control.
+    index : int
+        Index of the segment.
+
+    Returns
+    -------
+    ndarray
+        Point (x, y).
+    """
+    box = control.segments[index]
+    left, top = box.get_position()
+    return np.array([left + 4, top + box.size[1] / 2])
+
+
+def test_segmented_control_click_selects_each_segment(offscreen):
+    """A real click on each segment selects it and raises its box."""
+    changes = []
+    with ui.theme_scope("graphite"):
+        control = ui.SegmentedControl2D(
+            ["Axial", "Coronal", "Sagittal"], position=(10, 40)
+        )
+    control.on_change = lambda widget: changes.append(widget.selected)
+    show_m = offscreen(control, size=(260, 120))
+
+    for index in (1, 2, 0):
+        click(show_m, _center(control.labels[index]))
+        assert control.selected_index == index
+        image = _draw(show_m)
+        for other in range(3):
+            expected = GRAPHITE["accent"] if other == index else GRAPHITE["fill"]
+            npt.assert_allclose(
+                _pixel(image, _segment_point(control, other)), _hex(expected), atol=3
+            )
+        assert control.labels[index].font_weight == 600
+    assert changes == ["Coronal", "Sagittal", "Axial"]
+
+    click(show_m, _segment_point(control, 0))
+    assert changes == ["Coronal", "Sagittal", "Axial"]
+    click(show_m, _segment_point(control, 2))
+    assert control.selected == "Sagittal"
+
+
+def test_segmented_control_setters(offscreen):
+    """Setting the selection redraws it and calls on_change only on change."""
+    changes = []
+    control = ui.SegmentedControl2D(["a", "b", "c"], position=(10, 40))
+    control.on_change = changes.append
+    show_m = offscreen(control)
+
+    control.selected_index = 0
+    control.selected = "a"
+    assert changes == []
+    control.selected = "c"
+    control.selected_index = 2
+    assert changes == [control]
+    assert control.selected_index == 2
+    assert control.options == ["a", "b", "c"]
+
+    image = _draw(show_m)
+    npt.assert_allclose(_pixel(image, _segment_point(control, 2)), (255,) * 3, atol=3)
+    npt.assert_allclose(_pixel(image, _segment_point(control, 0)), (77,) * 3, atol=3)
+
+
+def test_segmented_control_disabled_ignores_clicks(offscreen):
+    """A disabled control keeps its selection and ignores hover."""
+    changes = []
+    control = ui.SegmentedControl2D(["a", "b"], enabled=False, position=(10, 40))
+    control.on_change = changes.append
+    show_m = offscreen(control)
+
+    send_pointer(show_m, "pointer_move", _segment_point(control, 1))
+    click(show_m, _center(control.labels[1]))
+    assert control.selected_index == 0
+    assert changes == []
+    image = _draw(show_m)
+    npt.assert_allclose(_pixel(image, _segment_point(control, 0)), (128,) * 3, atol=3)
+    npt.assert_allclose(_pixel(image, _segment_point(control, 1)), (77,) * 3, atol=3)
+
+    control.enabled = True
+    click(show_m, _center(control.labels[1]))
+    assert control.selected_index == 1
+    assert changes == [control]
+
+
+def test_segmented_control_hover(offscreen):
+    """An unselected segment is highlighted while the pointer is over it."""
+    control = ui.SegmentedControl2D(["a", "b", "c"], position=(10, 40))
+    show_m = offscreen(control)
+    point = _segment_point(control, 1)
+
+    send_pointer(show_m, "pointer_move", point)
+    npt.assert_allclose(_pixel(_draw(show_m), point), (115,) * 3, atol=3)
+    send_pointer(show_m, "pointer_move", _center(control.labels[1]))
+    npt.assert_allclose(_pixel(_draw(show_m), point), (115,) * 3, atol=3)
+    send_pointer(show_m, "pointer_move", _segment_point(control, 2))
+    image = _draw(show_m)
+    npt.assert_allclose(_pixel(image, point), (77,) * 3, atol=3)
+    npt.assert_allclose(_pixel(image, _segment_point(control, 2)), (115,) * 3, atol=3)
+    send_pointer(show_m, "pointer_move", _segment_point(control, 0))
+    npt.assert_allclose(
+        _pixel(_draw(show_m), _segment_point(control, 0)), (255,) * 3, atol=3
+    )
+
+
+def test_segmented_control_size_from_text_and_explicit():
+    """The natural width fits the widest option; an explicit size is split."""
+    control = ui.SegmentedControl2D(["a", "a much longer option"])
+    widest = control.labels[1]._measure_text(None)[0]
+    segment = widest + 2 * 10
+    npt.assert_allclose(control.size, (2 * segment + 2 + 4, round(18 * 1.4) + 8 + 4))
+    npt.assert_allclose(control.segments[0].size, control.segments[1].size)
+
+    sized = ui.SegmentedControl2D(["a", "b", "c", "d"], size=(206, 30))
+    npt.assert_array_equal(sized.size, (206, 30))
+    npt.assert_array_equal(sized.segments[0].size, (49, 26))
+    assert sized.segments[3].get_position()[0] == 2 + 3 * 51
+
+
+def test_segmented_control_grows_in_a_layout(offscreen):
+    """A layout can stretch the control; its segments share the width."""
+    control = ui.SegmentedControl2D(["a", "b"])
+    natural_height = control.size[1]
+    control.set_layout(width=ui.grow())
+    row = ui.Row(control, width=ui.fixed(300))
+    show_m = offscreen(row, size=(320, 100))
+
+    npt.assert_array_equal(control.size, (300, natural_height))
+    npt.assert_array_equal(control.segments[1].size, (147, natural_height - 4))
+    click(show_m, _center(control.labels[1]))
+    assert control.selected_index == 1
+
+    ui.set_theme("graphite")
+    try:
+        _draw(show_m)
+        assert control.size[0] == 300
+        assert control.size[1] < natural_height
+    finally:
+        ui.set_theme("classic")
+
+
+@pytest.mark.parametrize(
+    "args, kwargs, error",
+    [
+        ("abc", {}, TypeError),
+        ([], {}, ValueError),
+        (["a", 1], {}, TypeError),
+        (["a", "a"], {}, ValueError),
+        (["a", "b"], {"selected_index": 2}, IndexError),
+        (["a", "b"], {"selected_index": "a"}, TypeError),
+        (["a", "b"], {"size": (10, -1)}, ValueError),
+    ],
+)
+def test_segmented_control_invalid_arguments(args, kwargs, error):
+    """Invalid segmented control arguments raise clear errors."""
+    with pytest.raises(error):
+        ui.SegmentedControl2D(args, **kwargs)
+
+
+def test_segmented_control_invalid_selection():
+    """Selecting a missing option raises and keeps the selection."""
+    control = ui.SegmentedControl2D(["a", "b"])
+    with pytest.raises(ValueError, match="not one of"):
+        control.selected = "z"
+    with pytest.raises(IndexError):
+        control.selected_index = -1
+    assert control.selected_index == 0
+
+
+def _render_orders(element):
+    """
+    Get the render order of each actor of an element.
+
+    Parameters
+    ----------
+    element : UI
+        The element.
+
+    Returns
+    -------
+    list of float
+        Render orders of its actors.
+    """
+    return [actor.render_order for actor in element.actors]
+
+
+def _place(widget, how):
+    """
+    Place a widget in a panel, or change its Z-order after creation.
+
+    Parameters
+    ----------
+    widget : UI
+        The widget.
+    how : str
+        ``"add_element"`` to add it to a panel, ``"z_order"`` to raise it.
+
+    Returns
+    -------
+    UI
+        The element to show.
+    """
+    if how == "z_order":
+        widget.z_order = 3
+        return widget
+    panel = ui.Panel2D(size=(280, 120), position=(10, 10))
+    panel.add_element(widget, (10, 40))
+    return panel
+
+
+@pytest.mark.parametrize("how", ["add_element", "z_order"])
+def test_switch_parts_stay_stacked_when_placed(offscreen, how):
+    """In a panel or after a Z-order change, the knob draws and picks on top."""
+    changes = []
+    switch = ui.Switch2D(label="Shading")
+    switch.on_change = changes.append
+    show_m = offscreen(_place(switch, how), size=(300, 160))
+
+    hit = min(_render_orders(switch._hit_area))
+    track = min(_render_orders(switch.track))
+    knob = min(_render_orders(switch.knob))
+    assert hit < track < knob
+    assert switch.track.z_order == switch.z_order
+    _, right = _track_ends(switch)
+    npt.assert_allclose(_pixel(_draw(show_m), right), (128, 128, 128), atol=3)
+
+    click(show_m, _center(switch.knob))
+    click(show_m, _center(switch.label))
+    assert changes == [switch, switch]
+
+
+@pytest.mark.parametrize("how", ["add_element", "z_order"])
+def test_segmented_control_parts_stay_stacked_when_placed(offscreen, how):
+    """In a panel or after a Z-order change, segments draw and pick on top."""
+    control = ui.SegmentedControl2D(["a", "b", "c"])
+    show_m = offscreen(_place(control, how), size=(300, 160))
+
+    container = max(_render_orders(control.container))
+    assert container < min(_render_orders(control.segments[0]))
+    assert max(_render_orders(control.segments[0])) < min(
+        _render_orders(control.labels[0])
+    )
+    image = _draw(show_m)
+    npt.assert_allclose(_pixel(image, _segment_point(control, 0)), (255,) * 3, atol=3)
+
+    click(show_m, _segment_point(control, 2))
+    assert control.selected_index == 2
+    npt.assert_allclose(
+        _pixel(_draw(show_m), _segment_point(control, 2)), (255,) * 3, atol=3
+    )
+
+
+def test_switch_press_and_release_across_parts(offscreen):
+    """A press that moves a pixel, or ends on another part, still toggles."""
+    switch = ui.Switch2D(label="Shading", position=(40, 40))
+    show_m = offscreen(switch)
+    knob = _center(switch.knob)
+
+    send_pointer(show_m, "pointer_move", knob)
+    send_pointer(show_m, "pointer_down", knob, button=1)
+    send_pointer(show_m, "pointer_move", knob + (1, 0))
+    send_pointer(show_m, "pointer_up", knob + (1, 0), button=1)
+    assert switch.checked
+
+    knob = _center(switch.knob)
+    left, _ = _track_ends(switch)
+    send_pointer(show_m, "pointer_move", knob)
+    send_pointer(show_m, "pointer_down", knob, button=1)
+    send_pointer(show_m, "pointer_up", left, button=1)
+    assert not switch.checked
+
+
+def test_switch_release_outside_cancels_the_press(offscreen):
+    """Releasing outside does not toggle, and leaves no press behind."""
+    switch = ui.Switch2D(label="Shading", position=(40, 40))
+    show_m = offscreen(switch)
+    knob = _center(switch.knob)
+
+    send_pointer(show_m, "pointer_move", knob)
+    send_pointer(show_m, "pointer_down", knob, button=1)
+    send_pointer(show_m, "pointer_move", (190, 190))
+    send_pointer(show_m, "pointer_up", (190, 190), button=1)
+    assert not switch.checked
+
+    send_pointer(show_m, "pointer_down", (190, 190), button=1)
+    send_pointer(show_m, "pointer_up", knob, button=1)
+    assert not switch.checked
+
+
+def test_switch_click_after_hiding_and_showing(offscreen):
+    """A hidden switch ignores clicks and works again once shown."""
+    switch = ui.Switch2D(label="Shading", position=(40, 40))
+    show_m = offscreen(switch)
+
+    switch.set_visibility(False)
+    _draw(show_m)
+    click(show_m, _center(switch.track))
+    assert not switch.checked
+    assert not switch.knob.actor.visible
+
+    switch.set_visibility(True)
+    _draw(show_m)
+    assert switch._hit_area.actor.material.opacity == 0
+    click(show_m, _center(switch.track))
+    assert switch.checked
+
+
+def test_switch_label_text_can_change():
+    """Changing the label text resizes the switch; a bare switch refuses."""
+    switch = ui.Switch2D(label="A", position=(10, 10))
+    width = switch.size[0]
+    switch.label_text = "A much longer label"
+    assert switch.label_text == "A much longer label"
+    assert switch.label.message == "A much longer label"
+    assert switch.size[0] > width
+
+    with pytest.raises(ValueError, match="without a label"):
+        ui.Switch2D().label_text = "x"
+    with pytest.raises(TypeError):
+        switch.label_text = 3
+
+
+def test_switch_font_size_is_kept_by_restyle():
+    """A font size given to the constructor is kept when the theme changes."""
+    switch = ui.Switch2D(label="a", font_size=24)
+    control = ui.SegmentedControl2D(["a", "b"], font_size=24)
+    ui.set_theme("graphite")
+    try:
+        assert switch.label.font_size == 24
+        assert control.labels[0].font_size == 24
+        assert ui.Switch2D(label="a").label.font_size == 13
+    finally:
+        ui.set_theme("classic")
+
+
+def test_segmented_control_press_and_release(offscreen):
+    """A press selects when released on its segment, not on another one."""
+    control = ui.SegmentedControl2D(["a", "b", "c"], position=(10, 40))
+    show_m = offscreen(control)
+    first = _segment_point(control, 1)
+
+    send_pointer(show_m, "pointer_move", first)
+    send_pointer(show_m, "pointer_down", first, button=1)
+    send_pointer(show_m, "pointer_move", first + (1, 0))
+    send_pointer(show_m, "pointer_up", first + (1, 0), button=1)
+    assert control.selected_index == 1
+
+    send_pointer(show_m, "pointer_down", first, button=1)
+    send_pointer(show_m, "pointer_up", _segment_point(control, 2), button=1)
+    assert control.selected_index == 1
+
+    send_pointer(show_m, "pointer_down", first, button=1)
+    send_pointer(show_m, "pointer_move", (195, 195))
+    send_pointer(show_m, "pointer_up", (195, 195), button=1)
+    send_pointer(show_m, "pointer_down", (195, 195), button=1)
+    send_pointer(show_m, "pointer_up", _segment_point(control, 0), button=1)
+    assert control.selected_index == 1
+
+
+def test_segmented_control_resize_requests_layout():
+    """Resizing the control marks the layout containing it dirty."""
+    control = ui.SegmentedControl2D(["a", "b"])
+    row = ui.Row(control)
+    row.update_layout()
+    assert not row._layout_node.dirty
+
+    control.resize((240, 40))
+    assert row._layout_node.dirty
+    row.update_layout()
+    npt.assert_array_equal(row.size, (240, 40))
+
+
+def test_stale_presses_do_not_fire_later(offscreen):
+    """A press released off the parts is cancelled before a later release."""
+    switch = ui.Switch2D(label="Stale", position=(40, 40))
+    control = ui.SegmentedControl2D(["a", "b", "c"], position=(40, 120))
+    other = ui.Rectangle2D(size=(40, 30), position=(150, 20), color=(1, 0, 0))
+    show_m = offscreen(switch, control, other)
+    outside = _center(other)
+    last = _center(control.segments[2])
+    padding = (control.get_position()[0] + 1, _center(control)[1])
+
+    for kind, point in (
+        ("pointer_move", last),
+        ("pointer_down", last),
+        ("pointer_move", padding),
+        ("pointer_up", padding),
+    ):
+        send_pointer(show_m, kind, point, button=1 if "move" not in kind else 0)
+    send_pointer(show_m, "pointer_move", outside)
+    send_pointer(show_m, "pointer_down", outside, button=1)
+    send_pointer(show_m, "pointer_move", last)
+    send_pointer(show_m, "pointer_up", last, button=1)
+    assert control.selected_index == 0
+
+    track = _center(switch.track)
+    send_pointer(show_m, "pointer_move", track)
+    send_pointer(show_m, "pointer_down", track, button=1)
+    send_pointer(show_m, "pointer_up", outside, button=1)
+    send_pointer(show_m, "pointer_move", outside)
+    send_pointer(show_m, "pointer_down", outside, button=1)
+    send_pointer(show_m, "pointer_move", track)
+    send_pointer(show_m, "pointer_up", track, button=1)
+    assert not switch.checked
+
+
+def test_hiding_cancels_a_press(offscreen):
+    """A press made before hiding does not act after showing again."""
+    switch = ui.Switch2D(label="Hide", position=(40, 40))
+    control = ui.SegmentedControl2D(["a", "b"], position=(40, 120))
+    show_m = offscreen(switch, control)
+    segment = _segment_point(control, 1)
+    send_pointer(show_m, "pointer_down", _center(switch.track), button=1)
+    send_pointer(show_m, "pointer_down", segment, button=1)
+
+    for widget in (switch, control):
+        widget.set_visibility(False)
+        widget.set_visibility(True)
+    _draw(show_m)
+    send_pointer(show_m, "pointer_up", _center(switch.track), button=1)
+    send_pointer(show_m, "pointer_up", segment, button=1)
+    assert not switch.checked
+    assert control.selected_index == 0

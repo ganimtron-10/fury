@@ -19,6 +19,8 @@ __all__ = [
     "PlaybackPanel",
     "Card2D",
     "SpinBox",
+    "Switch2D",
+    "SegmentedControl2D",
 ]
 
 
@@ -8093,3 +8095,1192 @@ class SpinBox(UI):
         """
         self.value = self.validate_value(self.textbox._message)
         self.on_change(self)
+
+
+def _validate_size(size, name):
+    """
+    Check that a size is a pair of positive numbers.
+
+    Parameters
+    ----------
+    size : (float, float)
+        Width and height in pixels.
+    name : str
+        Name of the argument, used in the error message.
+
+    Returns
+    -------
+    tuple of float
+        The width and height.
+
+    Raises
+    ------
+    ValueError
+        If ``size`` is not two positive numbers.
+    """
+    try:
+        width, height = size
+        valid = width > 0 and height > 0
+    except (TypeError, ValueError):
+        valid = False
+    if not valid:
+        raise ValueError(f"{name} must be two positive numbers, got {size!r}.")
+    return float(width), float(height)
+
+
+def _button_held(event):
+    """
+    Check whether the left mouse button is held during a pointer event.
+
+    Parameters
+    ----------
+    event : PointerEvent
+        The PyGfx pointer event.
+
+    Returns
+    -------
+    bool
+        True if the left button is among the pressed buttons.
+    """
+    return 1 in (getattr(event, "buttons", None) or ())
+
+
+def _contains_event(element, event):
+    """
+    Check whether a pointer event happened inside an element.
+
+    Parameters
+    ----------
+    element : UI
+        The element.
+    event : PointerEvent
+        The PyGfx pointer event, in canvas coordinates with y pointing down.
+
+    Returns
+    -------
+    bool
+        True if the event position is inside the element's box.
+    """
+    x, y = element.get_position()
+    width, height = element.size
+    return x <= event.x <= x + width and y <= event.y <= y + height
+
+
+class Switch2D(UI):
+    """
+    An on/off switch: a rounded track with a round knob, and an optional label.
+
+    Clicking the track, the knob or the label toggles the switch, even when
+    the press and the release land on different parts. The knob
+    sits on the left while the switch is off and on the right while it is
+    on.
+
+    Parameters
+    ----------
+    checked : bool, optional
+        Initial state of the switch.
+    label : str, optional
+        Text shown next to the switch. Without it, only the track is drawn.
+    label_side : str, optional
+        ``"right"`` or ``"left"``: side of the track the label is shown on.
+    track_size : (float, float), optional
+        Width and height of the track in pixels. A size given here is kept
+        when the theme changes.
+        Defaults to the theme item of the same name.
+    font_size : int, optional
+        Font size of the label in pixels. A size given here is kept when the
+        theme changes.
+        Defaults to the theme item of the same name.
+    track_color : str, tuple, list or ndarray, optional
+        Color of the track while off. All colors accept a hex string
+        ("#FF0000"), RGB(A) in [0, 1], or RGB(A) in [0, 255].
+        Defaults to the theme item of the same name.
+    track_on_color : str, tuple, list or ndarray, optional
+        Color of the track while on.
+        Defaults to the theme item of the same name.
+    knob_color : str, tuple, list or ndarray, optional
+        Color of the knob while off.
+        Defaults to the theme item of the same name.
+    knob_on_color : str, tuple, list or ndarray, optional
+        Color of the knob while on.
+        Defaults to the theme item of the same name.
+    label_color : str, tuple, list or ndarray, optional
+        Color of the label.
+        Defaults to the theme item of the same name.
+    enabled : bool, optional
+        If False, the switch is drawn with the disabled colors and ignores
+        the pointer.
+    position : (float, float), optional
+        Absolute coordinates (x, y) of the top-left corner.
+    z_order : int, optional
+        Z-order of the switch. The knob is drawn at ``z_order + 1``.
+
+    Attributes
+    ----------
+    on_change : callable
+        ``on_change(switch)`` is called with this switch each time its state
+        changes, from a click or through :attr:`checked`.
+    track : RoundedRectangle2D
+        The track. An invisible box behind the whole switch makes the space
+        around the label text clickable too.
+    knob : RoundedRectangle2D
+        The knob.
+    label : TextBlock2D or None
+        The label text block, or None when the switch has no label. Use
+        :attr:`label_text` to change its text.
+
+    Notes
+    -----
+    The theme items ``knob_inset`` (space between the knob and the track
+    edge), ``label_gap``, ``corner_radius`` (limited to half of the track
+    height), ``border_color`` and ``border_width`` of the track, and the
+    hover and disabled colors complete the look. While the switch is on, the
+    track border takes the track color.
+    """
+
+    track_color = themed(item="track_color", doc="Color of the track while off.")
+    track_on_color = themed(item="track_on_color", doc="Color of the track while on.")
+    track_hover_color = themed(
+        item="track_hover_color", doc="Color of the track while off and hovered."
+    )
+    track_on_hover_color = themed(
+        item="track_on_hover_color", doc="Color of the track while on and hovered."
+    )
+    track_disabled_color = themed(
+        item="track_disabled_color", doc="Color of the track while disabled."
+    )
+    hover_border_color = themed(
+        item="hover_border_color",
+        doc="Color of the track border while off and hovered.",
+    )
+    knob_color = themed(item="knob_color", doc="Color of the knob while off.")
+    knob_on_color = themed(item="knob_on_color", doc="Color of the knob while on.")
+    knob_disabled_color = themed(
+        item="knob_disabled_color", doc="Color of the knob while disabled."
+    )
+    label_color = themed(item="label_color", doc="Color of the label.")
+    label_disabled_color = themed(
+        item="label_disabled_color", doc="Color of the label while disabled."
+    )
+
+    def __init__(
+        self,
+        *,
+        checked=False,
+        label=None,
+        label_side="right",
+        track_size=None,
+        font_size=None,
+        track_color=None,
+        track_on_color=None,
+        knob_color=None,
+        knob_on_color=None,
+        label_color=None,
+        enabled=True,
+        position=(0, 0),
+        z_order=0,
+    ):
+        """Initialize the switch."""
+        if label is not None and not isinstance(label, str):
+            raise TypeError(f"label must be a str or None, got {type(label)!r}.")
+        if label_side not in ("left", "right"):
+            raise ValueError(
+                f"label_side must be 'left' or 'right', got {label_side!r}."
+            )
+        if track_size is not None:
+            _validate_size(track_size, "track_size")
+
+        self._label_text = label
+        self._label_side = label_side
+        self._checked = bool(checked)
+        self._enabled = bool(enabled)
+        self._hovered_parts = set()
+        self._pressing = False
+        self._theme_value("track_size", track_size)
+        self._theme_value("font_size", font_size)
+        given = {
+            "track_color": track_color,
+            "track_on_color": track_on_color,
+            "knob_color": knob_color,
+            "knob_on_color": knob_on_color,
+            "label_color": label_color,
+        }
+        for item in (
+            "track_color",
+            "track_on_color",
+            "track_hover_color",
+            "track_on_hover_color",
+            "track_disabled_color",
+            "hover_border_color",
+            "knob_color",
+            "knob_on_color",
+            "knob_disabled_color",
+            "label_color",
+            "label_disabled_color",
+        ):
+            self._set_style(item, self._theme_value(item, given.get(item)))
+
+        super(Switch2D, self).__init__(position=position, z_order=z_order)
+
+        self.on_change = lambda switch: None
+        self._refresh_style()
+
+    def _setup(self):
+        """Create the track, the knob and the label."""
+        self.track = RoundedRectangle2D(size=(1, 1), corner_radius=0)
+        self.knob = RoundedRectangle2D(size=(1, 1), corner_radius=0)
+        self.label = None
+        self._hit_area = RoundedRectangle2D(size=(1, 1), corner_radius=0, opacity=0.0)
+        self._hit_area.actor.material.depth_write = False
+        self._track_size = (1.0, 1.0)
+        self._knob_inset = 0
+        self._radius = 0
+        self._label_gap = 0
+        parts = [self._hit_area, self.track, self.knob]
+        if self._label_text is not None:
+            self.label = TextBlock2D(
+                text=self._label_text,
+                dynamic_bbox=True,
+                font_size=self._theme_value("font_size"),
+                font_family=self._theme_value("font_family"),
+            )
+            parts.append(self.label)
+
+        for part in parts:
+            self._connect_part(part)
+        self._children.extend(parts)
+
+    def _connect_part(self, part):
+        """
+        Make a part toggle the switch when clicked and show the hover style.
+
+        Parameters
+        ----------
+        part : UI
+            The track, the knob, the label or the area behind them.
+        """
+        key = id(part)
+        part.on_left_mouse_button_pressed = self._handle_press
+        part.on_left_mouse_button_released = self._handle_release
+        part.on_hover = lambda event: self._set_hovered(key, True, event)
+        part.on_dishover = lambda event: self._set_hovered(key, False, event)
+
+    def _refresh_style(self):
+        """Show the themed size, font, colors and box style."""
+        self._track_size = _validate_size(self._theme_value("track_size"), "track_size")
+        height = self._track_size[1]
+        self._knob_inset = self._theme_value("knob_inset")
+        self._radius = min(self._theme_value("corner_radius"), height / 2)
+        self._label_gap = self._theme_value("label_gap")
+        knob_side = max(height - 2 * self._knob_inset, 1)
+        self.track.resize(self._track_size)
+        self.knob.resize((knob_side, knob_side))
+        knob_radius = min(max(self._radius - self._knob_inset, 0), knob_side / 2)
+        self.knob._push_style("corner_radius", knob_radius)
+        if self.label is not None:
+            self.label._push_styles(
+                font_size=self._theme_value("font_size"),
+                font_family=self._theme_value("font_family"),
+            )
+        self._update_visual_state()
+        self._update_actors_position()
+        self.mark_layout_dirty()
+
+    def _update_visual_state(self):
+        """Color the track, knob and label for the current state."""
+        hovered = self._enabled and bool(self._hovered_parts)
+        if not self._enabled:
+            track = self.track_disabled_color
+            border = self._theme_value("border_color")
+            knob = self.knob_disabled_color
+            label = self.label_disabled_color
+        elif self._checked:
+            track = self.track_on_hover_color if hovered else self.track_on_color
+            border = track
+            knob = self.knob_on_color
+            label = self.label_color
+        else:
+            track = self.track_hover_color if hovered else self.track_color
+            border = (
+                self.hover_border_color
+                if hovered
+                else self._theme_value("border_color")
+            )
+            knob = self.knob_color
+            label = self.label_color
+
+        self.track._push_style("color", track)
+        self._apply_box_style(
+            self.track, corner_radius=self._radius, border_color=border
+        )
+        self.knob._push_style("color", knob)
+        if self.label is not None:
+            self.label._push_style("color", label)
+        self._place_knob()
+
+    def _set_hovered(self, key, hovered, event):
+        """
+        Record that the pointer entered or left one of the parts.
+
+        Leaving the switch altogether, or entering a part without the left
+        button held, cancels a press, so a later release does not toggle it.
+
+        Parameters
+        ----------
+        key : int
+            Identifier of the part.
+        hovered : bool
+            True when the pointer entered the part.
+        event : PointerEvent
+            The PyGfx pointer event.
+        """
+        if hovered:
+            self._hovered_parts.add(key)
+            if not _button_held(event):
+                self._pressing = False
+        else:
+            self._hovered_parts.discard(key)
+            if not _contains_event(self, event):
+                self._pressing = False
+        self._update_visual_state()
+
+    def _reset_interaction_state(self):
+        """
+        Cancel the hover feedback of the switch.
+
+        Returns
+        -------
+        None
+            State is updated in place without dispatching callbacks.
+        """
+        super()._reset_interaction_state()
+        self._hovered_parts.clear()
+        self._pressing = False
+        self._update_visual_state()
+
+    def set_visibility(self, visibility):
+        """
+        Show or hide the switch. Hiding it cancels a press.
+
+        Parameters
+        ----------
+        visibility : bool
+            If True, the switch is visible.
+        """
+        super(Switch2D, self).set_visibility(visibility)
+        if not visibility:
+            self._pressing = False
+
+    def _handle_press(self, event):
+        """
+        Start a click on one of the parts.
+
+        Parameters
+        ----------
+        event : PointerEvent
+            The PyGfx pointer event.
+        """
+        self._pressing = self._enabled
+
+    def _handle_release(self, event):
+        """
+        Toggle the switch when a press on it ends on any of its parts.
+
+        Parameters
+        ----------
+        event : PointerEvent
+            The PyGfx pointer event.
+        """
+        pressing, self._pressing = self._pressing, False
+        if pressing and self._enabled:
+            self.checked = not self._checked
+
+    @property
+    def checked(self):
+        """
+        Get whether the switch is on.
+
+        Returns
+        -------
+        bool
+            True while the switch is on.
+        """
+        return self._checked
+
+    @checked.setter
+    def checked(self, value):
+        """
+        Turn the switch on or off.
+
+        :attr:`on_change` is called only when the state changes.
+
+        Parameters
+        ----------
+        value : bool
+            True to turn the switch on.
+        """
+        value = bool(value)
+        if value == self._checked:
+            return
+        self._checked = value
+        self._update_visual_state()
+        self.on_change(self)
+
+    @property
+    def enabled(self):
+        """
+        Get whether the switch reacts to the pointer.
+
+        Returns
+        -------
+        bool
+            True while the switch is enabled.
+        """
+        return self._enabled
+
+    @enabled.setter
+    def enabled(self, value):
+        """
+        Enable or disable the switch.
+
+        Parameters
+        ----------
+        value : bool
+            False to draw the switch with the disabled colors and ignore
+            the pointer.
+        """
+        self._enabled = bool(value)
+        self._pressing = False
+        self._update_visual_state()
+
+    @property
+    def label_text(self):
+        """
+        Get the text of the label.
+
+        Returns
+        -------
+        str or None
+            The label text, or None for a switch created without a label.
+        """
+        return self._label_text
+
+    @label_text.setter
+    def label_text(self, text):
+        """
+        Change the text of the label.
+
+        Parameters
+        ----------
+        text : str
+            The new text.
+
+        Raises
+        ------
+        ValueError
+            If the switch was created without a label.
+        """
+        if not isinstance(text, str):
+            raise TypeError(f"label_text must be a str, got {type(text)!r}.")
+        if self.label is None:
+            raise ValueError("This switch was created without a label.")
+        self._label_text = text
+        self.label.message = text
+        self._update_actors_position()
+        self.mark_layout_dirty()
+
+    @property
+    def z_order(self):
+        """
+        Get the Z-order of the switch.
+
+        Returns
+        -------
+        int
+            Z-order of the track and label. The knob is drawn above.
+        """
+        return self._z_order
+
+    @z_order.setter
+    def z_order(self, z_order):
+        """
+        Set the Z-order of the switch and restack its parts.
+
+        Parameters
+        ----------
+        z_order : int
+            The new Z-order.
+        """
+        UI.z_order.fset(self, z_order)
+        if hasattr(self, "_hit_area"):
+            self._update_actors_position()
+
+    def _get_actors(self):
+        """
+        Get the actors composing this UI component.
+
+        Returns
+        -------
+        list
+            An empty list; the track, knob and label draw themselves.
+        """
+        return []
+
+    def _get_size(self):
+        """
+        Get the size of the switch and its label.
+
+        Returns
+        -------
+        (float, float)
+            Width and height in pixels.
+        """
+        width, height = self._track_size
+        if self.label is None:
+            return width, height
+        label_width, label_height = self.label.size
+        return width + self._label_gap + label_width, max(height, label_height)
+
+    def _update_actors_position(self):
+        """Place the track, the label and the knob."""
+        for part in (self._hit_area, self.track, self.label):
+            if part is not None:
+                part.z_order = self.z_order
+        self.knob.z_order = self.z_order + 1
+        x, y = self.get_position()
+        width, height = self.size
+        self._hit_area.resize((width, height))
+        self._hit_area.set_position((x, y))
+        self.set_actor_position(
+            self._hit_area.actor,
+            (x + width / 2, y + height / 2),
+            self.z_order,
+            sub_order=-1,
+        )
+        track_width, track_height = self._track_size
+        track_x = x
+        if self.label is not None:
+            label_width, label_height = self.label.size
+            if self._label_side == "left":
+                label_x = x
+                track_x = x + label_width + self._label_gap
+            else:
+                label_x = x + track_width + self._label_gap
+            self.label.set_position((label_x, round(y + (height - label_height) / 2)))
+        self.track.set_position((track_x, round(y + (height - track_height) / 2)))
+        self._place_knob()
+
+    def _place_knob(self):
+        """Move the knob to the end of the track matching the state."""
+        left, top = self.track.get_position()
+        width, height = self._track_size
+        distance = self._knob_inset + self.knob.size[0] / 2
+        offset = width - distance if self._checked else distance
+        self.knob.set_position(
+            (left + offset, top + height / 2),
+            x_anchor=Anchor.CENTER,
+            y_anchor=Anchor.CENTER,
+        )
+
+
+class SegmentedControl2D(UI):
+    """
+    A row of mutually exclusive options, of which exactly one is selected.
+
+    The options are drawn as equal segments inside a filled container. The
+    selected segment is a raised box, and an unselected segment is
+    highlighted while the pointer is over it. Clicking a segment selects it
+    when the press and the release both land on that segment.
+
+    Parameters
+    ----------
+    options : list of str
+        Text of each option, in order. At least one, without duplicates.
+    selected_index : int, optional
+        Index of the option selected initially.
+    size : (float, float), optional
+        Width and height of the control in pixels. By default the segments
+        are as wide as the widest option text and its padding, and the size
+        follows the theme. A size given here, or later through
+        :meth:`resize`, is kept when the theme changes.
+    font_size : int, optional
+        Font size of the option texts in pixels. A size given here is kept
+        when the theme changes.
+        Defaults to the theme item of the same name.
+    color : str, tuple, list or ndarray, optional
+        Fill color of the container. All colors accept a hex string
+        ("#FF0000"), RGB(A) in [0, 1], or RGB(A) in [0, 255].
+        Defaults to the theme item of the same name.
+    text_color : str, tuple, list or ndarray, optional
+        Text color of the unselected options.
+        Defaults to the theme item of the same name.
+    selected_color : str, tuple, list or ndarray, optional
+        Color of the selected segment.
+        Defaults to the theme item of the same name.
+    selected_text_color : str, tuple, list or ndarray, optional
+        Text color of the selected option.
+        Defaults to the theme item of the same name.
+    enabled : bool, optional
+        If False, the control is drawn with the disabled colors and ignores
+        the pointer.
+    position : (float, float), optional
+        Absolute coordinates (x, y) of the top-left corner.
+    z_order : int, optional
+        Z-order of the container. Segments are drawn above it.
+
+    Attributes
+    ----------
+    on_change : callable
+        ``on_change(control)`` is called with this control each time the
+        selection changes, from a click or through :attr:`selected_index` or
+        :attr:`selected`.
+    container : RoundedRectangle2D
+        The box behind the segments.
+    segments : list of RoundedRectangle2D
+        The box of each segment.
+    labels : list of TextBlock2D
+        The text of each segment.
+
+    Notes
+    -----
+    The container takes the box style theme items (``corner_radius``,
+    ``border_color``, ``border_width`` and the shadow). The selected
+    segment takes the same items with a ``selected_`` prefix; other
+    segments only take ``selected_corner_radius``. The theme items
+    ``container_padding``, ``segment_gap`` and ``segment_padding``
+    (horizontal and vertical space around a text) set the spacing, and
+    ``font_weight`` and ``selected_font_weight`` the weight of the texts.
+    The control can be stretched by a layout; its segments then share the
+    width equally.
+    """
+
+    color = themed(item="color", doc="Fill color of the container.")
+    text_color = themed(item="text_color", doc="Text color of unselected options.")
+    selected_color = themed(item="selected_color", doc="Color of the selected segment.")
+    selected_text_color = themed(
+        item="selected_text_color", doc="Text color of the selected option."
+    )
+    hover_color = themed(
+        item="hover_color", doc="Color of an unselected segment under the pointer."
+    )
+    hover_text_color = themed(
+        item="hover_text_color", doc="Text color of an unselected option hovered."
+    )
+    disabled_selected_color = themed(
+        item="disabled_selected_color",
+        doc="Color of the selected segment while disabled.",
+    )
+    disabled_text_color = themed(
+        item="disabled_text_color", doc="Text color of every option while disabled."
+    )
+
+    def __init__(
+        self,
+        options,
+        *,
+        selected_index=0,
+        size=None,
+        font_size=None,
+        color=None,
+        text_color=None,
+        selected_color=None,
+        selected_text_color=None,
+        enabled=True,
+        position=(0, 0),
+        z_order=0,
+    ):
+        """Initialize the segmented control."""
+        if isinstance(options, str):
+            raise TypeError("options must be a list of str, not a single str.")
+        options = list(options)
+        if not options:
+            raise ValueError("options must contain at least one option.")
+        if not all(isinstance(option, str) for option in options):
+            raise TypeError("options must all be str.")
+        if len(set(options)) != len(options):
+            raise ValueError(f"options must be unique, got {options!r}.")
+        self._options = options
+        self._selected = self._checked_index(selected_index)
+        self._explicit_size = None
+        if size is not None:
+            self._explicit_size = _validate_size(size, "size")
+        self._size = self._explicit_size or (1.0, 1.0)
+        self._enabled = bool(enabled)
+        self._hovered_parts = {}
+        self._pressed_index = None
+        self._layout_resizing = False
+        self._theme_value("font_size", font_size)
+        given = {
+            "color": color,
+            "text_color": text_color,
+            "selected_color": selected_color,
+            "selected_text_color": selected_text_color,
+        }
+        for item in (
+            "color",
+            "text_color",
+            "selected_color",
+            "selected_text_color",
+            "hover_color",
+            "hover_text_color",
+            "disabled_selected_color",
+            "disabled_text_color",
+        ):
+            self._set_style(item, self._theme_value(item, given.get(item)))
+
+        super(SegmentedControl2D, self).__init__(position=position, z_order=z_order)
+
+        self.on_change = lambda control: None
+        self._refresh_style()
+
+    def _checked_index(self, index):
+        """
+        Check that an index names an option.
+
+        Parameters
+        ----------
+        index : int
+            Index of an option.
+
+        Returns
+        -------
+        int
+            The index.
+
+        Raises
+        ------
+        TypeError
+            If ``index`` is not an integer.
+        IndexError
+            If no option has this index.
+        """
+        if isinstance(index, bool) or not isinstance(index, (int, np.integer)):
+            raise TypeError(f"selected_index must be an int, got {index!r}.")
+        if not 0 <= index < len(self._options):
+            raise IndexError(
+                f"selected_index must be in [0, {len(self._options) - 1}], got {index}."
+            )
+        return int(index)
+
+    def _setup(self):
+        """Create the container, and a box and a text for each option."""
+        self.container = RoundedRectangle2D(size=(1, 1), corner_radius=0)
+        self.segments = []
+        self.labels = []
+        self._inset = 0
+        self._gap = 0
+        for index, option in enumerate(self._options):
+            box = RoundedRectangle2D(size=(1, 1), corner_radius=0)
+            text = TextBlock2D(
+                text=option,
+                size=(1, 1),
+                justification="center",
+                vertical_justification="middle",
+                font_size=self._theme_value("font_size"),
+                font_family=self._theme_value("font_family"),
+            )
+            self._connect_part(box, index)
+            self._connect_part(text, index)
+            self.segments.append(box)
+            self.labels.append(text)
+        self.container.on_left_mouse_button_released = self._cancel_press
+        self.container.on_dishover = self._cancel_press_outside
+        self._children.extend([self.container, *self.segments, *self.labels])
+
+    def _connect_part(self, part, index):
+        """
+        Make a part of a segment select it when clicked and show its hover.
+
+        Parameters
+        ----------
+        part : UI
+            The box or the text of the segment.
+        index : int
+            Index of the segment.
+        """
+        key = id(part)
+        part.on_left_mouse_button_pressed = lambda event: self._handle_press(index)
+        part.on_left_mouse_button_released = lambda event: self._handle_release(index)
+        part.on_hover = lambda event: self._set_hovered(index, key, True, event)
+        part.on_dishover = lambda event: self._set_hovered(index, key, False, event)
+
+    def _refresh_style(self):
+        """Show the themed font, spacing, size, colors and box styles."""
+        font_size = self._theme_value("font_size")
+        family = self._theme_value("font_family")
+        for text in self.labels:
+            text._push_styles(font_size=font_size, font_family=family)
+        self._inset = self._theme_value("container_padding") + self._theme_value(
+            "border_width"
+        )
+        self._gap = self._theme_value("segment_gap")
+        if self._explicit_size is None:
+            padding_x, padding_y = self._theme_value("segment_padding")
+            text_width = max(text._measure_text(None)[0] for text in self.labels)
+            segment_width = text_width + 2 * padding_x
+            segment_height = round(font_size * 1.4) + 2 * padding_y
+            count = len(self._options)
+            self._size = (
+                count * segment_width + (count - 1) * self._gap + 2 * self._inset,
+                segment_height + 2 * self._inset,
+            )
+        self.container._push_style("color", self.color)
+        self._apply_box_style(self.container)
+        self._update_visual_state()
+        self._update_actors_position()
+        self.mark_layout_dirty()
+
+    def _update_visual_state(self):
+        """Color the segments and texts for the selection, hover and state."""
+        hovered = self._hovered_index() if self._enabled else None
+        weight = self._theme_value("font_weight")
+        selected_weight = self._theme_value("selected_font_weight")
+        radius = self._theme_value("selected_corner_radius")
+        flat = {
+            "corner_radius": radius,
+            "border_width": 0,
+            "shadow_color": (0, 0, 0, 0),
+            "shadow_offset": (0, 0),
+            "shadow_blur": 0,
+            "shadow_spread": 0,
+        }
+        for index, (box, text) in enumerate(
+            zip(self.segments, self.labels, strict=True)
+        ):
+            selected = index == self._selected
+            if not self._enabled:
+                fill = self.disabled_selected_color if selected else self.color
+                text_color = self.disabled_text_color
+            elif selected:
+                fill, text_color = self.selected_color, self.selected_text_color
+            elif index == hovered:
+                fill, text_color = self.hover_color, self.hover_text_color
+            else:
+                fill, text_color = self.color, self.text_color
+            box._push_style("color", fill)
+            if selected:
+                self._apply_box_style(box, prefix="selected_")
+            else:
+                self._apply_box_style(box, **flat)
+            text._push_styles(
+                color=text_color, font_weight=selected_weight if selected else weight
+            )
+
+    def _hovered_index(self):
+        """
+        Get the option under the pointer.
+
+        Returns
+        -------
+        int or None
+            Index of the hovered option, or None.
+        """
+        for index, parts in self._hovered_parts.items():
+            if parts:
+                return index
+        return None
+
+    def _set_hovered(self, index, key, hovered, event):
+        """
+        Record that the pointer entered or left a part of a segment.
+
+        Leaving the control altogether, or entering a segment without the
+        left button held, cancels a press, so a later release selects
+        nothing.
+
+        Parameters
+        ----------
+        index : int
+            Index of the segment.
+        key : int
+            Identifier of the part.
+        hovered : bool
+            True when the pointer entered the part.
+        event : PointerEvent
+            The PyGfx pointer event.
+        """
+        parts = self._hovered_parts.setdefault(index, set())
+        if hovered:
+            self._hovered_parts = {index: parts}
+            parts.add(key)
+            if not _button_held(event):
+                self._pressed_index = None
+        else:
+            parts.discard(key)
+            if not _contains_event(self, event):
+                self._pressed_index = None
+        self._update_visual_state()
+
+    def _reset_interaction_state(self):
+        """
+        Cancel the hover feedback of the segments.
+
+        Returns
+        -------
+        None
+            State is updated in place without dispatching callbacks.
+        """
+        super()._reset_interaction_state()
+        self._hovered_parts = {}
+        self._pressed_index = None
+        self._update_visual_state()
+
+    def _cancel_press(self, event):
+        """
+        Cancel a press released on the container, between the segments.
+
+        Parameters
+        ----------
+        event : PointerEvent
+            The PyGfx pointer event.
+        """
+        self._pressed_index = None
+
+    def _cancel_press_outside(self, event):
+        """
+        Cancel a press when the pointer leaves the control.
+
+        Parameters
+        ----------
+        event : PointerEvent
+            The PyGfx pointer event.
+        """
+        if not _contains_event(self, event):
+            self._pressed_index = None
+
+    def set_visibility(self, visibility):
+        """
+        Show or hide the control. Hiding it cancels a press.
+
+        Parameters
+        ----------
+        visibility : bool
+            If True, the control is visible.
+        """
+        super(SegmentedControl2D, self).set_visibility(visibility)
+        if not visibility:
+            self._pressed_index = None
+
+    def _handle_press(self, index):
+        """
+        Start a click on a segment.
+
+        Parameters
+        ----------
+        index : int
+            Index of the pressed segment.
+        """
+        self._pressed_index = index if self._enabled else None
+
+    def _handle_release(self, index):
+        """
+        Select a segment when a press on it also ends on it.
+
+        Parameters
+        ----------
+        index : int
+            Index of the segment under the pointer at release.
+        """
+        pressed, self._pressed_index = self._pressed_index, None
+        if self._enabled and pressed == index:
+            self.selected_index = index
+
+    @property
+    def options(self):
+        """
+        Get the texts of the options.
+
+        Returns
+        -------
+        list of str
+            A copy of the options, in order.
+        """
+        return list(self._options)
+
+    @property
+    def selected_index(self):
+        """
+        Get the index of the selected option.
+
+        Returns
+        -------
+        int
+            Index in :attr:`options`.
+        """
+        return self._selected
+
+    @selected_index.setter
+    def selected_index(self, index):
+        """
+        Select an option by index.
+
+        :attr:`on_change` is called only when the selection changes.
+
+        Parameters
+        ----------
+        index : int
+            Index in :attr:`options`.
+        """
+        index = self._checked_index(index)
+        if index == self._selected:
+            return
+        self._selected = index
+        self._update_visual_state()
+        self.on_change(self)
+
+    @property
+    def selected(self):
+        """
+        Get the text of the selected option.
+
+        Returns
+        -------
+        str
+            The selected option.
+        """
+        return self._options[self._selected]
+
+    @selected.setter
+    def selected(self, option):
+        """
+        Select an option by its text.
+
+        Parameters
+        ----------
+        option : str
+            One of :attr:`options`.
+        """
+        if option not in self._options:
+            raise ValueError(f"{option!r} is not one of the options {self._options}.")
+        self.selected_index = self._options.index(option)
+
+    @property
+    def enabled(self):
+        """
+        Get whether the control reacts to the pointer.
+
+        Returns
+        -------
+        bool
+            True while the control is enabled.
+        """
+        return self._enabled
+
+    @enabled.setter
+    def enabled(self, value):
+        """
+        Enable or disable the control.
+
+        Parameters
+        ----------
+        value : bool
+            False to draw the control with the disabled colors and ignore
+            the pointer.
+        """
+        self._enabled = bool(value)
+        self._pressed_index = None
+        self._update_visual_state()
+
+    @property
+    def z_order(self):
+        """
+        Get the Z-order of the control.
+
+        Returns
+        -------
+        int
+            Z-order of the container. Segments are drawn above.
+        """
+        return self._z_order
+
+    @z_order.setter
+    def z_order(self, z_order):
+        """
+        Set the Z-order of the control and restack its parts.
+
+        Parameters
+        ----------
+        z_order : int
+            The new Z-order.
+        """
+        UI.z_order.fset(self, z_order)
+        if hasattr(self, "container"):
+            self._update_actors_position()
+
+    def resize(self, size):
+        """
+        Resize the control. The segments share the width equally.
+
+        A size given here is kept when the theme changes, unless it was
+        given by a layout.
+
+        Parameters
+        ----------
+        size : (float, float)
+            Width and height in pixels.
+        """
+        size = _validate_size(size, "size")
+        self._size = size
+        self._update_actors_position()
+        if not self._layout_resizing:
+            self._explicit_size = size
+            self.mark_layout_dirty()
+
+    def _apply_layout(self, rect):
+        """
+        Take the rectangle computed by the layout.
+
+        Parameters
+        ----------
+        rect : LayoutRect
+            The computed position and size.
+        """
+        self._layout_resizing = True
+        try:
+            super(SegmentedControl2D, self)._apply_layout(rect)
+        finally:
+            self._layout_resizing = False
+
+    def _get_actors(self):
+        """
+        Get the actors composing this UI component.
+
+        Returns
+        -------
+        list
+            An empty list; the boxes and texts draw themselves.
+        """
+        return []
+
+    def _get_size(self):
+        """
+        Get the size of the control.
+
+        Returns
+        -------
+        (float, float)
+            Width and height in pixels.
+        """
+        return self._size
+
+    def _update_actors_position(self):
+        """Place the container and the segments."""
+        x, y = self.get_position()
+        width, height = self._size
+        count = len(self._options)
+        segment_width = (width - 2 * self._inset - (count - 1) * self._gap) / count
+        segment_size = (max(segment_width, 1), max(height - 2 * self._inset, 1))
+        self.container.z_order = self.z_order
+        self.container.resize((width, height))
+        self.container.set_position((x, y))
+        for index, (box, text) in enumerate(
+            zip(self.segments, self.labels, strict=True)
+        ):
+            left = x + self._inset + index * (segment_width + self._gap)
+            corner = (left, y + self._inset)
+            box.z_order = self.z_order + 1
+            text.z_order = self.z_order + 2
+            box.resize(segment_size)
+            box.set_position(corner)
+            text.resize(segment_size)
+            text.set_position(corner)
