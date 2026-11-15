@@ -525,6 +525,7 @@ backward-compatibility code was explicitly removed. (Ref: :ghpull:`1043`)
 * ``fury.ui.Card2D``
 * ``fury.ui.Checkbox``, ``fury.ui.RadioButton``  (Ref: :ghpull:`1305`)
 * ``fury.ui.PlaybackPanel``
+* ``fury.ui.Tree2D``, ``fury.ui.TreeNode2D``  (new in v2; Ref: :ghpull:`1283`)
 
 **Action**: ``DrawPanel``, ``FileMenu2D``, ``GridUI``, and ``SpinBox``
 remain unavailable pending their PyGfx port; if you relied on those,
