@@ -1129,3 +1129,151 @@ def test_clean_frames_do_no_layout_work():
     assert solved == []
     assert len(ui.UIContext._dirty_layouts) == 0
     show_m.close()
+
+
+def _render(*elements, size=(200, 200), background=(0, 0, 0)):
+    """
+    Render elements in an offscreen window and return the RGB image.
+
+    Parameters
+    ----------
+    *elements : UI
+        Elements to show.
+    size : (int, int), optional
+        Window size in pixels.
+    background : tuple, optional
+        RGB background color of the scene.
+
+    Returns
+    -------
+    ndarray
+        Image indexed as ``image[y, x]``, with values in [0, 255].
+    """
+    scene = window.Scene(background=background)
+    scene.add(*elements)
+    show_m = window.ShowManager(
+        scene=scene, size=size, window_type="offscreen", pixel_ratio=1
+    )
+    show_m.render()
+    show_m.window.draw()
+    image = np.asarray(show_m.snapshot())[..., :3].astype(int)
+    show_m.close()
+    return image
+
+
+def _hex(color):
+    """
+    Convert a hex color to 8-bit RGB values.
+
+    Parameters
+    ----------
+    color : str
+        Color such as ``"#1C1D20"``.
+
+    Returns
+    -------
+    ndarray
+        RGB values in [0, 255].
+    """
+    return np.array([int(color[i : i + 2], 16) for i in (1, 3, 5)])
+
+
+def test_graphite_panel_draws_rounded_box_with_border():
+    """A Graphite panel has its fill, a border and transparent rounded corners."""
+    with ui.theme_scope("graphite"):
+        panel = ui.Panel2D(size=(120, 100), position=(40, 40))
+    thick_border = ui.builtin_theme("graphite").derive(
+        items={"Panel2D": {"border_width": 4}}
+    )
+    with ui.theme_scope(thick_border):
+        bordered = ui.Panel2D(size=(120, 100), position=(40, 40))
+
+    image = _render(panel)
+    npt.assert_allclose(image[90, 100], _hex("#1C1D20"), atol=2)
+    npt.assert_array_equal(image[40, 40], (0, 0, 0))
+    npt.assert_array_equal(image[41, 41], (0, 0, 0))
+    assert image[90, 40].sum() > image[90, 100].sum()
+
+    border_image = _render(bordered)
+    npt.assert_allclose(border_image[90, 42], _hex("#2C2E33"), atol=2)
+    npt.assert_allclose(border_image[90, 100], _hex("#1C1D20"), atol=2)
+
+
+def test_graphite_light_panel_casts_a_shadow():
+    """The light Graphite panel darkens the scene below its bottom edge."""
+    with ui.theme_scope("graphite_light"):
+        panel = ui.Panel2D(size=(120, 80), position=(40, 40))
+
+    image = _render(panel, background=(1, 1, 1))
+    npt.assert_allclose(image[80, 100], (255, 255, 255), atol=1)
+    assert image[128, 100].sum() < 3 * 252
+    npt.assert_array_equal(image[20, 100], (255, 255, 255))
+
+
+def test_graphite_panel_uses_theme_padding_and_gap():
+    """Children added to a Graphite panel are inset and spaced by the theme."""
+    with ui.theme_scope("graphite"):
+        panel = ui.Panel2D(size=(200, 200), position=(10, 20))
+        panel.set_layout(direction=ui.Direction.COLUMN)
+        first = ui.Rectangle2D(size=(50, 20))
+        second = ui.Rectangle2D(size=(50, 20))
+        panel.add(first)
+        panel.add(second)
+    panel.update_layout()
+
+    npt.assert_array_equal(first.get_position(), (22, 32))
+    npt.assert_array_equal(second.get_position(), (22, 60))
+
+    panel.set_layout(padding=0)
+    panel.update_layout()
+    npt.assert_array_equal(first.get_position(), (10, 20))
+
+
+def test_widget_panels_ignore_theme_padding():
+    """Panels that widgets build for their parts keep their own spacing."""
+    with ui.theme_scope("graphite"):
+        combo = ui.ComboBox2D(items=["a", "b"], size=(200, 200))
+
+    assert combo.panel.layout_style.padding.left == 0
+    assert combo.panel.layout_style.gap == 0
+
+
+def test_classic_panel_matches_flat_rectangle():
+    """A classic panel draws the same pixels as a plain rectangle."""
+    panel = ui.Panel2D(size=(120, 100), position=(40, 40))
+    rectangle = ui.Rectangle2D(
+        size=(120, 100), position=(40, 40), color=(0.1, 0.1, 0.1), opacity=0.7
+    )
+
+    npt.assert_array_equal(
+        _render(panel, background=(0.5, 0.6, 0.7)),
+        _render(rectangle, background=(0.5, 0.6, 0.7)),
+    )
+
+
+def test_classic_panel_ignores_border_width_without_has_border():
+    """Like before themes, a border width alone draws no classic border."""
+    panel = ui.Panel2D(size=(120, 100), position=(40, 40), border_width=4)
+    plain = ui.Panel2D(size=(120, 100), position=(40, 40))
+
+    npt.assert_array_equal(_render(panel), _render(plain))
+    assert panel.background.border_width == 0
+
+
+def test_graphite_panel_uses_given_border_width():
+    """When the theme draws a panel border, an explicit width is used."""
+    with ui.theme_scope("graphite"):
+        panel = ui.Panel2D(size=(120, 100), position=(40, 40), border_width=4)
+
+    assert panel.background.border_width == 4
+    npt.assert_allclose(_render(panel)[90, 42], _hex("#2C2E33"), atol=2)
+
+
+def test_restyle_updates_has_border_widths():
+    """Restyling a panel with border rectangles resizes them to the theme width."""
+    thick = ui.builtin_theme("classic").derive(items={"Panel2D": {"border_width": 6}})
+    panel = ui.Panel2D(size=(100, 80), has_border=True)
+
+    panel.apply_theme(thick)
+
+    assert panel.border_width == [6, 6, 6, 6]

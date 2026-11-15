@@ -432,7 +432,7 @@ def test_textblock2d_initialization_custom():
 
     assert tb.have_bg is True
     npt.assert_array_almost_equal(tb.background_color, custom_bg)
-    assert isinstance(tb.background, ui.Rectangle2D)
+    assert isinstance(tb.background, ui.RoundedRectangle2D)
 
     assert "**Custom**" in tb.get_formatted_text("Custom")
 
@@ -1108,7 +1108,8 @@ def test_default_style_has_no_border_and_no_shadow():
     assert box.shadow_spread == 0
     assert box.shadow_offset == (0.0, 0.0)
     assert box.shadow_actor.visible is False
-    assert box.actors == [box.actor, box.shadow_actor]
+    assert box.actors == [box.actor]
+    assert box.shadow_actor.parent is box.actor
 
 
 def test_border_is_drawn_inside_the_edge(show_window):
@@ -1513,3 +1514,82 @@ def test_invalid_style_arguments_raise(kwargs):
     name, value = next(iter(kwargs.items()))
     with pytest.raises(ValueError):
         setattr(box, name, value)
+
+
+@pytest.mark.parametrize("opacity", [1.0, 0.7])
+def test_square_borderless_box_matches_rectangle_pixels(show_window, opacity):
+    """A box with square corners and no border draws exactly like Rectangle2D."""
+    box = _box(opacity=opacity)
+    rectangle = ui.Rectangle2D(
+        size=(100, 100), position=(50, 50), color=FILL, opacity=opacity
+    )
+
+    box_image = _snapshot(show_window(box))
+    rectangle_image = _snapshot(show_window(rectangle))
+
+    npt.assert_array_equal(box_image, rectangle_image)
+
+
+def test_box_switches_material_and_keeps_events(show_window):
+    """Rounding and squaring a box changes its look but keeps its events."""
+    box = _box()
+    presses = []
+    box.on_left_mouse_button_pressed = presses.append
+    show_m = show_window(box)
+
+    box.corner_radius = 30
+    _assert_color(_snapshot(show_m)[52, 52], BACKGROUND)
+    box.corner_radius = 0
+    _assert_color(_snapshot(show_m)[52, 52], FILL)
+    box.border_width = 4
+    box.border_color = (0, 1, 0)
+    _assert_color(_snapshot(show_m)[100, 51], (0, 1, 0))
+
+    box.border_width = 0
+    _assert_color(_snapshot(show_m)[100, 51], FILL)
+
+    pick_info = show_m.renderer.get_pick_info((100, 100))
+    assert pick_info["world_object"] is box.actor
+    show_m.renderer.dispatch_event(
+        window.PointerEvent(
+            x=100,
+            y=100,
+            type=window.EventType.POINTER_DOWN,
+            target=pick_info["world_object"],
+            button=1,
+        )
+    )
+    assert len(presses) == 1
+
+
+def test_box_material_switch_keeps_picking_settings(show_window):
+    """A box made non-pickable stays non-pickable after it is rounded."""
+    box = _box()
+    box.actor.material.pick_write = False
+    show_m = show_window(box)
+    box.corner_radius = 20
+    _snapshot(show_m)
+
+    assert show_m.renderer.get_pick_info((100, 100))["world_object"] is None
+
+
+def test_text_font_weight_thickens_glyphs(show_window):
+    """A semibold text block covers more pixels than a regular one."""
+    images = []
+    for weight in (400, 600):
+        text = ui.TextBlock2D(
+            text="Weight",
+            font_size=24,
+            color=(0, 0, 0),
+            position=(20, 80),
+            dynamic_bbox=True,
+            font_weight=weight,
+        )
+        assert text.font_weight == weight
+        images.append(_snapshot(show_window(text)))
+
+    regular, semibold = ((image.sum(axis=-1) < 3 * 128).sum() for image in images)
+    assert semibold > regular * 1.1
+
+    with pytest.raises(ValueError, match="font_weight"):
+        text.font_weight = 1000

@@ -10,6 +10,58 @@ def icon(fname="play3.png"):
     return read_viz_icons(fname=fname)
 
 
+def send_pointer(show_m, kind, position, *, button=0, pointer_id=1):
+    """
+    Send a pointer event through the renderer, as the canvas does.
+
+    The renderer picks the object under the pointer and dispatches the event,
+    generating enter and leave events when the object under the pointer
+    changes.
+
+    Parameters
+    ----------
+    show_m : ShowManager
+        The show manager whose renderer receives the event.
+    kind : str
+        ``"pointer_move"``, ``"pointer_down"`` or ``"pointer_up"``.
+    position : (float, float)
+        Logical canvas coordinates, with y pointing down.
+    button : int, optional
+        Mouse button, 1 for the left button.
+    pointer_id : int, optional
+        Identifier of the pointer.
+    """
+    show_m.renderer.convert_event(
+        {
+            "event_type": kind,
+            "x": float(position[0]),
+            "y": float(position[1]),
+            "button": button,
+            "buttons": (button,) if kind == "pointer_down" else (),
+            "modifiers": (),
+            "ntouches": 0,
+            "touches": {},
+            "pointer_id": pointer_id,
+        }
+    )
+
+
+def click(show_m, position):
+    """
+    Press and release the left button at a position.
+
+    Parameters
+    ----------
+    show_m : ShowManager
+        The show manager whose renderer receives the events.
+    position : (float, float)
+        Logical canvas coordinates, with y pointing down.
+    """
+    send_pointer(show_m, "pointer_move", position)
+    send_pointer(show_m, "pointer_down", position, button=1)
+    send_pointer(show_m, "pointer_up", position, button=1)
+
+
 def list_box_item():
     """Build a standalone ListBoxItem2D with visible text."""
     item = ui.ListBoxItem2D(on_select=lambda **kwargs: None, size=(100, 30))

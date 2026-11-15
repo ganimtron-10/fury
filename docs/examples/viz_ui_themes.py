@@ -56,8 +56,7 @@ classic_panel = settings_panel("Classic", (15, 40))
 ##############################################################################
 # Derive a theme to change only some items. Each item belongs to a UI class,
 # and subclasses inherit it: items set for ``Slider2D`` apply to every
-# slider. ``set_theme`` makes it the global theme for elements created
-# afterwards.
+# slider.
 
 dark = ui.builtin_theme("classic").derive(
     name="dark",
@@ -83,13 +82,17 @@ dark = ui.builtin_theme("classic").derive(
         },
     },
 )
-ui.set_theme(dark)
-dark_panel = settings_panel("Dark", (225, 40))
 
 ##############################################################################
 # ``theme_scope`` applies a theme only to elements created inside the
 # ``with`` block, like a temporary style in an immediate mode UI. Sub-widgets
-# built by a composite widget use the same theme.
+# built by a composite widget use the same theme. ``ui.set_theme(dark)``
+# would instead make it the global theme: elements created afterwards use it,
+# and existing elements that follow the global theme, such as the classic
+# panel above, are restyled.
+
+with ui.theme_scope(dark):
+    dark_panel = settings_panel("Dark", (225, 40))
 
 warm = dark.derive(
     name="warm",
@@ -113,9 +116,7 @@ with ui.theme_scope(warm):
 
 ##############################################################################
 # ``Theme.save`` and ``Theme.load`` store a theme in a JSON file, which makes
-# it easy to share. Restore the classic theme so later code is not affected.
-
-ui.set_theme("classic")
+# it easy to share.
 
 ##############################################################################
 # Add the panels to a scene and show it.

@@ -13,6 +13,7 @@ from fury.data import DATA_DIR, fetch_viz_icons, fetch_viz_new_icons, read_viz_i
 from fury.lib import KeyboardEvent
 from fury.testing import VisualTest
 from fury.ui.helpers import Anchor
+from fury.ui.tests._helpers import click, send_pointer
 
 
 def test_textured_button_2d_initialization():
@@ -3670,3 +3671,387 @@ def test_loader_validation_preserves_rendered_content():
         npt.assert_array_equal(show_m.snapshot(), original)
     finally:
         show_m.close()
+
+
+GRAPHITE = {
+    "background": "#1C1D20",
+    "border": "#2C2E33",
+    "text": "#ECEDEF",
+    "muted": "#8D9097",
+    "accent": "#F2F3F5",
+    "fill": "#26282C",
+}
+
+
+def _hex(color):
+    """
+    Convert a hex color to 8-bit RGB values.
+
+    Parameters
+    ----------
+    color : str
+        Color such as ``"#1C1D20"``.
+
+    Returns
+    -------
+    ndarray
+        RGB values in [0, 255].
+    """
+    return np.array([int(color[i : i + 2], 16) for i in (1, 3, 5)])
+
+
+@pytest.fixture
+def offscreen():
+    """
+    Provide a factory for offscreen windows that are closed after the test.
+
+    Yields
+    ------
+    callable
+        ``offscreen(*elements, size=(200, 200))`` returns a ShowManager
+        showing the elements over a black scene.
+    """
+    managers = []
+
+    def factory(*elements, size=(200, 200)):
+        """
+        Create an offscreen window showing the elements.
+
+        Parameters
+        ----------
+        *elements : UI
+            Elements to show.
+        size : (int, int), optional
+            Window size in pixels.
+
+        Returns
+        -------
+        ShowManager
+            The show manager, with one frame drawn.
+        """
+        scene = window.Scene(background=(0, 0, 0))
+        scene.add(*elements)
+        show_m = window.ShowManager(
+            scene=scene, size=size, window_type="offscreen", pixel_ratio=1
+        )
+        managers.append(show_m)
+        _draw(show_m)
+        return show_m
+
+    yield factory
+    for show_m in managers:
+        show_m.close()
+
+
+def _draw(show_m):
+    """
+    Draw a frame and return its RGB pixels.
+
+    Parameters
+    ----------
+    show_m : ShowManager
+        The show manager to draw.
+
+    Returns
+    -------
+    ndarray
+        Image indexed as ``image[y, x]``, with values in [0, 255].
+    """
+    show_m.render()
+    show_m.window.draw()
+    return np.asarray(show_m.snapshot())[..., :3].astype(int)
+
+
+def _center(element):
+    """
+    Get the center of a UI element.
+
+    Parameters
+    ----------
+    element : UI
+        The element.
+
+    Returns
+    -------
+    ndarray
+        Center (x, y) in canvas coordinates.
+    """
+    return element.get_position(x_anchor=Anchor.CENTER, y_anchor=Anchor.CENTER)
+
+
+def test_graphite_text_button_hover_and_pressed_colors(offscreen):
+    """Real pointer events show the Graphite hover and pressed colors."""
+    with ui.theme_scope("graphite"):
+        button = ui.TextButton2D("Go", size=(100, 40), position=(50, 50))
+    show_m = offscreen(button)
+    sample = (58, 70)
+
+    npt.assert_allclose(_draw(show_m)[sample[1], sample[0]], _hex("#F2F3F5"), atol=2)
+
+    send_pointer(show_m, "pointer_move", sample)
+    assert button.is_hovered
+    npt.assert_allclose(_draw(show_m)[sample[1], sample[0]], _hex("#FFFFFF"), atol=2)
+
+    send_pointer(show_m, "pointer_down", sample, button=1)
+    npt.assert_allclose(_draw(show_m)[sample[1], sample[0]], _hex("#C9CBD0"), atol=2)
+
+    send_pointer(show_m, "pointer_up", sample, button=1)
+    npt.assert_allclose(_draw(show_m)[sample[1], sample[0]], _hex("#FFFFFF"), atol=2)
+
+    send_pointer(show_m, "pointer_move", (5, 5))
+    npt.assert_allclose(_draw(show_m)[sample[1], sample[0]], _hex("#F2F3F5"), atol=2)
+
+
+def test_graphite_text_button_has_rounded_corners(offscreen):
+    """The Graphite button box is rounded, so its corner shows the scene."""
+    with ui.theme_scope("graphite"):
+        button = ui.TextButton2D("Go", size=(100, 40), position=(50, 50))
+    image = _draw(offscreen(button))
+
+    assert image[50, 50].max() < 40
+    npt.assert_allclose(image[70, 52], _hex(GRAPHITE["accent"]), atol=2)
+    npt.assert_allclose(image[52, 100], _hex(GRAPHITE["accent"]), atol=2)
+
+
+def test_graphite_text_button_disabled_state(offscreen):
+    """A disabled Graphite button is dimmed and ignores the pointer."""
+    clicks = []
+    with ui.theme_scope("graphite"):
+        button = ui.TextButton2D("Go", size=(100, 40), position=(50, 50))
+    button.on_clicked = clicks.append
+    button.enabled = False
+    show_m = offscreen(button)
+    sample = (58, 70)
+
+    npt.assert_allclose(
+        _draw(show_m)[sample[1], sample[0]], _hex(GRAPHITE["fill"]), atol=2
+    )
+    npt.assert_array_almost_equal(
+        button.child.color, _hex(GRAPHITE["muted"]) / 255, decimal=3
+    )
+
+    click(show_m, sample)
+    assert clicks == []
+    npt.assert_allclose(
+        _draw(show_m)[sample[1], sample[0]], _hex(GRAPHITE["fill"]), atol=2
+    )
+
+    button.enabled = True
+    npt.assert_array_almost_equal(button.child.color, _hex("#141518") / 255, decimal=3)
+
+
+def test_secondary_text_button_uses_secondary_items():
+    """A secondary button reads the secondary theme items."""
+    with ui.theme_scope("graphite"):
+        button = ui.TextButton2D("Reset", variant="secondary")
+
+    npt.assert_array_almost_equal(
+        button.child.background.color, _hex(GRAPHITE["background"]) / 255, decimal=3
+    )
+    npt.assert_array_almost_equal(
+        button.child.color, _hex(GRAPHITE["text"]) / 255, decimal=3
+    )
+    with pytest.raises(ValueError, match="variant"):
+        ui.TextButton2D("Bad", variant="ghost")
+
+
+def test_graphite_text_box_focus_ring(offscreen):
+    """Clicking a Graphite text box shows its focus ring; clicking again hides it."""
+    with ui.theme_scope("graphite"):
+        text_box = ui.TextBox2D(20, 1, text="Name", position=(40, 60))
+    show_m = offscreen(text_box)
+    edge = (41, int(_center(text_box)[1]))
+
+    before = _draw(show_m)[edge[1], edge[0]]
+    click(show_m, _center(text_box))
+    assert text_box._has_focus
+    focused = _draw(show_m)[edge[1], edge[0]]
+    assert focused.sum() > before.sum() + 3 * 50
+
+    click(show_m, _center(text_box))
+    assert not text_box._has_focus
+    npt.assert_allclose(_draw(show_m)[edge[1], edge[0]], before, atol=2)
+
+
+def test_graphite_slider_fills_track_up_to_handle(offscreen):
+    """The inline slider fills the track with the accent up to the handle."""
+    with ui.theme_scope("graphite"):
+        slider = ui.LineSlider2D(position=(20, 50), length=160, initial_value=50)
+    show_m = offscreen(slider)
+    track_y = int(_center(slider.track)[1])
+
+    image = _draw(show_m)
+    npt.assert_allclose(image[track_y, 50], _hex(GRAPHITE["accent"]), atol=2)
+    npt.assert_allclose(image[track_y, 150], _hex(GRAPHITE["border"]), atol=2)
+
+    slider.value = 90
+    image = _draw(show_m)
+    npt.assert_allclose(image[track_y, 150], _hex(GRAPHITE["accent"]), atol=2)
+
+
+def test_inline_slider_places_label_and_value_above_track():
+    """The inline layout puts the label left and the value right, above the track."""
+    with ui.theme_scope("graphite"):
+        slider = ui.LineSlider2D(
+            position=(20, 50),
+            length=160,
+            initial_value=0.25,
+            min_value=0,
+            max_value=1,
+            label="Opacity",
+            text_template="{value:.2f}",
+        )
+
+    left, top = slider.get_position()
+    right = slider.get_position(x_anchor=Anchor.RIGHT)[0]
+    assert slider.label.message == "Opacity"
+    assert slider.text.message == "0.25"
+    npt.assert_allclose(slider.label.get_position()[0], left)
+    npt.assert_allclose(slider.text.get_position(x_anchor=Anchor.RIGHT)[0], right)
+    label_bottom = slider.label.get_position(y_anchor=Anchor.BOTTOM)[1]
+    assert label_bottom < slider.track.get_position()[1]
+    npt.assert_array_equal(slider.track.size, (160, 4))
+    npt.assert_array_equal(slider.handle.size, (14, 14))
+
+
+def test_classic_slider_warns_that_label_is_ignored(caplog):
+    """The classic layout does not show a label and says so."""
+    with caplog.at_level("WARNING"):
+        slider = ui.LineSlider2D(label="Opacity")
+
+    assert slider.label is None
+    assert "label" in caplog.text
+
+
+def test_slider_layout_argument_overrides_theme():
+    """An explicit layout wins over the theme, and a bad one is rejected."""
+    with ui.theme_scope("graphite"):
+        slider = ui.LineSlider2D(layout="classic")
+    assert slider.fill is None
+    with pytest.raises(ValueError, match="layout"):
+        ui.LineSlider2D(layout="stacked")
+
+
+def test_graphite_slider_handle_hover_and_drag_colors(offscreen):
+    """The handle shows the hover color under the pointer and the active color."""
+    with ui.theme_scope("graphite"):
+        slider = ui.LineSlider2D(position=(20, 50), length=160, initial_value=50)
+    show_m = offscreen(slider)
+    default = _hex(GRAPHITE["text"]) / 255
+    handle = _center(slider.handle)
+
+    send_pointer(show_m, "pointer_move", handle)
+    npt.assert_array_almost_equal(slider.handle.color, (1, 1, 1))
+
+    send_pointer(show_m, "pointer_down", handle, button=1)
+    send_pointer(show_m, "pointer_move", handle + (10, 0))
+    npt.assert_array_almost_equal(
+        slider.handle.color, _hex(GRAPHITE["accent"]) / 255, decimal=3
+    )
+    released_at = _center(slider.handle)
+    send_pointer(show_m, "pointer_up", released_at, button=1)
+    assert not slider._dragging
+    npt.assert_array_almost_equal(slider.handle.color, default, decimal=3)
+
+    _draw(show_m)
+    send_pointer(show_m, "pointer_move", (5, 5))
+    send_pointer(show_m, "pointer_move", released_at)
+    npt.assert_array_almost_equal(slider.handle.color, (1, 1, 1))
+    send_pointer(show_m, "pointer_move", (5, 5))
+    npt.assert_array_almost_equal(slider.handle.color, default, decimal=3)
+
+
+def test_slider_drag_released_outside_ends_on_next_hover(offscreen):
+    """After a release away from the slider, the next hover ends the drag."""
+    with ui.theme_scope("graphite"):
+        slider = ui.LineSlider2D(position=(20, 50), length=160, initial_value=50)
+    show_m = offscreen(slider, size=(300, 200))
+    handle = _center(slider.handle)
+
+    send_pointer(show_m, "pointer_move", handle)
+    send_pointer(show_m, "pointer_down", handle, button=1)
+    send_pointer(show_m, "pointer_move", (280, 190))
+    send_pointer(show_m, "pointer_up", (280, 190), button=1)
+    _draw(show_m)
+    send_pointer(show_m, "pointer_move", _center(slider.handle))
+    send_pointer(show_m, "pointer_move", (290, 195))
+
+    assert not slider._dragging
+    npt.assert_array_almost_equal(
+        slider.handle.color, _hex(GRAPHITE["text"]) / 255, decimal=3
+    )
+
+
+def test_classic_derived_slider_keeps_its_color_on_hover(offscreen):
+    """Without a theme hover color, the handle keeps its color under the pointer."""
+    red = ui.builtin_theme("classic").derive(
+        items={"Slider2D": {"handle_color": (1, 0, 0)}}
+    )
+    with ui.theme_scope(red):
+        slider = ui.LineSlider2D(position=(20, 80), length=160)
+    show_m = offscreen(slider)
+
+    send_pointer(show_m, "pointer_move", _center(slider.handle))
+    assert slider._handle_hovered
+    npt.assert_array_almost_equal(slider.handle.color, (1, 0, 0))
+
+
+def test_graphite_checkbox_click_fills_box(offscreen):
+    """Clicking a Graphite checkbox fills its box with the accent and shows the mark."""
+    with ui.theme_scope("graphite"):
+        checkbox = ui.Checkbox(["Shading"], position=(40, 40))
+    button, _ = checkbox.options["Shading"]
+    show_m = offscreen(checkbox)
+    corner = button.get_position() + 3
+
+    npt.assert_allclose(
+        _draw(show_m)[int(corner[1]), int(corner[0])], _hex(GRAPHITE["fill"]), atol=3
+    )
+    assert not button.mark.visible
+
+    click(show_m, _center(button))
+    assert checkbox.checked_labels == ["Shading"]
+    assert button.mark.visible
+    npt.assert_allclose(
+        _draw(show_m)[int(corner[1]), int(corner[0])], _hex(GRAPHITE["accent"]), atol=3
+    )
+
+
+def test_graphite_radio_shows_dot_for_selection(offscreen):
+    """Clicking a Graphite radio button moves the dot to the clicked option."""
+    with ui.theme_scope("graphite"):
+        radio = ui.RadioButton(["a", "b"], checked_labels=["a"], position=(40, 40))
+    button_a, _ = radio.options["a"]
+    button_b, _ = radio.options["b"]
+    show_m = offscreen(radio)
+
+    assert button_a.child.corner_radius == button_a.size[0] / 2
+    assert button_a.mark.actor.visible
+    assert not button_b.mark.actor.visible
+    dot_b = _center(button_b)
+    npt.assert_allclose(
+        _draw(show_m)[int(dot_b[1]), int(dot_b[0])], _hex(GRAPHITE["fill"]), atol=3
+    )
+
+    click(show_m, dot_b)
+    assert radio.checked_labels == ["b"]
+    assert not button_a.mark.actor.visible
+    assert button_b.mark.actor.visible
+    npt.assert_allclose(
+        _draw(show_m)[int(dot_b[1]), int(dot_b[0])], _hex("#141518"), atol=3
+    )
+
+
+def test_graphite_list_item_hover(offscreen):
+    """A Graphite list item shows the hover color under the pointer."""
+    with ui.theme_scope("graphite"):
+        item = ui.ListBoxItem2D(on_select=lambda **kwargs: None, size=(120, 30))
+    item.set_position((40, 40))
+    item.element = "Hello"
+    show_m = offscreen(item)
+    point = (150, 55)
+
+    send_pointer(show_m, "pointer_move", point)
+    npt.assert_allclose(_draw(show_m)[55, 150], _hex(GRAPHITE["fill"]), atol=2)
+    send_pointer(show_m, "pointer_move", (5, 5))
+    npt.assert_allclose(_draw(show_m)[55, 150], _hex(GRAPHITE["background"]), atol=2)

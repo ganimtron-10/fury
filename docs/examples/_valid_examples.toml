@@ -78,6 +78,7 @@ files = [
     "viz_spinbox.py",
     "viz_textbox.py",
     "viz_ui_themes.py",
+    "viz_ui_graphite.py",
 ]
 
 [animation]
