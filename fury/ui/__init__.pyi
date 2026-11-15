@@ -46,6 +46,11 @@ __all__ = [
     #     "rotate_2d",
     #     "wrap_overflow",
     "UIContext",
+    "Theme",
+    "builtin_theme",
+    "get_theme",
+    "set_theme",
+    "theme_scope",
     "Anchor",
 ]
 
@@ -69,7 +74,6 @@ from .containers import (
 )
 from .context import UIContext
 from .core import UI, Anchor, Disk2D, Rectangle2D, RoundedRectangle2D, TextBlock2D
-from .layout import Align, Direction, Position, fit, fixed, grow, percent
 from .elements import (
     Card2D,
     Checkbox,
@@ -89,6 +93,8 @@ from .elements import (
     TextButton2D,
     TexturedButton2D,
 )
+from .layout import Align, Direction, Position, fit, fixed, grow, percent
+from .theme import Theme, builtin_theme, get_theme, set_theme, theme_scope
 
 # from .elements import (
 #     Checkbox,

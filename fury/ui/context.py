@@ -34,7 +34,68 @@ class UIContextClass:
         self._z_max = 1
         self._z_min = -1
         self._dirty_layouts = WeakSet()
+        self._theme = None
+        self._theme_stack = []
         self._initialized = True
+
+    @property
+    def theme(self):
+        """
+        Get the global theme of UI elements.
+
+        Returns
+        -------
+        Theme or None
+            The global theme, or None before one is set or first needed.
+        """
+        return self._theme
+
+    @theme.setter
+    def theme(self, theme):
+        """
+        Set the global theme of UI elements.
+
+        Parameters
+        ----------
+        theme : Theme
+            The global theme.
+        """
+        self._theme = theme
+
+    def push_theme(self, theme):
+        """
+        Use a theme for UI elements created until the matching pop.
+
+        Parameters
+        ----------
+        theme : Theme
+            The scoped theme.
+        """
+        self._theme_stack.append(theme)
+
+    def pop_theme(self):
+        """
+        Stop using the most recently pushed theme.
+
+        Returns
+        -------
+        Theme
+            The theme that was removed.
+        """
+        return self._theme_stack.pop()
+
+    def current_theme(self):
+        """
+        Get the innermost scoped theme, or the global theme.
+
+        Returns
+        -------
+        Theme or None
+            The theme in use.
+        """
+        if self._theme_stack:
+            return self._theme_stack[-1]
+        return self._theme
 
     @property
     def hot_ui(self):
