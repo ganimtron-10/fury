@@ -18,6 +18,8 @@ __all__ = [
     "PlaybackPanel",
     "Card2D",
     "SpinBox",
+    "TreeNode2D",
+    "Tree2D",
 ]
 
 
@@ -4008,7 +4010,7 @@ class TreeNode2D(UI):
         self.scroll_offset = 0
         self.right_margin = 0
 
-        super(TreeNode2D, self).__init__(position=position, z_order=z_order)
+        super().__init__(position=position, z_order=z_order)
 
         self.on_node_select = lambda ui: None
         self.on_node_deselect = lambda ui: None
@@ -4215,7 +4217,7 @@ class TreeNode2D(UI):
         self._apply_wheel_callback(node)
         node._wheel_callback = getattr(self, "_wheel_callback", None)
 
-    def add_element(self, element, coords=(0.0, 0.0)):
+    def add_element(self, element, *, coords=(0.0, 0.0)):
         """
         Add a UI element to the current node.
 
@@ -4259,7 +4261,7 @@ class TreeNode2D(UI):
 
         self._apply_wheel_callback(element)
 
-    def resize(self, size, recursive=True):
+    def resize(self, size, *, recursive=True):
         """
         Resize the Tree Node.
 
@@ -4361,7 +4363,7 @@ class TreeNode2D(UI):
 
         self._update_actors_position()
 
-    def toggle_view(self, event=None):
+    def toggle_view(self, *, event=None):
         """
         Toggle the view of the node.
 
@@ -4700,7 +4702,7 @@ class TreeNode2D(UI):
         """
         self.set_icon(icon)
 
-    def set_icon(self, icon, selected_icon=None):
+    def set_icon(self, icon, *, selected_icon=None):
         """
         Set the icon of the current node.
 
@@ -4932,7 +4934,7 @@ class Tree2D(UI):
         self.scroll_step_size = 0
         self._last_wheel_event = None
 
-        super(Tree2D, self).__init__(position=position, z_order=z_order)
+        super().__init__(position=position, z_order=z_order)
 
     def _setup(self):
         """Setup this UI element."""
@@ -5292,7 +5294,7 @@ class Tree2D(UI):
         )
         self.update_scrollbar()
 
-    def add_content(self, node, content, coords=(0.0, 0.0)):
+    def add_content(self, node, content, *, coords=(0.0, 0.0)):
         """
         Add content to a specific node.
 
@@ -5312,7 +5314,7 @@ class Tree2D(UI):
         if isinstance(content, TreeNode2D):
             _node.add_node(content)
         else:
-            _node.add_element(content, coords)
+            _node.add_element(content, coords=coords)
 
         _node.set_visibility(False)
         self.update_scrollbar()

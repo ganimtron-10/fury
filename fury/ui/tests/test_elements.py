@@ -2915,7 +2915,7 @@ def test_ui_treenode2d_add_content():
     tree = ui.elements.Tree2D(structure=structure, tree_name="TestTree")
 
     text_block = ui.TextBlock2D(text="My Content", size=(50, 50))
-    tree.add_content("Root", text_block, (0.5, 0.5))
+    tree.add_content("Root", text_block, coords=(0.5, 0.5))
 
     root_node = tree.select_node("Root")
     assert text_block in root_node.content_panel._elements
@@ -2987,12 +2987,12 @@ def test_ui_treenode2d_expand_collapse_logic():
         x=10, y=10, type=window.EventType.POINTER_DOWN, target="target"
     )
 
-    root_node.toggle_view(event_click)
+    root_node.toggle_view(event=event_click)
     assert root_node.expanded is True
     assert root_node.content_panel.actors[0].visible is True
     assert root_node.button.toggled is True
 
-    root_node.toggle_view(event_click)
+    root_node.toggle_view(event=event_click)
     assert root_node.expanded is False
     assert root_node.content_panel.actors[0].visible is False
     assert root_node.button.toggled is False
@@ -3210,7 +3210,7 @@ def test_ui_tree2d_added_content_is_scrollable_and_clipped():
     assert tree.scroll_step_size == 0
     content = ui.Rectangle2D(size=(100, 400), color=(1, 0, 0))
 
-    tree.add_content("Leaf", content, (10, 0))
+    tree.add_content("Leaf", content, coords=(10, 0))
 
     assert tree.scroll_step_size > 0
     assert len(content.actor.material.clipping_planes) == 4

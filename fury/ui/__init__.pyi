@@ -28,6 +28,8 @@ __all__ = [
     "PlaybackPanel",
     "Card2D",
     "SpinBox",
+    "TreeNode2D",
+    "Tree2D",
     "UI",
     #     "cal_bounding_box_2d",
     #     "check_overflow",
@@ -66,6 +68,8 @@ from .elements import (
     TextBox2D,
     TextButton2D,
     TexturedButton2D,
+    Tree2D,
+    TreeNode2D,
 )
 
 # from .elements import (

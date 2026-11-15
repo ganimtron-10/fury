@@ -42,7 +42,7 @@ structure = [
     {"Containers": ["Panels", "ImageContainers"]},
 ]
 
-tree = ui.elements.Tree2D(
+tree = ui.Tree2D(
     structure=structure, tree_name="FURY UI Breakdown", size=(500, 500), position=(0, 0)
 )
 
@@ -61,7 +61,7 @@ disk = Disk2D(outer_radius=50, color=(0.6, 0.2, 0.8))
 # Now, we add the UI elements to their respective nodes.
 
 tree.add_content("Rectangle", rect)
-tree.add_content("Disk", disk, (0.5, 0.5))
+tree.add_content("Disk", disk, coords=(0.5, 0.5))
 
 ###############################################################################
 # Now, let's create UI elements for the Elements node.
@@ -82,13 +82,13 @@ rangeslider = RangeSlider(
 ###############################################################################
 # Now, we add the UI elements to their respective nodes.
 
-tree.add_content("Button", button, (0.1, 0.5))
-tree.add_content("ComboBox", combobox, (0.1, 0.5))
+tree.add_content("Button", button, coords=(0.1, 0.5))
+tree.add_content("ComboBox", combobox, coords=(0.1, 0.5))
 tree.add_content("ListBox", listbox)
-tree.add_content("LineSlider", lineslider, (0.5, 0.5))
-tree.add_content("LineDoubleSlider", linedoubleslider, (0.1, 0.5))
-tree.add_content("RingSlider", ringslider, (0.1, 0.5))
-tree.add_content("RangeSlider", rangeslider, (0.1, 0.5))
+tree.add_content("LineSlider", lineslider, coords=(0.5, 0.5))
+tree.add_content("LineDoubleSlider", linedoubleslider, coords=(0.1, 0.5))
+tree.add_content("RingSlider", ringslider, coords=(0.1, 0.5))
+tree.add_content("RangeSlider", rangeslider, coords=(0.1, 0.5))
 
 ###############################################################################
 # Now, we create UI elements for the Containers node.
@@ -111,8 +111,8 @@ img = ImageContainer2D(img_path=path, size=(100, 100))
 # Now, we add the UI elements to their respective nodes.
 
 tree.add_content("Panels", panel_first)
-tree.add_content("Panels", panel_second, (0.5, 0.5))
-tree.add_content("ImageContainers", img, (0.5, 0.5))
+tree.add_content("Panels", panel_second, coords=(0.5, 0.5))
+tree.add_content("ImageContainers", img, coords=(0.5, 0.5))
 
 ###############################################################################
 # Finally, we add the tree to our scene and start the interactive window.

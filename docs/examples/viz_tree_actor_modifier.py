@@ -26,7 +26,7 @@ structure = [
 ###############################################################################
 # Next, we instantiate the ``Tree2D`` object using the structure defined above.
 
-tree = ui.elements.Tree2D(
+tree = ui.Tree2D(
     structure=structure,
     tree_name="Actor Modifier",
     size=(500, 500),
@@ -144,14 +144,14 @@ def setup_actor_controls(actor_obj, node_name):
     color_node = node.select_child("Color")
 
     # Add the translation controls
-    translate_node.add_element(line_slider_x, (0.1, 0.0))
-    translate_node.add_element(line_slider_y, (0.1, 1.5))
-    translate_node.add_element(ring_slider, (0.6, 1.5))
+    translate_node.add_element(line_slider_x, coords=(0.1, 0.0))
+    translate_node.add_element(line_slider_y, coords=(0.1, 1.5))
+    translate_node.add_element(ring_slider, coords=(0.6, 1.5))
 
     # Add the color controls
-    color_node.add_element(line_slider_r, (0.1, 0.0))
-    color_node.add_element(line_slider_g, (0.4, 0.0))
-    color_node.add_element(line_slider_b, (0.7, 0.0))
+    color_node.add_element(line_slider_r, coords=(0.1, 0.0))
+    color_node.add_element(line_slider_g, coords=(0.4, 0.0))
+    color_node.add_element(line_slider_b, coords=(0.7, 0.0))
 
     translate_node.set_visibility(node.expanded)
     color_node.set_visibility(node.expanded)
