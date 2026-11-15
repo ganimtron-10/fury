@@ -553,6 +553,13 @@ def _composite_factories(directory):
             structure=[{"Root": ["Child1", "Child2"]}], tree_name="Tree"
         ),
         "loader": lambda: ui.Loader2D(size=(400, 300), message="Loading"),
+        "switch": lambda: ui.Switch2D(label="Shading", checked=True, position=(50, 50)),
+        "switch_off": lambda: ui.Switch2D(
+            label="Axes", label_side="left", position=(50, 50)
+        ),
+        "segmented": lambda: ui.SegmentedControl2D(
+            ["Axial", "Coronal", "Sagittal"], selected_index=1, position=(50, 50)
+        ),
     }
 
 
@@ -603,6 +610,9 @@ COMPOSITES = [
     "filemenu",
     "tree",
     "loader",
+    "switch",
+    "switch_off",
+    "segmented",
 ]
 
 
@@ -798,6 +808,9 @@ RESTYLE_MATCHES_FRESH = [
     "card",
     "tree",
     "loader",
+    "switch",
+    "switch_off",
+    "segmented",
 ]
 
 
@@ -865,18 +878,33 @@ def _center(element):
     return element.get_position(x_anchor=Anchor.CENTER, y_anchor=Anchor.CENTER)
 
 
-@pytest.mark.parametrize("state", ["hovered_button", "focused_textbox", "open_combo"])
+@pytest.mark.parametrize(
+    "state",
+    [
+        "hovered_button",
+        "focused_textbox",
+        "open_combo",
+        "hovered_switch",
+        "hovered_segment",
+    ],
+)
 def test_roundtrip_keeps_interaction_states(state):
     """A restyle round trip during hover, focus or an open menu changes nothing."""
     factories = {
         "hovered_button": lambda: ui.TextButton2D("Go", position=(50, 50)),
         "focused_textbox": lambda: ui.TextBox2D(20, 2, text="Type", position=(50, 50)),
         "open_combo": lambda: ui.ComboBox2D(items=["x", "y"], position=(50, 50)),
+        "hovered_switch": lambda: ui.Switch2D(label="Axes", position=(50, 50)),
+        "hovered_segment": lambda: ui.SegmentedControl2D(["a", "b"], position=(50, 50)),
     }
 
     def interact(show_m, widget, restyle):
         if state == "hovered_button":
             send_pointer(show_m, "pointer_move", _center(widget))
+        elif state == "hovered_switch":
+            send_pointer(show_m, "pointer_move", _center(widget.track))
+        elif state == "hovered_segment":
+            send_pointer(show_m, "pointer_move", _center(widget.segments[1]))
         elif state == "focused_textbox":
             click(show_m, _center(widget))
         else:
@@ -1370,6 +1398,69 @@ USER_VALUES = [
         lambda: ui.SpinBox(),
         _set("panel_color", RED),
         lambda w: w.panel.background.color,
+        RED,
+    ),
+    (
+        "switch.track_on_color",
+        lambda: ui.Switch2D(checked=True),
+        _set("track_on_color", RED),
+        lambda w: w.track.color,
+        RED,
+    ),
+    (
+        "switch.track_color",
+        lambda: ui.Switch2D(),
+        _set("track_color", RED),
+        lambda w: w.track.color,
+        RED,
+    ),
+    (
+        "switch.knob_color",
+        lambda: ui.Switch2D(),
+        _set("knob_color", RED),
+        lambda w: w.knob.color,
+        RED,
+    ),
+    (
+        "switch.label_color",
+        lambda: ui.Switch2D(label="a"),
+        _set("label_color", RED),
+        lambda w: w.label.color,
+        RED,
+    ),
+    (
+        "switch.track.color",
+        lambda: ui.Switch2D(),
+        _set("track.color", RED),
+        lambda w: w.track.color,
+        RED,
+    ),
+    (
+        "segmented.color",
+        lambda: ui.SegmentedControl2D(["a", "b"]),
+        _set("color", RED),
+        lambda w: w.container.color,
+        RED,
+    ),
+    (
+        "segmented.selected_color",
+        lambda: ui.SegmentedControl2D(["a", "b"]),
+        _set("selected_color", RED),
+        lambda w: w.segments[0].color,
+        RED,
+    ),
+    (
+        "segmented.text_color",
+        lambda: ui.SegmentedControl2D(["a", "b"]),
+        _set("text_color", RED),
+        lambda w: w.labels[1].color,
+        RED,
+    ),
+    (
+        "segmented.selected_text_color",
+        lambda: ui.SegmentedControl2D(["a", "b"]),
+        _set("selected_text_color", RED),
+        lambda w: w.labels[0].color,
         RED,
     ),
 ]
@@ -2052,3 +2143,54 @@ def test_text_color_none_after_theme_change_follows_button():
     expected = ui.TextButton2D("Go").child.color
     npt.assert_allclose(button.child.color, expected)
     npt.assert_allclose(button.child.color, _hex("#141518"))
+
+
+@pytest.mark.parametrize("name", ["graphite", "graphite_light"])
+def test_switch_and_segmented_control_follow_the_mockup(name):
+    """Fresh Graphite widgets use the mockup sizes and palette colors."""
+    palette = ui.theme.GRAPHITE_PALETTE
+    if name == "graphite_light":
+        palette = ui.theme.GRAPHITE_LIGHT_PALETTE
+    with ui.theme_scope(name):
+        switch = ui.Switch2D(checked=True)
+        control = ui.SegmentedControl2D(["Axial", "Cor", "Sag"])
+
+    npt.assert_array_equal(switch.track.size, (30, 18))
+    npt.assert_array_equal(switch.knob.size, (12, 12))
+    assert switch.knob.corner_radius == 6
+    npt.assert_allclose(switch.track.color, _hex(palette["accent"]))
+    npt.assert_allclose(switch.knob.color, _hex(palette["on_accent"]))
+    assert control.container.corner_radius == 8
+    assert control.container.border_width == 1
+    assert control.segments[0].corner_radius == 6
+    npt.assert_allclose(control.container.color, _hex(palette["fill"]))
+    npt.assert_allclose(control.segments[0].color, _hex(palette["accent"]))
+    npt.assert_allclose(control.labels[0].color, _hex(palette["on_accent"]))
+    npt.assert_allclose(control.labels[1].color, _hex(palette["muted"]))
+    assert control.labels[0].font_weight == 600
+
+
+def test_user_switch_and_segment_colors_survive_graphite():
+    """Colors set by the user are drawn after a switch to Graphite."""
+    switch = ui.Switch2D(checked=True, track_on_color=GREEN, position=(20, 20))
+    control = ui.SegmentedControl2D(["a", "b"], position=(20, 80))
+    control.selected_color = RED
+
+    ui.set_theme("graphite")
+
+    npt.assert_array_almost_equal(switch.track.color, GREEN)
+    npt.assert_array_almost_equal(control.segments[0].color, RED)
+    npt.assert_array_almost_equal(control.container.color, _hex("#26282C"))
+    track_x, track_y = switch.track.get_position() + (5, 9)
+    segment_x, segment_y = control.segments[0].get_position() + (4, 4)
+    scene = window.Scene(background=(0, 0, 0))
+    scene.add(switch, control)
+    show_m = window.ShowManager(
+        scene=scene, size=(200, 200), window_type="offscreen", pixel_ratio=1
+    )
+    show_m.render()
+    show_m.window.draw()
+    image = np.asarray(show_m.snapshot())[..., :3].astype(int)
+    show_m.close()
+    npt.assert_allclose(image[int(track_y), int(track_x)], (0, 255, 0), atol=3)
+    npt.assert_allclose(image[int(segment_y), int(segment_x)], (255, 0, 0), atol=3)

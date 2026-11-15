@@ -79,6 +79,7 @@ files = [
     "viz_textbox.py",
     "viz_ui_themes.py",
     "viz_ui_graphite.py",
+    "viz_ui_switch_segmented.py",
 ]
 
 [animation]

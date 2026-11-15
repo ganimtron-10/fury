@@ -137,4 +137,8 @@ ELEMENT_FACTORIES = {
     "image_container_2d": lambda: ui.ImageContainer2D(
         img_path=icon("home3.png"), size=(100, 100)
     ),
+    "switch_2d": lambda: ui.Switch2D(label="Shading", position=(50, 50)),
+    "segmented_control_2d": lambda: ui.SegmentedControl2D(
+        ["Axial", "Coronal", "Sagittal"], position=(50, 50)
+    ),
 }
