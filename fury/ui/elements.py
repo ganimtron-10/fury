@@ -4050,6 +4050,12 @@ class TreeNode2D(UI):
         Whether the node is selected.
     selectable : bool
         Whether clicking the title row selects the node.
+    multiselect : bool
+        If False, selecting a node deselects every other node of the tree.
+        Only the value of the topmost node is used.
+    right_margin : int
+        Width in pixels kept free on the right of the rows, used by Tree2D
+        for its scroll bar.
     on_node_select : callable
         Called with the node after it is selected.
     on_node_deselect : callable
@@ -4992,8 +4998,8 @@ class TreeNode2D(UI):
         """
         Set the expanded state of the node.
 
-        Collapsing a node also collapses its child nodes. The node holding
-        this one is told about the change in height.
+        Collapsing a node also collapses its expandable child nodes. The
+        node holding this one is told about the change in height.
 
         Parameters
         ----------
@@ -5254,13 +5260,14 @@ class Tree2D(UI):
     opacity : float, optional
         Background opacity of the title row and body of the Tree2D.
     indent : int, optional
-        Global indentation for the parent/child nodes.
+        Indentation of each level of nodes built from ``structure``.
     multiselect : bool, optional
         If False, selecting a node deselects every other node of the tree.
     button_position : str, optional
         Position of the collapse/expand button, either 'start' or 'end'.
     icon : str or ndarray, optional
-        Path, URL or image data of the icon placed next to each label.
+        Path, URL or image data of the icon placed next to the label of each
+        node built from ``structure``.
     selected_icon : str or ndarray, optional
         Icon shown while a node is selected. When not given, ``icon`` is
         shown in both states.
@@ -5282,6 +5289,13 @@ class Tree2D(UI):
         If False, selecting a node deselects every other node of the tree.
     selected_nodes : list of TreeNode2D
         Selected nodes of the tree.
+    view_offset : float
+        How far the rows are scrolled, in pixels.
+    scroll_step_size : float
+        Pixels the rows move per pixel of scroll-bar drag; 0 when the rows
+        fit and there is nothing to scroll.
+    scroll_init_position : float
+        Pointer position the current scroll-bar drag is measured from.
     """
 
     def __init__(

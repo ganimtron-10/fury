@@ -4247,7 +4247,12 @@ def test_line_double_slider_2d_layers_follow_z_order():
 
 
 def test_listbox2d_empty_slot_click_and_size(ui_scene, caplog):
-    """Empty ListBox2D slots stay collapsed and ignore clicks without errors."""
+    """
+    Empty ListBox2D slots stay collapsed and ignore clicks without errors.
+
+    The click goes straight to the collapsed slot, since a 1 px slot cannot be
+    picked reliably; it checks the guard against clicks on empty slots.
+    """
     show_manager, scene = ui_scene
     listbox = ui.ListBox2D(values=["One"], size=(150, 150))
     scene.add(listbox)
