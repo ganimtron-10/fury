@@ -3664,6 +3664,65 @@ def test_ui_treenode2d_collapse_reports_one_size_change():
     )
 
 
+def test_ui_tree2d_scroll_bar_stays_on_top_inside_a_moved_panel(ui_scene):
+    """Moving a panel holding a tree keeps the scroll bar above the rows."""
+    show_manager, scene = ui_scene
+    panel = ui.Panel2D(size=(300, 300), color=(0.5, 0.5, 0.5))
+    tree = ui.Tree2D(
+        structure=[{"Root": [f"Child {i}" for i in range(15)]}],
+        size=TREE_SIZE,
+        z_order=2,
+    )
+    panel.add_element(tree, (10, 10))
+    scene.add(panel)
+    tree.get_node("Root").toggle_view()
+
+    tree.z_order = 2
+    panel.set_position((40, 40))
+
+    npt.assert_equal(tree.scroll_bar.z_order, tree.z_order + 1)
+    _render(show_manager)
+    pick = show_manager.renderer.get_pick_info(_center(tree.scroll_bar))
+    assert pick["world_object"] is tree.scroll_bar.actor
+
+
+def test_ui_treenode2d_unexpandable_child_keeps_its_state():
+    """Collapsing a parent leaves a non-expandable child expanded."""
+    fixed_open = ui.TreeNode2D(
+        label="C", expandable=False, expanded=True, children=[ui.TreeNode2D("c")]
+    )
+    parent = ui.TreeNode2D(label="P", children=[fixed_open])
+
+    parent.expanded = True
+    parent.expanded = False
+    parent.expanded = True
+
+    assert fixed_open.expanded
+    assert _shown(fixed_open.child_nodes[0].title_panel.background)
+
+
+def test_ui_treenode2d_warns_when_child_height_is_replaced(caplog):
+    """A node added with a different child_height is reported."""
+    parent = ui.TreeNode2D(label="P", child_height=30)
+
+    with caplog.at_level(logging.WARNING):
+        parent.add_node(ui.TreeNode2D(label="C", child_height=50))
+
+    assert any("child_height" in record.getMessage() for record in caplog.records)
+    npt.assert_equal(parent.child_nodes[0].child_height, 30)
+
+
+def test_line_double_slider_2d_keeps_layers_when_z_order_is_set_again():
+    """Setting the same z_order twice keeps handles above the track."""
+    slider = ui.LineDoubleSlider2D(length=100)
+
+    slider.z_order = 4
+    slider.z_order = 4
+
+    npt.assert_equal([handle.z_order for handle in slider.handles], [5, 5])
+    npt.assert_equal([text.z_order for text in slider.texts], [6, 6])
+
+
 def test_ui_tree2d_click_selects_one_node_without_multiselect(ui_scene):
     """With multiselect off, a click deselects nodes in other branches too."""
     show_manager, scene = ui_scene

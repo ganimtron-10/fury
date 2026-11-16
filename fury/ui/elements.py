@@ -1624,9 +1624,10 @@ class LineDoubleSlider2D(UI):
         z_order : int
             The new Z-order.
         """
-        changed = z_order != getattr(self, "_z_order", None)
+        if z_order == getattr(self, "_z_order", None):
+            return
         UI.z_order.fset(self, z_order)
-        if changed and len(getattr(self, "texts", [])) == 2:
+        if len(getattr(self, "texts", [])) == 2:
             self._update_actors_position()
 
     def _update_actors_position(self):
@@ -4407,8 +4408,9 @@ class TreeNode2D(UI):
         """
         Add a child node to the current node.
 
-        The node keeps its expanded and selected state. If only one node may
-        be selected, a selected node added here deselects the others.
+        The node keeps its expanded and selected state and takes this node's
+        ``child_height``. If only one node may be selected, a selected node
+        added here deselects the others.
 
         Parameters
         ----------
@@ -4432,6 +4434,11 @@ class TreeNode2D(UI):
         if node is self or any(inner is self for inner in node.iter_nodes()):
             raise ValueError("A node cannot be added below itself.")
 
+        if node.child_height != self.child_height:
+            logging.warning(
+                f"{node.label!r} takes the child_height of {self.label!r}: "
+                f"{self.child_height} instead of {node.child_height}."
+            )
         node.child_height = self.child_height
         self._child_nodes.append(node)
 
@@ -5011,7 +5018,7 @@ class TreeNode2D(UI):
         node holding this one is told only once.
         """
         for child in self._child_nodes:
-            if isinstance(child, TreeNode2D):
+            if isinstance(child, TreeNode2D) and child._expandable:
                 child._collapse_subtree()
         self._expanded = False
         if self._expandable:
@@ -5262,8 +5269,8 @@ class Tree2D(UI):
     scroll_bar_active_color : list of 3 floats, optional
         Color of the scroll bar while it is being dragged.
     z_order : int, optional
-        Stacking order of the Tree2D. Nested rows are drawn two layers above
-        the node holding them, as elements of a nested Panel2D are.
+        Stacking order of the Tree2D. Its rows are drawn two layers above it,
+        as elements of a Panel2D are.
 
     Attributes
     ----------
@@ -5389,9 +5396,10 @@ class Tree2D(UI):
         z_order : int
             The new Z-order.
         """
-        changed = z_order != getattr(self, "_z_order", None)
+        if z_order == getattr(self, "_z_order", None):
+            return
         UI.z_order.fset(self, z_order)
-        if changed and hasattr(self, "scroll_bar"):
+        if hasattr(self, "scroll_bar"):
             self.scroll_bar.z_order = z_order + 1
             self.update_scrollbar()
 
@@ -5801,6 +5809,7 @@ class Tree2D(UI):
             label=label,
             indent=self._indent,
             child_indent=0,
+            child_height=self._node_height,
             multiselect=self.multiselect,
             button_position=self._button_position,
             icon=self._icon,
