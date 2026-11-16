@@ -72,6 +72,8 @@ files = [
     "viz_textblock.py",
     "viz_spinbox.py",
     "viz_textbox.py",
+    "viz_tree_ui.py",
+    "viz_tree_actor_modifier.py",
 ]
 
 [animation]

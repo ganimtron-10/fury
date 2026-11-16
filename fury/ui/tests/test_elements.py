@@ -1,14 +1,17 @@
 """Test for components module."""
 
+import logging
 from os.path import join as pjoin
 import warnings
 
 import numpy as np
 import numpy.testing as npt
+import pytest
 
 from fury import ui, window
 from fury.data import DATA_DIR, fetch_viz_icons, fetch_viz_new_icons, read_viz_icons
-from fury.lib import KeyboardEvent
+from fury.io import load_image
+from fury.lib import KeyboardEvent, WheelEvent
 from fury.testing import VisualTest
 from fury.ui.helpers import Anchor
 
@@ -1364,23 +1367,47 @@ def test_line_double_slider_2d_initial_values_clamping():
 
 
 def test_range_slider_size_horizontal():
-    """Test that horizontal RangeSlider adds heights of sub-sliders."""
+    """Test that horizontal RangeSlider size encompasses its sub-sliders."""
     rs = ui.RangeSlider(length=200, orientation="horizontal")
 
     size = rs._get_size()
-    expected_h = rs.range_slider.size[1] + rs.value_slider.size[1]
-    expected_w = max(rs.range_slider.size[0], rs.value_slider.size[0])
+    expected_w = (
+        max(
+            rs.range_slider.size[0] + rs.range_slider.get_position()[0],
+            rs.value_slider.size[0] + rs.value_slider.get_position()[0],
+        )
+        - rs.get_position()[0]
+    )
+    expected_h = (
+        max(
+            rs.range_slider.size[1] + rs.range_slider.get_position()[1],
+            rs.value_slider.size[1] + rs.value_slider.get_position()[1],
+        )
+        - rs.get_position()[1]
+    )
     npt.assert_equal(size[0], expected_w)
     npt.assert_equal(size[1], expected_h)
 
 
 def test_range_slider_size_vertical():
-    """Test that vertical RangeSlider adds widths of sub-sliders."""
+    """Test that vertical RangeSlider size encompasses its sub-sliders."""
     rs = ui.RangeSlider(length=200, orientation="vertical")
 
     size = rs._get_size()
-    expected_w = rs.range_slider.size[0] + rs.value_slider.size[0]
-    expected_h = max(rs.range_slider.size[1], rs.value_slider.size[1])
+    expected_w = (
+        max(
+            rs.range_slider.size[0] + rs.range_slider.get_position()[0],
+            rs.value_slider.size[0] + rs.value_slider.get_position()[0],
+        )
+        - rs.get_position()[0]
+    )
+    expected_h = (
+        max(
+            rs.range_slider.size[1] + rs.range_slider.get_position()[1],
+            rs.value_slider.size[1] + rs.value_slider.get_position()[1],
+        )
+        - rs.get_position()[1]
+    )
     npt.assert_equal(size[0], expected_w)
     npt.assert_equal(size[1], expected_h)
 
@@ -2864,6 +2891,1387 @@ def test_ui_card2d_visual(recording=False):
         title="Card2D Visual Test",
         recording=recording,
     )
+
+
+TREE_POSITION = (50, 50)
+TREE_SIZE = (240, 200)
+
+
+@pytest.fixture
+def ui_scene():
+    """Yield an offscreen ShowManager and its scene, then close it."""
+    ui.UIContext.hot_ui = None
+    ui.UIContext.active_ui = None
+    scene = window.Scene(background=(0, 0, 0))
+    show_manager = window.ShowManager(
+        scene=scene, size=(400, 600), window_type="offscreen", pixel_ratio=1
+    )
+    yield show_manager, scene
+    show_manager.close()
+    ui.UIContext.hot_ui = None
+    ui.UIContext.active_ui = None
+
+
+@pytest.fixture
+def expanded_tree(ui_scene):
+    """Yield an offscreen ShowManager with an expanded 15-row Tree2D."""
+    show_manager, scene = ui_scene
+    tree = ui.Tree2D(
+        structure=[{"Root": [f"Child {i}" for i in range(15)]}],
+        tree_name="Tree",
+        position=TREE_POSITION,
+        size=TREE_SIZE,
+        color=(0.1, 0.3, 0.5),
+        opacity=1.0,
+    )
+    scene.add(tree)
+    tree.get_node("Root").toggle_view()
+    return show_manager, tree
+
+
+def _render(show_manager):
+    """Render the scene and return the snapshot."""
+    show_manager.render()
+    show_manager.window.draw()
+    return show_manager.snapshot()
+
+
+def _target_at(show_manager, x, y):
+    """Render, then return the object drawn at (x, y) after hovering it."""
+    _render(show_manager)
+    target = show_manager.renderer.get_pick_info((x, y))["world_object"]
+    show_manager.renderer.dispatch_event(
+        window.PointerEvent(
+            type=window.EventType.POINTER_ENTER, x=x, y=y, target=target
+        )
+    )
+    return target
+
+
+def _wheel_at(show_manager, x, y, dy):
+    """Hover (x, y), then dispatch one wheel event to what is drawn there."""
+    target = _target_at(show_manager, x, y)
+    show_manager.renderer.dispatch_event(
+        WheelEvent(type=window.EventType.WHEEL, x=x, y=y, dx=0, dy=dy, target=target)
+    )
+
+
+def _pointer(show_manager, event_type, x, y, target):
+    """Dispatch one left-button pointer event to a target."""
+    show_manager.renderer.dispatch_event(
+        window.PointerEvent(type=event_type, x=x, y=y, target=target, button=1)
+    )
+
+
+def _click_at(show_manager, x, y):
+    """Press and release the left button over what is drawn at (x, y)."""
+    target = _target_at(show_manager, x, y)
+    _pointer(show_manager, window.EventType.POINTER_DOWN, x, y, target)
+    _pointer(show_manager, window.EventType.POINTER_UP, x, y, target)
+
+
+def _drag_from(show_manager, start, end):
+    """Press at start, drag to end and release, over what is drawn at start."""
+    target = _target_at(show_manager, *start)
+    _pointer(show_manager, window.EventType.POINTER_DOWN, *start, target)
+    _pointer(show_manager, window.EventType.POINTER_DRAG, *end, target)
+    _pointer(show_manager, window.EventType.POINTER_UP, *end, target)
+
+
+def _center(ui_element):
+    """Return the center of a UI element in canvas coordinates."""
+    return tuple(ui_element.get_position() + ui_element.size / 2)
+
+
+def _label_point(node):
+    """Return a point on the label of a node's title row."""
+    return tuple(node.label_text.get_position() + (5, node.child_height / 2))
+
+
+def _shown(ui_element):
+    """Check whether every actor of a UI element and its sub-elements is visible."""
+    actors = [
+        actor
+        for element in ui.elements._collect_ui_elements(ui_element)
+        for actor in element.actors
+    ]
+    assert actors
+    return all(actor.visible for actor in actors)
+
+
+def test_ui_tree2d_initialization():
+    """Tree2D builds one node per label under an unselectable title node."""
+    tree = ui.Tree2D(structure=[{"Root": ["Child1", "Child2"]}], tree_name="TestTree")
+
+    npt.assert_equal(tree.tree_name, "TestTree")
+    npt.assert_equal(sorted(tree.nodes_dict), ["Child1", "Child2", "Root"])
+    npt.assert_equal([node.label for node in tree.nodes], ["Root"])
+    root = tree.get_node("Root")
+    npt.assert_equal([node.label for node in root.child_nodes], ["Child1", "Child2"])
+    assert root.get_child("Child2") is tree.get_node("Child2")
+    assert tree.base_node.expandable is False
+    assert tree.base_node.selectable is False
+    assert tree.base_node.expanded is True
+
+
+def test_ui_tree2d_nested_structure():
+    """A structure key that names an existing node adds children to it."""
+    tree = ui.Tree2D(structure=[{"A": ["a1"]}, {"a1": ["x", "y"]}, {"A": ["a2"]}])
+
+    a_node = tree.get_node("A")
+    npt.assert_equal([node.label for node in a_node.child_nodes], ["a1", "a2"])
+    npt.assert_equal(
+        [node.label for node in tree.get_node("a1").child_nodes], ["x", "y"]
+    )
+    npt.assert_equal([node.label for node in tree.nodes], ["A"])
+
+
+def test_ui_tree2d_rejects_duplicate_labels():
+    """Two nodes cannot share a label, since nodes are looked up by label."""
+    with npt.assert_raises(ValueError):
+        ui.Tree2D(structure=[{"A": ["leaf"]}, {"B": ["leaf"]}])
+
+    tree = ui.Tree2D(structure=[{"A": ["a1"]}])
+    with npt.assert_raises(ValueError):
+        tree.add_content("A", ui.TreeNode2D(label="a1"))
+    assert "a1" in tree.nodes_dict
+    npt.assert_equal(len(tree.get_node("A").child_nodes), 1)
+
+
+def test_ui_treenode2d_rejects_bad_arguments():
+    """Invalid button positions, nodes and coordinates raise errors."""
+    with npt.assert_raises(ValueError):
+        ui.TreeNode2D(label="A", button_position="middle")
+    with npt.assert_raises(ValueError):
+        ui.Tree2D(structure=[{"A": []}], button_position="middle")
+
+    node = ui.TreeNode2D(label="A")
+    with npt.assert_raises(TypeError):
+        node.add_node(ui.Rectangle2D(size=(10, 10)))
+    with npt.assert_raises(ValueError):
+        node.add_element(ui.Rectangle2D(size=(10, 10)), coords=(0.5, 0.5))
+
+    node.add_element(ui.Rectangle2D(size=(10, 10)), coords=(5, 5))
+    with npt.assert_raises(ValueError):
+        node.add_node(ui.TreeNode2D(label="B"))
+
+    parent = ui.TreeNode2D(label="P", children=[ui.TreeNode2D(label="C")])
+    with npt.assert_raises(ValueError):
+        parent.add_element(ui.Rectangle2D(size=(10, 10)))
+
+
+def test_ui_tree2d_add_content_keeps_node_reachable(ui_scene):
+    """Adding content to a node keeps its row, and expanding shows the content."""
+    show_manager, scene = ui_scene
+    tree = ui.Tree2D(
+        structure=[{"A": []}, {"B": ["b1"]}],
+        position=TREE_POSITION,
+        size=TREE_SIZE,
+    )
+    scene.add(tree)
+    a_node = tree.get_node("A")
+    b1_node = tree.get_node("b1")
+    tree.get_node("B").toggle_view()
+    b1_node.toggle_view()
+    content = ui.Rectangle2D(size=(60, 40), color=(1, 0, 0))
+
+    tree.add_content("b1", content, coords=(10, 5))
+
+    assert _shown(tree.get_node("B").title_panel.background)
+    assert _shown(b1_node.title_panel.background)
+    assert _shown(content)
+    npt.assert_array_equal(
+        content.get_position() - b1_node.content_panel.get_position(),
+        (25 + 10, 5),
+    )
+
+    leaf_content = ui.Rectangle2D(size=(60, 40), color=(0, 1, 0))
+    tree.add_content("A", leaf_content)
+    assert _shown(a_node.title_panel.background)
+    assert not _shown(leaf_content)
+
+    _click_at(show_manager, *_center(a_node.button))
+    assert a_node.expanded
+    assert _shown(leaf_content)
+
+
+def test_ui_tree2d_content_added_after_show_is_drawn(ui_scene):
+    """Content and nodes added to a tree already in a scene are drawn."""
+    show_manager, scene = ui_scene
+    tree = ui.Tree2D(
+        structure=[{"Root": ["Leaf"]}], position=TREE_POSITION, size=TREE_SIZE
+    )
+    scene.add(tree)
+    tree.get_node("Root").toggle_view()
+    tree.get_node("Leaf").toggle_view()
+
+    content = ui.Rectangle2D(size=(60, 40), color=(1, 0, 0))
+    tree.add_content("Leaf", content, coords=(10, 5))
+    tree.add_content("Root", ui.TreeNode2D(label="New node"))
+
+    image = _render(show_manager)
+    x, y = (int(value) for value in _center(content))
+    npt.assert_array_equal(image[y, x, :3], (255, 0, 0))
+    new_row = tree.get_node("New node").label_text
+    left, top = (int(value) for value in new_row.get_position())
+    assert image[top : top + 20, left : left + 60, :3].max() > 200
+
+
+def test_ui_tree2d_buttons_added_after_show_are_drawn(ui_scene):
+    """Widgets with textured buttons added to a shown tree draw their buttons."""
+    show_manager, scene = ui_scene
+    tree = ui.Tree2D(
+        structure=[{"Root": ["Combo", "Button"]}],
+        position=TREE_POSITION,
+        size=(300, 400),
+    )
+    scene.add(tree)
+    combobox = ui.ComboBox2D(items=["A", "B"], size=(200, 100))
+    button = ui.TexturedButton2D(
+        states={"default": read_viz_icons(fname="plus.png")}, size=(30, 30)
+    )
+    tree.add_content("Combo", combobox)
+    tree.add_content("Button", button)
+    for label in ("Root", "Combo", "Button"):
+        tree.get_node(label).toggle_view()
+
+    _render(show_manager)
+    for widget in (combobox.drop_down_button, button):
+        x, y = _center(widget)
+        pick = show_manager.renderer.get_pick_info((x, y))["world_object"]
+        assert pick is widget.child.actor
+
+
+def test_ui_tree2d_long_labels_stay_in_their_row(ui_scene):
+    """Long labels and deep rows are shortened instead of overflowing."""
+    show_manager, scene = ui_scene
+    long_label = "A label much longer than the narrow tree row"
+    structure = [{"L0": ["L1"]}, {"L1": ["L2"]}, {"L2": ["L3"]}, {"L3": [long_label]}]
+    tree = ui.Tree2D(structure=structure, position=TREE_POSITION, size=(150, 300))
+    scene.add(tree)
+    for label in ("L0", "L1", "L2", "L3"):
+        tree.get_node(label).toggle_view()
+
+    image = _render(show_manager)
+    left, top = TREE_POSITION
+    right = left + tree.size[0]
+    assert not image[top : top + 300, right + 1 :, :3].any()
+    node = tree.get_node(long_label)
+    assert node.label == long_label
+    assert node.label_text.message != long_label
+    npt.assert_equal(node.size[1], node.child_height)
+
+    top_node = tree.get_node("L0")
+    top_node.label = "New"
+    assert top_node.label_text.message == "New"
+
+
+def test_ui_treenode2d_child_height_relayouts():
+    """Changing child_height resizes the title rows of a node and its children."""
+    node = ui.TreeNode2D(label="Node", children=[ui.TreeNode2D(label="Child")])
+    node.toggle_view()
+
+    node.child_height = 40
+
+    npt.assert_equal(node.title_panel.size[1], 40)
+    npt.assert_equal(node.child_nodes[0].title_panel.size[1], 40)
+    npt.assert_equal(node.size[1], 80)
+
+
+@pytest.mark.parametrize(
+    "structure",
+    [[{"A": ["a"], "B": ["b"]}], [{"A": "abc"}], [{}], ["A"]],
+)
+def test_ui_tree2d_rejects_bad_structure(structure):
+    """Malformed structure entries raise a clear error."""
+    with npt.assert_raises(ValueError):
+        ui.Tree2D(structure=structure)
+
+
+def test_ui_tree2d_added_nodes_keep_state():
+    """Added nodes keep their expanded state and follow single selection."""
+    tree = ui.Tree2D(structure=[{"A": ["a1"]}], multiselect=False)
+    tree.get_node("a1").selected = True
+    extra = ui.TreeNode2D(label="extra", expanded=True)
+    extra.add_node(ui.TreeNode2D(label="inner"))
+    extra.selected = True
+
+    tree.add_content("A", extra)
+
+    assert extra.expanded
+    npt.assert_equal([node.label for node in tree.selected_nodes], ["extra"])
+    assert "inner" in tree.nodes_dict
+
+
+def test_ui_tree2d_z_order_and_resize_after_construction():
+    """Setting z_order later keeps the scroll bar above, and resize is stable."""
+    tree = ui.Tree2D(structure=[{"A": [f"a{i}" for i in range(20)]}], size=TREE_SIZE)
+    tree.get_node("A").toggle_view()
+
+    tree.z_order = 5
+    tree.resize(tree.size)
+    tree.resize(tree.size)
+
+    npt.assert_equal(tree.base_node.z_order, 5)
+    npt.assert_equal(tree.scroll_bar.z_order, 6)
+    npt.assert_array_equal(tree.size, TREE_SIZE)
+
+
+def test_ui_tree2d_body_fills_visible_area(ui_scene):
+    """The tree body is drawn down to the bottom of the tree."""
+    show_manager, scene = ui_scene
+    tree = ui.Tree2D(
+        structure=[{"A": []}],
+        position=TREE_POSITION,
+        size=TREE_SIZE,
+        color=(0.1, 0.3, 0.5),
+        opacity=1.0,
+    )
+    scene.add(tree)
+
+    image = _render(show_manager)
+    left, top = TREE_POSITION
+    bottom_pixel = image[top + TREE_SIZE[1] - 5, left + 5, :3]
+    npt.assert_allclose(bottom_pixel, np.array((0.1, 0.3, 0.5)) * 255, atol=3)
+
+
+def test_ui_tree2d_collapse_and_expand_keep_rows_packed(ui_scene):
+    """Rows stay packed after collapsing an ancestor and expanding it again."""
+    show_manager, scene = ui_scene
+    tree = ui.Tree2D(
+        structure=[{"R": ["A", "B"]}, {"A": ["a1", "a2", "a3"]}],
+        position=TREE_POSITION,
+        size=TREE_SIZE,
+    )
+    scene.add(tree)
+    r_node, a_node, b_node = (tree.get_node(label) for label in ("R", "A", "B"))
+
+    for node in (r_node, a_node, r_node, r_node):
+        _click_at(show_manager, *_center(node.button))
+
+    assert r_node.expanded and not a_node.expanded
+    npt.assert_equal(
+        b_node.get_position()[1], a_node.get_position()[1] + a_node.child_height
+    )
+    npt.assert_equal(r_node.size[1], 3 * r_node.child_height)
+
+
+def test_ui_tree2d_expanded_setter_updates_layout_and_scrolling():
+    """Setting expanded in code moves later rows and turns scrolling on."""
+    tree = ui.Tree2D(
+        structure=[{"R": ["A", "B"] + [f"C{i}" for i in range(12)]}, {"A": ["a1"]}],
+        size=TREE_SIZE,
+    )
+    r_node, a_node, b_node = (tree.get_node(label) for label in ("R", "A", "B"))
+
+    r_node.expanded = True
+    a_node.expanded = True
+
+    npt.assert_equal(
+        b_node.get_position()[1], a_node.get_position()[1] + 2 * a_node.child_height
+    )
+    assert tree.scroll_step_size > 0
+    assert _shown(tree.scroll_bar)
+
+
+def test_ui_tree2d_lookup_follows_renames_and_added_nodes():
+    """nodes_dict follows renamed nodes and nodes added through TreeNode2D."""
+    tree = ui.Tree2D(structure=[{"A": ["a1"]}])
+
+    tree.get_node("a1").label = "renamed"
+    tree.get_node("A").add_node(ui.TreeNode2D(label="direct"))
+
+    npt.assert_equal(sorted(tree.nodes_dict), ["A", "direct", "renamed"])
+    tree.add_content("A", ui.TreeNode2D(label="a1"))
+    assert tree.get_node("a1").label == "a1"
+
+
+@pytest.mark.parametrize("indent", [25, 40, 80])
+def test_ui_tree2d_indent_applies_to_every_level(indent):
+    """Each nesting level is indented by the tree's indent."""
+    tree = ui.Tree2D(structure=[{"A": ["a1"]}, {"a1": ["x"]}], indent=indent)
+    tree.get_node("A").toggle_view()
+    tree.get_node("a1").toggle_view()
+
+    x_positions = [tree.get_node(label).get_position()[0] for label in ("A", "a1", "x")]
+
+    npt.assert_array_equal(np.diff(x_positions), [indent, indent])
+
+
+def test_ui_tree2d_wide_content_leaves_scroll_bar_clickable(ui_scene):
+    """Content wider than the tree is clipped before the scroll bar."""
+    show_manager, scene = ui_scene
+    tree = ui.Tree2D(
+        structure=[{"Root": ["Wide"] + [f"Row {i}" for i in range(12)]}],
+        position=TREE_POSITION,
+        size=TREE_SIZE,
+    )
+    wide = ui.Rectangle2D(size=(400, 300), color=(0, 1, 0))
+    tree.add_content("Wide", wide)
+    scene.add(tree)
+    tree.get_node("Root").toggle_view()
+    tree.get_node("Wide").toggle_view()
+
+    for _ in range(2):
+        _wheel_at(show_manager, *(wide.get_position() + (10, 60)), dy=100)
+    x, y = _center(tree.scroll_bar)
+    assert wide.get_position()[1] < y < wide.get_position()[1] + wide.size[1]
+    _render(show_manager)
+    pick = show_manager.renderer.get_pick_info((x, y))["world_object"]
+
+    assert pick is tree.scroll_bar.actor
+
+
+def test_ui_tree2d_click_on_unselectable_node_expands_it(ui_scene):
+    """Clicking the label of an unselectable node expands it, not selects it."""
+    show_manager, scene = ui_scene
+    tree = ui.Tree2D(
+        structure=[{"A": ["a1"]}],
+        position=TREE_POSITION,
+        size=TREE_SIZE,
+        multiselect=False,
+    )
+    scene.add(tree)
+    a_node = tree.get_node("A")
+    a_node.selectable = False
+
+    _click_at(show_manager, *_label_point(a_node))
+    assert a_node.expanded
+    _click_at(show_manager, *_label_point(tree.get_node("a1")))
+    _click_at(show_manager, *_label_point(a_node))
+
+    assert not a_node.expanded
+    npt.assert_equal([node.label for node in tree.selected_nodes], ["a1"])
+
+
+def test_ui_tree2d_turning_multiselect_off_keeps_one_selection():
+    """Turning multiselect off keeps only the first selected node."""
+    tree = ui.Tree2D(structure=[{"A": ["a1"]}, {"B": []}])
+    for label in ("a1", "B"):
+        tree.get_node(label).selected = True
+
+    tree.multiselect = False
+
+    npt.assert_equal([node.label for node in tree.selected_nodes], ["a1"])
+    tree.get_node("B").selected = True
+    npt.assert_equal([node.label for node in tree.selected_nodes], ["B"])
+
+
+def test_ui_treenode2d_rejects_same_child_twice():
+    """A node cannot be added twice to the same parent."""
+    parent = ui.TreeNode2D(label="P")
+    child = ui.TreeNode2D(label="C")
+    parent.add_node(child)
+
+    with npt.assert_raises(ValueError):
+        parent.add_node(child)
+
+
+def test_ui_tree2d_warns_when_coords_is_unused(caplog):
+    """coords given with a TreeNode2D is reported as unused."""
+    tree = ui.Tree2D(structure=[{"A": []}])
+
+    with caplog.at_level(logging.WARNING):
+        tree.add_content("A", ui.TreeNode2D(label="B"), coords=(10, 10))
+
+    assert any("coords" in record.getMessage() for record in caplog.records)
+
+
+def test_ui_tree2d_body_spans_full_width(ui_scene):
+    """Without a scroll bar the body fills the strip it would use."""
+    show_manager, scene = ui_scene
+    tree = ui.Tree2D(
+        structure=[{"A": []}],
+        position=TREE_POSITION,
+        size=TREE_SIZE,
+        color=(0.1, 0.3, 0.5),
+        opacity=1.0,
+    )
+    scene.add(tree)
+
+    image = _render(show_manager)
+    left, top = TREE_POSITION
+    strip_pixel = image[top + 100, left + TREE_SIZE[0] - 2, :3]
+    npt.assert_allclose(strip_pixel, np.array((0.1, 0.3, 0.5)) * 255, atol=3)
+
+
+def test_ui_tree2d_multi_word_labels_stay_on_one_line(ui_scene):
+    """A long label with spaces is shortened instead of wrapping."""
+    show_manager, scene = ui_scene
+    long_label = "Brain tumor segmentation results for subject"
+    tree = ui.Tree2D(
+        structure=[{"A": [long_label, "Next row"]}],
+        position=TREE_POSITION,
+        size=(300, 200),
+    )
+    scene.add(tree)
+    tree.get_node("A").toggle_view()
+
+    label_text = tree.get_node(long_label).label_text
+    width, height = label_text.get_text_actor_size()
+    assert label_text.message.endswith("...")
+    assert height <= tree.get_node(long_label).child_height
+    assert width <= label_text.size[0]
+
+
+def test_ui_tree2d_expanding_after_moving_places_rows(ui_scene):
+    """Rows of a node expanded after the tree moved or scrolled line up."""
+    show_manager, scene = ui_scene
+    tree = ui.Tree2D(
+        structure=[{"R": ["A"] + [f"r{i}" for i in range(12)]}, {"A": ["a1"]}],
+        position=TREE_POSITION,
+        size=TREE_SIZE,
+    )
+    scene.add(tree)
+    tree.get_node("R").toggle_view()
+    _wheel_at(show_manager, TREE_POSITION[0] + 10, TREE_POSITION[1] + 100, dy=100)
+    tree.set_position((80, 90))
+
+    tree.get_node("A").toggle_view()
+
+    a_node, a1_node = tree.get_node("A"), tree.get_node("a1")
+    npt.assert_array_equal(
+        a1_node.get_position(),
+        a_node.get_position() + (25, a_node.child_height),
+    )
+
+
+def test_ui_treenode2d_rejects_cycles_and_nodes_as_elements():
+    """A node cannot be added below itself or as a plain UI element."""
+    parent = ui.TreeNode2D(label="P")
+    child = ui.TreeNode2D(label="C")
+    parent.add_node(child)
+
+    with npt.assert_raises(ValueError):
+        parent.add_node(parent)
+    with npt.assert_raises(ValueError):
+        child.add_node(parent)
+    with npt.assert_raises(TypeError):
+        ui.TreeNode2D(label="Q").add_element(ui.TreeNode2D(label="R"))
+
+
+def test_ui_tree2d_settings_apply_after_construction():
+    """Changing expandable, colors and the tree name updates the tree."""
+    tree = ui.Tree2D(structure=[{"A": ["a1"]}], tree_name="Old")
+    node = tree.get_node("A")
+
+    tree.tree_name = "New"
+    node.expandable = False
+    node.unselected_color = (0, 0, 1)
+    node.selected = True
+    node.selected_color = (0, 1, 0)
+
+    assert tree.base_node.label_text.message == "New"
+    assert not _shown(node.button)
+    npt.assert_array_almost_equal(node.color, (0, 1, 0))
+    node.selected = False
+    npt.assert_array_almost_equal(node.color, (0, 0, 1))
+
+
+def test_ui_treenode2d_keeps_fixed_height_when_nested():
+    """A node with auto_resize off keeps its height inside another node."""
+    fixed = ui.TreeNode2D(
+        label="fixed", size=(200, 300), auto_resize=False, expanded=True
+    )
+    fixed.add_element(ui.Rectangle2D(size=(40, 40)))
+    parent = ui.TreeNode2D(label="parent", expanded=True)
+
+    parent.add_node(fixed)
+    parent.resize((250, 400))
+
+    npt.assert_equal(fixed.size[1], 300)
+    npt.assert_equal(parent.children_size(), 300)
+
+
+def test_ui_tree2d_keeps_user_wheel_callback_on_content(ui_scene):
+    """A wheel callback set on content before adding it keeps running."""
+    show_manager, scene = ui_scene
+    tree = ui.Tree2D(
+        structure=[{"Root": ["Box"] + [f"r{i}" for i in range(12)]}],
+        position=TREE_POSITION,
+        size=TREE_SIZE,
+    )
+    box = ui.Rectangle2D(size=(80, 40), color=(1, 0, 0))
+    wheel_events = []
+    box.on_wheel = lambda event: wheel_events.append(event.dy)
+    tree.add_content("Box", box)
+    scene.add(tree)
+    tree.get_node("Root").toggle_view()
+    tree.get_node("Box").toggle_view()
+
+    _wheel_at(show_manager, *_center(box), dy=100)
+
+    npt.assert_equal(wheel_events, [100])
+    npt.assert_equal(tree.view_offset, 0)
+
+
+def test_ui_treenode2d_selected_icon_without_icon():
+    """A selected icon alone shows while the node is selected."""
+    minus = read_viz_icons(fname="minus.png")
+    node = ui.TreeNode2D(label="x", selected_icon=minus)
+    assert not _shown(node.label_image)
+
+    node.selected = True
+
+    assert _shown(node.label_image)
+    npt.assert_array_equal(node.label_image.img, load_image(minus))
+    node.selected = False
+    assert not _shown(node.label_image)
+
+
+def test_ui_tree2d_fixed_height_node_grows_for_larger_content(ui_scene):
+    """A fixed-height node taller content pushes later rows down."""
+    show_manager, scene = ui_scene
+    tree = ui.Tree2D(structure=[{"A": []}], position=TREE_POSITION, size=(300, 400))
+    fixed = ui.TreeNode2D(label="F", size=(200, 60), auto_resize=False, expanded=True)
+    for i in range(6):
+        fixed.add_node(ui.TreeNode2D(label=f"f{i}"))
+    tree.add_content("A", fixed)
+    tree.add_content("A", ui.TreeNode2D(label="Z"))
+    scene.add(tree)
+    tree.get_node("A").toggle_view()
+
+    z_node = tree.get_node("Z")
+    last_child = tree.get_node("f5")
+    assert z_node.get_position()[1] >= last_child.get_position()[1] + 25
+    _click_at(show_manager, *_label_point(z_node))
+    npt.assert_equal([node.label for node in tree.selected_nodes], ["Z"])
+
+
+def test_ui_tree2d_structure_is_built_once():
+    """Tree2D builds its structure at construction and has no public rebuild."""
+    tree = ui.Tree2D(structure=[{"A": ["a1"]}])
+
+    assert not hasattr(tree, "generate_tree")
+    npt.assert_equal([node.label for node in tree.base_node.child_nodes], ["A"])
+
+
+def test_ui_treenode2d_expandable_and_selected_icon_setters():
+    """Re-enabling expandable shows the right button, and selected_icon can go."""
+    minus = read_viz_icons(fname="minus.png")
+    plus = read_viz_icons(fname="plus.png")
+    node = ui.TreeNode2D(
+        label="N", children=[ui.TreeNode2D(label="c")], icon=plus, selected_icon=minus
+    )
+    node.expanded = True
+    node.expandable = False
+    node.expanded = False
+    node.expandable = True
+    assert node.button.toggled is False
+
+    node.selected = True
+    npt.assert_array_equal(node.label_image.img, load_image(minus))
+    node.selected_icon = None
+    npt.assert_array_equal(node.label_image.img, load_image(plus))
+    assert node.selected_icon is None
+
+
+def test_ui_treenode2d_fixed_height_node_shrinks_back():
+    """A fixed-height node returns to its height when its content shrinks."""
+    fixed = ui.TreeNode2D(label="F", size=(200, 100), auto_resize=False, expanded=True)
+    child = ui.TreeNode2D(label="c")
+    child.add_element(ui.Rectangle2D(size=(40, 300)))
+    fixed.add_node(child)
+
+    child.toggle_view()
+    assert fixed.size[1] > 300
+    child.toggle_view()
+
+    npt.assert_equal(fixed.size[1], 100)
+
+
+def test_ui_tree2d_clips_wide_text_at_the_right_edge(ui_scene):
+    """Text wider than the tree is not drawn past its right edge."""
+    show_manager, scene = ui_scene
+    tree = ui.Tree2D(structure=[{"A": []}], position=TREE_POSITION, size=TREE_SIZE)
+    wide_text = ui.TextBlock2D(
+        text="A text much wider than the tree that holds it", size=(600, 30)
+    )
+    tree.add_content("A", wide_text)
+    scene.add(tree)
+    tree.get_node("A").toggle_view()
+
+    image = _render(show_manager)
+    right = TREE_POSITION[0] + TREE_SIZE[0]
+    assert not image[:, right + 1 :, :3].any()
+
+
+def test_ui_tree2d_add_node_adds_a_top_level_row():
+    """Tree2D.add_node adds a top-level node and checks its label."""
+    tree = ui.Tree2D(structure=[{"A": ["a1"]}])
+
+    tree.add_node(ui.TreeNode2D(label="B"))
+
+    npt.assert_equal([node.label for node in tree.nodes], ["A", "B"])
+    npt.assert_equal([node.label for node in tree.base_node.child_nodes], ["A", "B"])
+    assert tree.get_node("B").get_position()[1] > tree.get_node("A").get_position()[1]
+    with npt.assert_raises(ValueError):
+        tree.add_node(ui.TreeNode2D(label="a1"))
+
+
+def test_ui_tree2d_scroll_bar_follows_pointer_after_dragging_past_end(ui_scene):
+    """Dragging past the end and back keeps the handle under the pointer."""
+    show_manager, scene = ui_scene
+    tree = ui.Tree2D(
+        structure=[{"Root": [f"Child {i}" for i in range(15)]}],
+        position=TREE_POSITION,
+        size=TREE_SIZE,
+    )
+    scene.add(tree)
+    tree.get_node("Root").toggle_view()
+    x, y = _center(tree.scroll_bar)
+    target = _target_at(show_manager, x, y)
+
+    _pointer(show_manager, window.EventType.POINTER_DOWN, x, y, target)
+    _pointer(show_manager, window.EventType.POINTER_DRAG, x, y - 100, target)
+    _pointer(show_manager, window.EventType.POINTER_DRAG, x, y + 20, target)
+
+    npt.assert_allclose(_center(tree.scroll_bar)[1], y + 20, atol=1)
+
+
+@pytest.mark.parametrize("node_height", [12, 16, 20, 40])
+def test_ui_tree2d_labels_fit_any_row_height(node_height):
+    """Labels stay visible and inside their row for small and large rows."""
+    tree = ui.Tree2D(structure=[{"Alpha": ["Beta"]}], node_height=node_height)
+    tree.get_node("Alpha").toggle_view()
+
+    for label in ("Alpha", "Beta"):
+        label_text = tree.get_node(label).label_text
+        assert label_text.message == label
+        assert label_text.get_text_actor_size()[1] <= node_height
+
+
+def test_ui_treenode2d_collapse_reports_one_size_change():
+    """Collapsing a node with expanded descendants reports one change."""
+    children = [ui.TreeNode2D(label=f"c{i}") for i in range(3)]
+    for child in children:
+        child.add_node(ui.TreeNode2D(label=f"{child.label} leaf"))
+    root = ui.TreeNode2D(label="root", children=children)
+    root.expanded = True
+    for child in children:
+        child.expanded = True
+    changes = []
+    root.on_size_change = lambda node: changes.append(node.label)
+
+    root.expanded = False
+
+    npt.assert_equal(changes, ["root"])
+    assert not any(child.expanded for child in children)
+    root.expanded = True
+    npt.assert_array_equal(
+        [child.get_position()[1] for child in children],
+        root.get_position()[1] + root.child_height * np.arange(1, 4),
+    )
+
+
+def test_ui_tree2d_scroll_bar_stays_on_top_inside_a_moved_panel(ui_scene):
+    """Moving a panel holding a tree keeps the scroll bar above the rows."""
+    show_manager, scene = ui_scene
+    panel = ui.Panel2D(size=(300, 300), color=(0.5, 0.5, 0.5))
+    tree = ui.Tree2D(
+        structure=[{"Root": [f"Child {i}" for i in range(15)]}],
+        size=TREE_SIZE,
+        z_order=2,
+    )
+    panel.add_element(tree, (10, 10))
+    scene.add(panel)
+    tree.get_node("Root").toggle_view()
+
+    tree.z_order = 2
+    panel.set_position((40, 40))
+
+    npt.assert_equal(tree.scroll_bar.z_order, tree.z_order + 1)
+    _render(show_manager)
+    pick = show_manager.renderer.get_pick_info(_center(tree.scroll_bar))
+    assert pick["world_object"] is tree.scroll_bar.actor
+
+
+def test_ui_treenode2d_unexpandable_child_keeps_its_state():
+    """Collapsing a parent leaves a non-expandable child expanded."""
+    fixed_open = ui.TreeNode2D(
+        label="C", expandable=False, expanded=True, children=[ui.TreeNode2D("c")]
+    )
+    parent = ui.TreeNode2D(label="P", children=[fixed_open])
+
+    parent.expanded = True
+    parent.expanded = False
+    parent.expanded = True
+
+    assert fixed_open.expanded
+    assert _shown(fixed_open.child_nodes[0].title_panel.background)
+
+
+def test_ui_treenode2d_warns_when_child_height_is_replaced(caplog):
+    """A node added with a different child_height is reported."""
+    parent = ui.TreeNode2D(label="P", child_height=30)
+
+    with caplog.at_level(logging.WARNING):
+        parent.add_node(ui.TreeNode2D(label="C", child_height=50))
+
+    assert any("child_height" in record.getMessage() for record in caplog.records)
+    npt.assert_equal(parent.child_nodes[0].child_height, 30)
+
+
+def test_line_double_slider_2d_keeps_layers_when_z_order_is_set_again():
+    """Setting the same z_order twice keeps handles above the track."""
+    slider = ui.LineDoubleSlider2D(length=100)
+
+    slider.z_order = 4
+    slider.z_order = 4
+
+    npt.assert_equal([handle.z_order for handle in slider.handles], [5, 5])
+    npt.assert_equal([text.z_order for text in slider.texts], [6, 6])
+
+
+def test_ui_tree2d_click_selects_one_node_without_multiselect(ui_scene):
+    """With multiselect off, a click deselects nodes in other branches too."""
+    show_manager, scene = ui_scene
+    tree = ui.Tree2D(
+        structure=[{"A": ["a1", "a2"]}, {"B": ["b1"]}],
+        tree_name="Tree",
+        position=TREE_POSITION,
+        size=TREE_SIZE,
+        multiselect=False,
+    )
+    scene.add(tree)
+    tree.get_node("A").toggle_view()
+    tree.get_node("B").toggle_view()
+    events = []
+    for node in tree.nodes_dict.values():
+        node.on_node_select = lambda node: events.append(("select", node.label))
+        node.on_node_deselect = lambda node: events.append(("deselect", node.label))
+
+    _click_at(show_manager, *_label_point(tree.get_node("a2")))
+    _click_at(show_manager, *_label_point(tree.get_node("b1")))
+    _click_at(show_manager, *_label_point(tree.get_node("A")))
+    _click_at(show_manager, *_label_point(tree.base_node))
+
+    npt.assert_equal([node.label for node in tree.selected_nodes], ["A"])
+    assert tree.base_node.selected is False
+    npt.assert_equal(
+        events,
+        [
+            ("select", "a2"),
+            ("select", "b1"),
+            ("deselect", "a2"),
+            ("select", "A"),
+            ("deselect", "b1"),
+        ],
+    )
+    npt.assert_array_almost_equal(
+        tree.get_node("A").color, tree.get_node("A").selected_color
+    )
+    npt.assert_array_almost_equal(
+        tree.get_node("b1").color, tree.get_node("b1").unselected_color
+    )
+
+
+def test_ui_tree2d_click_toggles_selection_with_multiselect(ui_scene):
+    """With multiselect on, clicks add nodes and a second click deselects."""
+    show_manager, scene = ui_scene
+    tree = ui.Tree2D(
+        structure=[{"A": ["a1"]}, {"B": []}],
+        position=TREE_POSITION,
+        size=TREE_SIZE,
+    )
+    scene.add(tree)
+    tree.get_node("A").toggle_view()
+
+    _click_at(show_manager, *_label_point(tree.get_node("a1")))
+    _click_at(show_manager, *_label_point(tree.get_node("B")))
+    npt.assert_equal([node.label for node in tree.selected_nodes], ["a1", "B"])
+
+    _click_at(show_manager, *_label_point(tree.get_node("a1")))
+    npt.assert_equal([node.label for node in tree.selected_nodes], ["B"])
+
+    tree.base_node.clear_selections()
+    npt.assert_equal(tree.selected_nodes, [])
+
+
+def test_ui_tree2d_icons_on_narrow_nodes(ui_scene):
+    """Icons show on every level of a narrow tree and can be set later."""
+    show_manager, scene = ui_scene
+    plus = read_viz_icons(fname="plus.png")
+    minus = read_viz_icons(fname="minus.png")
+    tree = ui.Tree2D(
+        structure=[{"A": ["a1"]}, {"a1": ["deep"]}],
+        position=TREE_POSITION,
+        size=(150, 300),
+        icon=plus,
+    )
+    scene.add(tree)
+    tree.get_node("A").toggle_view()
+    tree.get_node("a1").toggle_view()
+
+    for label in ("A", "a1", "deep"):
+        node = tree.get_node(label)
+        assert node.has_icon
+        assert _shown(node.label_image)
+        npt.assert_array_equal(node.label_image.size, (25, 25))
+
+    plain = ui.Tree2D(structure=[{"X": ["x1"]}], size=(150, 200))
+    x_node = plain.get_node("X")
+    assert not x_node.has_icon
+    assert not _shown(x_node.label_image)
+    text_x = x_node.label_text.get_position()[0]
+
+    x_node.set_icon(plus, selected_icon=minus)
+    assert _shown(x_node.label_image)
+    assert x_node.label_text.get_position()[0] > text_x
+    x_node.selected = True
+    npt.assert_array_equal(x_node.label_image.img, load_image(minus))
+    x_node.icon = None
+    assert _shown(x_node.label_image)
+    x_node.selected = False
+    assert not _shown(x_node.label_image)
+
+
+def test_ui_tree2d_selected_icon_defaults_to_icon():
+    """Selecting a node with only an icon keeps that icon."""
+    plus = read_viz_icons(fname="plus.png")
+    tree = ui.Tree2D(structure=[{"A": []}], icon=plus)
+    node = tree.get_node("A")
+
+    node.selected = True
+
+    npt.assert_array_equal(node.label_image.img, load_image(plus))
+
+
+def test_ui_tree2d_leaf_nodes_have_no_button():
+    """Only nodes with content show the expand button."""
+    tree = ui.Tree2D(structure=[{"A": ["a1"]}, {"B": []}])
+    tree.get_node("A").toggle_view()
+
+    assert _shown(tree.get_node("A").button)
+    assert not _shown(tree.get_node("B").button)
+    assert not _shown(tree.get_node("a1").button)
+
+    tree.add_content("B", ui.Rectangle2D(size=(20, 20)))
+    assert _shown(tree.get_node("B").button)
+
+
+def test_ui_tree2d_wheel_over_listbox_scrolls_only_listbox(ui_scene):
+    """A ListBox inside a scrollable tree keeps its own wheel handling."""
+    show_manager, scene = ui_scene
+    tree = ui.Tree2D(
+        structure=[{"Root": ["Slider", "List"] + [f"Row {i}" for i in range(10)]}],
+        position=TREE_POSITION,
+        size=(240, 400),
+    )
+    listbox = ui.ListBox2D(values=[f"Item {i}" for i in range(10)], size=(150, 100))
+    slider = ui.LineSlider2D(length=100)
+    tree.add_content("List", listbox)
+    tree.add_content("Slider", slider)
+    scene.add(tree)
+    tree.get_node("Root").toggle_view()
+    tree.get_node("List").toggle_view()
+    tree.get_node("Slider").toggle_view()
+    assert tree.scroll_step_size > 0
+
+    _wheel_at(show_manager, *_center(listbox.slots[1]), dy=100)
+
+    npt.assert_equal(listbox.view_offset, 1)
+    npt.assert_equal(tree.view_offset, 0)
+
+    _wheel_at(show_manager, *_center(slider.track), dy=100)
+
+    npt.assert_equal(tree.view_offset, tree.base_node.child_height)
+
+
+def test_ui_tree2d_applies_z_order(ui_scene):
+    """The z_order of a Tree2D is the lowest layer of its rows and scroll bar."""
+    _, scene = ui_scene
+    tree = ui.Tree2D(
+        structure=[{"A": [f"a{i}" for i in range(20)]}],
+        size=TREE_SIZE,
+        z_order=7,
+    )
+    scene.add(tree)
+    tree.get_node("A").toggle_view()
+
+    row_orders = [
+        element.z_order
+        for element in ui.elements._collect_ui_elements(tree.base_node)
+        if element.actors and all(actor.visible for actor in element.actors)
+    ]
+    npt.assert_equal(tree.base_node.z_order, 7)
+    assert min(row_orders) >= 7
+    npt.assert_equal(tree.scroll_bar.z_order, 8)
+
+
+def test_ui_tree2d_scroll_bar_only_when_rows_overflow(ui_scene):
+    """The scroll bar is hidden until the rows overflow the visible area."""
+    show_manager, scene = ui_scene
+    tree = ui.Tree2D(
+        structure=[{"Root": [f"Child {i}" for i in range(15)]}],
+        position=TREE_POSITION,
+        size=TREE_SIZE,
+    )
+    scene.add(tree)
+    assert not _shown(tree.scroll_bar)
+
+    tree.get_node("Root").toggle_view()
+    assert _shown(tree.scroll_bar)
+    npt.assert_array_almost_equal(tree.scroll_bar.color, tree.scroll_bar_inactive_color)
+
+    start = _center(tree.scroll_bar)
+    target = _target_at(show_manager, *start)
+    _pointer(show_manager, window.EventType.POINTER_DOWN, *start, target)
+    npt.assert_array_almost_equal(tree.scroll_bar.color, tree.scroll_bar_active_color)
+    _pointer(
+        show_manager, window.EventType.POINTER_DRAG, start[0], start[1] + 40, target
+    )
+    _pointer(show_manager, window.EventType.POINTER_UP, start[0], start[1] + 40, target)
+    assert tree.view_offset > 0
+    npt.assert_array_almost_equal(tree.scroll_bar.color, tree.scroll_bar_inactive_color)
+
+    tree.get_node("Root").toggle_view()
+    assert not _shown(tree.scroll_bar)
+    npt.assert_equal(tree.view_offset, 0)
+
+
+def test_ui_tree2d_set_visibility(expanded_tree):
+    """Hiding a tree hides every row and showing it keeps collapsed rows hidden."""
+    _, tree = expanded_tree
+    tree.add_content("Child 1", ui.Rectangle2D(size=(20, 20)))
+    content = tree.get_node("Child 1").child_nodes[0]
+
+    tree.set_visibility(False)
+    assert not _shown(tree.base_node.title_panel.background)
+    assert not _shown(tree.get_node("Child 0").title_panel.background)
+    assert not _shown(tree.scroll_bar)
+
+    tree.set_visibility(True)
+    assert _shown(tree.get_node("Child 0").title_panel.background)
+    assert _shown(tree.scroll_bar)
+    assert not _shown(content)
+
+
+def test_ui_tree2d_drag_moves_tree(ui_scene):
+    """Dragging the title row of a node moves the whole tree."""
+    show_manager, scene = ui_scene
+    tree = ui.Tree2D(
+        structure=[{"Root": []}],
+        tree_name="Tree",
+        position=TREE_POSITION,
+        size=TREE_SIZE,
+    )
+    scene.add(tree)
+    start = (TREE_POSITION[0] + 200, TREE_POSITION[1] + 37)
+
+    _drag_from(show_manager, start, (start[0] + 20, start[1] + 30))
+
+    npt.assert_array_almost_equal(
+        tree.get_position(), np.array(TREE_POSITION) + (20, 30)
+    )
+
+
+def test_ui_treenode2d_standalone_drag_and_size(ui_scene):
+    """A TreeNode2D without a tree fits its content and drags itself."""
+    show_manager, scene = ui_scene
+    child = ui.TreeNode2D(label="Child")
+    node = ui.TreeNode2D(label="Node", children=[child], position=(10, 10))
+    scene.add(node)
+
+    npt.assert_equal(node.size[1], node.child_height)
+    node.toggle_view()
+    npt.assert_equal(node.size[1], 2 * node.child_height)
+
+    start = tuple(child.title_panel.get_position() + (150, 10))
+    _drag_from(show_manager, start, (start[0] + 30, start[1] + 40))
+    npt.assert_array_almost_equal(node.get_position(), (40, 50))
+
+
+def test_ui_treenode2d_expand_collapse_logic(ui_scene):
+    """Clicking the button expands a node and collapsing hides its children."""
+    show_manager, scene = ui_scene
+    tree = ui.Tree2D(
+        structure=[{"Root": ["Child1"]}, {"Child1": ["Leaf"]}],
+        position=TREE_POSITION,
+        size=TREE_SIZE,
+    )
+    scene.add(tree)
+    root = tree.get_node("Root")
+    child = tree.get_node("Child1")
+    assert root.expanded is False
+    assert not _shown(child.title_panel.background)
+
+    _click_at(show_manager, *_center(root.button))
+    assert root.expanded is True
+    assert root.button.toggled is True
+    assert _shown(child.title_panel.background)
+    child.toggle_view()
+    assert _shown(tree.get_node("Leaf").title_panel.background)
+
+    _click_at(show_manager, *_center(root.button))
+    assert root.expanded is False
+    assert child.expanded is False
+    assert not _shown(child.title_panel.background)
+    assert not _shown(tree.get_node("Leaf").title_panel.background)
+
+
+def test_ui_treenode2d_button_position():
+    """The button sits before the label at 'start' and after it at 'end'."""
+    tree_start = ui.Tree2D(structure=[{"Root": ["a"]}], button_position="start")
+    tree_end = ui.Tree2D(structure=[{"Root": ["a"]}], button_position="end")
+    node_start = tree_start.get_node("Root")
+    node_end = tree_end.get_node("Root")
+
+    assert node_start.button.get_position()[0] < node_start.label_text.get_position()[0]
+    assert node_end.button.get_position()[0] > node_end.label_text.get_position()[0]
+
+
+def test_ui_tree2d_clips_rows_to_viewport(expanded_tree):
+    """Rows past the bottom of the Tree2D are not drawn or picked."""
+    show_manager, tree = expanded_tree
+    left, top = TREE_POSITION
+    width, height = TREE_SIZE
+    tree_actors = {
+        actor
+        for element in ui.elements._collect_ui_elements(tree)
+        for actor in element.actors
+    }
+
+    image = _render(show_manager)
+    below = image[top + height + 2 :, left : left + width, :3]
+    inside = image[top : top + height, left : left + width, :3]
+
+    assert tree.scroll_step_size > 0
+    assert inside.any()
+    assert not below.any()
+    pick_below = show_manager.renderer.get_pick_info(
+        (left + width / 2, top + height + 20)
+    )
+    assert pick_below["world_object"] not in tree_actors
+
+
+def test_ui_tree2d_title_row_stays_while_scrolling(expanded_tree):
+    """The title row of the tree stays on top while the rows scroll under it."""
+    show_manager, tree = expanded_tree
+    left, top = TREE_POSITION
+
+    for _ in range(3):
+        _wheel_at(show_manager, left + 10, top + 100, dy=100)
+
+    npt.assert_equal(tree.view_offset, 3 * tree.base_node.child_height)
+    npt.assert_array_equal(tree.base_node.title_panel.get_position(), TREE_POSITION)
+    image = _render(show_manager)
+    header_pixel = image[top + 5, left + TREE_SIZE[0] - 20, :3]
+    npt.assert_allclose(header_pixel, np.array((0.1, 0.3, 0.5)) * 255, atol=3)
+
+
+@pytest.mark.parametrize("target", ["label", "button", "background", "scrollbar"])
+def test_ui_tree2d_one_wheel_event_scrolls_one_row(expanded_tree, target):
+    """One wheel event over any part of the tree scrolls exactly one row."""
+    show_manager, tree = expanded_tree
+    tree.add_content("Child 0", ui.Rectangle2D(size=(20, 20)))
+    child = tree.get_node("Child 0")
+    if target == "label":
+        x, y = _label_point(child)
+    elif target == "button":
+        x, y = _center(child.button)
+    elif target == "background":
+        x, y = tree.get_position() + (10, tree.size[1] - 10)
+    else:
+        x, y = _center(tree.scroll_bar)
+
+    _wheel_at(show_manager, x, y, dy=100)
+
+    npt.assert_equal(tree.view_offset, tree.base_node.child_height)
+
+
+def test_ui_tree2d_scrolling_keeps_button_children(expanded_tree):
+    """Scrolling does not grow the internal child list of node buttons."""
+    show_manager, tree = expanded_tree
+    button = tree.get_node("Child 0").button
+    children_before = len(button._children)
+
+    for dy in (100, 100, -100, -100):
+        _wheel_at(show_manager, *(tree.get_position() + (10, 100)), dy=dy)
+
+    npt.assert_equal(len(button._children), children_before)
+
+
+def test_ui_tree2d_drag_while_scrolled_keeps_position(expanded_tree):
+    """Dragging a scrolled tree moves it by the pointer distance only."""
+    show_manager, tree = expanded_tree
+    _wheel_at(show_manager, *(tree.get_position() + (10, 100)), dy=100)
+    start = tree.get_position().copy()
+    point = (start[0] + 200, start[1] + 37)
+
+    _drag_from(show_manager, point, (point[0] + 10, point[1] + 15))
+
+    npt.assert_array_almost_equal(tree.get_position(), start + (10, 15))
+    npt.assert_equal(tree.view_offset, tree.base_node.child_height)
+
+
+def test_ui_tree2d_added_content_is_scrollable_and_clipped(ui_scene):
+    """Content added after construction updates scrolling and is clipped."""
+    show_manager, scene = ui_scene
+    tree = ui.Tree2D(
+        structure=[{"Root": ["Leaf"]}],
+        tree_name="Tree",
+        position=TREE_POSITION,
+        size=TREE_SIZE,
+    )
+    content = ui.Rectangle2D(size=(100, 400), color=(1, 0, 0))
+    tree.add_content("Leaf", content, coords=(10, 0))
+    scene.add(tree)
+    tree.get_node("Root").toggle_view()
+    assert tree.scroll_step_size == 0
+
+    tree.get_node("Leaf").toggle_view()
+
+    assert tree.scroll_step_size > 0
+    image = _render(show_manager)
+    left, top = TREE_POSITION
+    assert not image[top + TREE_SIZE[1] + 2 :, left : left + TREE_SIZE[0], :3].any()
+    _wheel_at(show_manager, *(content.get_position() + (10, 10)), dy=100)
+    npt.assert_equal(tree.view_offset, tree.base_node.child_height)
+
+
+def test_ui_tree2d_resize_updates_viewport_and_scrollbar(expanded_tree):
+    """Resizing the tree updates its visible area and turns scrolling on or off."""
+    show_manager, tree = expanded_tree
+    width = TREE_SIZE[0]
+    rows_height = tree.base_node.size[1]
+    _wheel_at(show_manager, *(tree.get_position() + (10, 100)), dy=100)
+    assert tree.view_offset > 0
+
+    tree.resize((width, rows_height + 20))
+    _wheel_at(show_manager, *(tree.get_position() + (10, 100)), dy=100)
+
+    npt.assert_array_equal(tree.size, (width, rows_height + 20))
+    npt.assert_equal(tree.scroll_step_size, 0)
+    npt.assert_equal(tree.view_offset, 0)
+    assert not _shown(tree.scroll_bar)
+    image = _render(show_manager)
+    left, top = tree.get_position()
+    last_row = image[int(top + rows_height) - 12, int(left) : int(left + width), :3]
+    assert last_row.any()
+
+    tree.resize((width, 100))
+    _wheel_at(show_manager, *(tree.get_position() + (10, 50)), dy=100)
+
+    assert tree.scroll_step_size > 0
+    npt.assert_equal(tree.view_offset, tree.base_node.child_height)
+
+
+def test_combobox2d_menu_opens_below_its_position(ui_scene):
+    """The ComboBox2D panel starts at the combo box's own position."""
+    _, scene = ui_scene
+    combobox = ui.ComboBox2D(items=["A", "B", "C"], position=(30, 30), size=(200, 150))
+    scene.add(combobox)
+
+    npt.assert_array_equal(combobox.panel.get_position(), (30, 30))
+
+
+def test_range_slider_set_position_moves_sub_sliders():
+    """Moving a RangeSlider moves both of its sliders by the same amount."""
+    slider = ui.RangeSlider(
+        range_slider_center=(0, 60), value_slider_center=(0, 0), length=200
+    )
+    range_start = slider.range_slider.get_position().copy()
+    value_start = slider.value_slider.get_position().copy()
+    origin = slider.get_position().copy()
+
+    slider.set_position((150, 220))
+
+    shift = np.array((150, 220)) - origin
+    npt.assert_array_equal(slider.range_slider.get_position(), range_start + shift)
+    npt.assert_array_equal(slider.value_slider.get_position(), value_start + shift)
+
+
+@pytest.mark.parametrize(
+    "justification, vertical_justification",
+    [("left", "top"), ("center", "middle"), ("right", "bottom")],
+)
+def test_textblock2d_text_stays_inside_its_box(
+    ui_scene, justification, vertical_justification
+):
+    """Justified text is drawn inside its bounding box on the matching side."""
+    show_manager, scene = ui_scene
+    position, size = (60, 60), (240, 120)
+    text = ui.TextBlock2D(
+        text="Tree",
+        position=position,
+        size=size,
+        font_size=20,
+        color=(1, 1, 1),
+        bg_color=(0, 0, 0),
+        justification=justification,
+        vertical_justification=vertical_justification,
+    )
+    scene.add(text)
+
+    image = _render(show_manager)
+    rows, columns = np.nonzero(image[..., :3].max(axis=-1) > 128)
+
+    assert rows.size > 0
+    assert columns.min() >= position[0] and columns.max() < position[0] + size[0]
+    assert rows.min() >= position[1] and rows.max() < position[1] + size[1]
+    horizontal = (columns.mean() - position[0]) / size[0]
+    vertical = (rows.mean() - position[1]) / size[1]
+    expected = {"left": 0.0, "center": 0.5, "right": 1.0}[justification]
+    expected_vertical = {"top": 0.0, "middle": 0.5, "bottom": 1.0}[
+        vertical_justification
+    ]
+    assert abs(horizontal - expected) < 0.35
+    assert abs(vertical - expected_vertical) < 0.35
+
+
+def test_textblock2d_background_forwards_drag(ui_scene):
+    """Dragging the background of a TextBlock2D reaches its drag callback."""
+    show_manager, scene = ui_scene
+    text = ui.TextBlock2D(
+        text="Drag", position=(60, 60), size=(200, 60), bg_color=(0.2, 0.2, 0.2)
+    )
+    scene.add(text)
+    drags = []
+    text.on_left_mouse_button_dragged = lambda event: drags.append((event.x, event.y))
+
+    _drag_from(show_manager, (250, 110), (270, 130))
+
+    npt.assert_equal(drags, [(270, 130)])
+
+
+def test_line_double_slider_2d_layers_follow_z_order():
+    """Handles and labels of a LineDoubleSlider2D stay above its track."""
+    slider = ui.LineDoubleSlider2D(length=100)
+
+    slider.z_order = 4
+
+    npt.assert_equal(slider.track.z_order, 4)
+    npt.assert_equal([handle.z_order for handle in slider.handles], [5, 5])
+    npt.assert_equal([text.z_order for text in slider.texts], [6, 6])
+
+
+def test_listbox2d_empty_slot_click_and_size(ui_scene, caplog):
+    """
+    Empty ListBox2D slots stay collapsed and ignore clicks without errors.
+
+    The click goes straight to the collapsed slot, since a 1 px slot cannot be
+    picked reliably; it checks the guard against clicks on empty slots.
+    """
+    show_manager, scene = ui_scene
+    listbox = ui.ListBox2D(values=["One"], size=(150, 150))
+    scene.add(listbox)
+    empty_slot = listbox.slots[-1]
+    selections = []
+    listbox.on_change = lambda: selections.append(list(listbox.selected))
+
+    listbox.set_visibility(False)
+    listbox.set_visibility(True)
+    assert empty_slot.size[1] <= 1
+    x, y = _center(empty_slot)
+    _render(show_manager)
+    with caplog.at_level(logging.ERROR):
+        for event_type in (window.EventType.POINTER_DOWN, window.EventType.POINTER_UP):
+            _pointer(show_manager, event_type, x, y, empty_slot.background.actor)
+
+    npt.assert_equal(listbox.selected, [])
+    npt.assert_equal(selections, [])
+    npt.assert_equal([record.getMessage() for record in caplog.records], [])
 
 
 def _click_event():
