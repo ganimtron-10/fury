@@ -67,7 +67,40 @@ def model_path(filename):
     str
         Path of the cached OBJ file.
     """
+    local = _local_model_path(filename)
+    if local:
+        return local
     return px.fetch(f"kenney-{filename}")
+
+
+KENNEY_ASSETS = os.environ.get(
+    "FURY_KENNEY_ASSETS",
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "kenny_assets"),
+)
+
+
+def _local_model_path(filename):
+    """
+    Find a Kenney model in the local packs folder.
+
+    The polyxios-data catalog does not publish the Kenney models yet, so the
+    demo branch reads the unpacked packs from ``kenny_assets`` (or
+    ``FURY_KENNEY_ASSETS``) first.
+
+    Parameters
+    ----------
+    filename : str
+        Model file name as named in its Kenney pack.
+
+    Returns
+    -------
+    str or None
+        Path of the OBJ file, or None when no local pack has it.
+    """
+    for root, _, files in os.walk(KENNEY_ASSETS):
+        if filename in files:
+            return os.path.join(root, filename)
+    return None
 
 
 def texture_path(filename):
@@ -85,6 +118,9 @@ def texture_path(filename):
         Path of the model's ``colormap.png``.
     """
     path = model_path(filename)
+    local = os.path.join(os.path.dirname(path), "Textures", "colormap.png")
+    if os.path.exists(local):
+        return local
     folder = os.path.splitext(os.path.basename(path))[0]
     return os.path.join(os.path.dirname(path), folder, "colormap.png")
 
