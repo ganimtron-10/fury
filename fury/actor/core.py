@@ -29,6 +29,66 @@ import fury.primitive as fp
 from fury.transform import rotate, scale, translate
 
 
+class PrimitiveInfo:
+    """
+    What a primitive actor was built from.
+
+    Actors merge all their primitives into one buffer, so this is the only
+    record of where each primitive is and how big it is.
+
+    Parameters
+    ----------
+    centers : ndarray, shape (N, 3)
+        Primitive centres.
+    scales : ndarray, shape (N, 3)
+        Scale factors per primitive.
+    directions : ndarray, shape (N, 3)
+        Orientation vectors; the unrotated direction is +X.
+
+    Attributes
+    ----------
+    rotations : ndarray, shape (N, 4) or None
+        Orientation of each primitive as ``(x, y, z, w)`` quaternions, once a
+        physics world has turned the vertices; it then replaces
+        ``directions``.
+    kind : str or None
+        The primitive's form, such as ``"box"`` or ``"sphere"``, when the
+        actor function sets it.
+    radii : ndarray, shape (N,) or None
+        Primitive radii, for spheres and disks.
+    """
+
+    def __init__(self, *, centers, scales, directions):
+        self.centers = centers
+        self.scales = scales
+        self.directions = directions
+        self.rotations = None
+        self.kind = None
+        self.radii = None
+
+
+def _broadcast_scales(scales, count):
+    """
+    Expand scales the way ``repeat_primitive`` interprets them.
+
+    Parameters
+    ----------
+    scales : float or array_like
+        Scales as given to an actor factory.
+    count : int
+        Number of primitives.
+
+    Returns
+    -------
+    ndarray, shape (count, 3)
+        Scale factors per primitive.
+    """
+    scales = np.asarray(scales, dtype=float)
+    if scales.ndim == 1 and scales.size == count:
+        return np.repeat(scales[:, None], 3, axis=1)
+    return np.broadcast_to(scales, (count, 3)).copy()
+
+
 class Actor:
     """Base Actor class for making APIs user-friendly."""
 
@@ -511,6 +571,21 @@ def actor_from_primitive(
     if not repeat_primitive:
         obj.local.position = centers[0]
     obj.prim_count = prim_count
+    centers = np.asarray(centers, dtype=float).reshape(-1, 3)
+    if repeat_primitive:
+        obj.primitive_info = PrimitiveInfo(
+            centers=centers.copy(),
+            scales=_broadcast_scales(scales, prim_count),
+            directions=np.broadcast_to(
+                np.asarray(directions, dtype=float), (prim_count, 3)
+            ).copy(),
+        )
+    else:
+        obj.primitive_info = PrimitiveInfo(
+            centers=np.zeros((1, 3)),
+            scales=np.ones((1, 3)),
+            directions=np.array([[1.0, 0.0, 0.0]]),
+        )
     return obj
 
 

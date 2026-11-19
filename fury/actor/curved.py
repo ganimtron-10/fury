@@ -186,6 +186,8 @@ def sphere(
         wireframe=wireframe,
         wireframe_thickness=wireframe_thickness,
     )
+    obj.primitive_info.kind = "sphere"
+    obj.primitive_info.radii = radii_arr.astype(float)
     return obj
 
 

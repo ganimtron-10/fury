@@ -41,6 +41,7 @@ def generate_api_reference_rst(
         r"\.actor\..+$",
         r"\.ui\..+$",
         r"\.motion\..+$",
+        r"\.physics\..+$",
     ]
     docwriter.object_skip_patterns += [
         r".*FetcherError.*$",
