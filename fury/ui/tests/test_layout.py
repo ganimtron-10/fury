@@ -1,5 +1,6 @@
 """Tests for the pure layout solver."""
 
+import math
 import time
 
 import numpy.testing as npt
@@ -10,11 +11,13 @@ from fury.ui.layout import (
     Direction,
     Edges,
     LayoutNode,
+    LayoutStyle,
     Position,
     fit,
     fixed,
     grow,
     percent,
+    place,
     solve,
 )
 
@@ -63,7 +66,7 @@ def test_fit_is_clamped_by_min_and_max():
 
 
 def test_grow_shares_leftover_by_weight():
-    a, b = box(width=grow(1)), box(width=grow(3))
+    a, b = box(width=grow(weight=1)), box(width=grow(weight=3))
     root = LayoutNode(children=[a, b], width=fixed(100), height=10)
     solve(root)
     assert a.rect.width + b.rect.width == 100
@@ -343,7 +346,7 @@ def test_edges_shorthands(value, expected):
         lambda: Edges.of(-1),
         lambda: fixed(-1),
         lambda: fit(min=5, max=1),
-        lambda: grow(0),
+        lambda: grow(weight=0),
         lambda: percent(1.5),
         lambda: LayoutNode(align_main=Align.STRETCH),
         lambda: LayoutNode(align_cross=Align.SPACE_BETWEEN),
@@ -379,3 +382,250 @@ def test_large_tree_solves_quickly():
     elapsed = time.perf_counter() - start
     npt.assert_array_less(elapsed, 0.2)
     assert rows[-1].children[-1].rect.x + rows[-1].children[-1].rect.width == 1000
+
+
+@pytest.mark.parametrize("size,space", [(1, 4), (3, 6), (11, 12)])
+def test_centering_keeps_integer_size(size, space):
+    child = box(size, 1)
+    solve(LayoutNode(children=[child], width=space, height=1, align_main=Align.CENTER))
+    assert child.rect.width == size
+    assert child.rect.x == math.floor((space - size) / 2 + 0.5)
+
+
+def test_wrap_resolves_percent_before_breaking_lines():
+    children = [box(width=percent(0.5)) for _ in range(4)]
+    solve(LayoutNode(children=children, width=fixed(100), wrap=True))
+    assert [c.rect.width for c in children] == [50, 50, 50, 50]
+    assert [c.rect.position for c in children] == [(0, 0), (50, 0), (0, 10), (50, 10)]
+
+
+@pytest.mark.parametrize(
+    "fraction,positions",
+    [
+        (0.45, [(0, 0), (55, 0), (0, 20)]),
+        (0.5, [(0, 0), (0, 20), (0, 40)]),
+    ],
+)
+def test_wrap_percent_ignores_gaps_and_matches_across_lines(fraction, positions):
+    children = [box(width=percent(fraction)) for _ in range(3)]
+    solve(LayoutNode(children=children, width=fixed(100), wrap=True, gap=10))
+    assert len({c.rect.width for c in children}) == 1
+    assert children[0].rect.width == fraction * 100
+    assert [c.rect.position for c in children] == positions
+
+
+def test_wrap_percent_height_in_fit_row_does_not_overflow():
+    tall = box(fixed(60), 40)
+    half = box(50, percent(1.0))
+    root = LayoutNode(children=[tall, half], width=100, wrap=True)
+    rect = solve(root)
+    assert half.rect.y + half.rect.height <= rect.height
+
+
+def test_wrap_percent_height_in_fit_row_takes_content_height():
+    head = text_leaf(10, 30, height=percent(0.5))
+    base = text_leaf(10, 80)
+    tail = text_leaf(95, 25, height=percent(0.5))
+    root = LayoutNode(children=[head, base, tail], width=fixed(100), wrap=True)
+    assert solve(root).height == 105
+    assert head.rect.height == 30
+    assert tail.rect.position == (0, 80)
+    assert tail.rect.height == 25
+
+
+def _stretched_wrap_row(content, row_height):
+    child = LayoutNode(measure=lambda _: (10, content), height=percent(0.5))
+    row = LayoutNode(children=[child], width=fixed(100), wrap=True)
+    solve(LayoutNode(children=[row], height=row_height, align_cross=Align.STRETCH))
+    return row, child
+
+
+def _grow_wrap_row(content, column_height):
+    child = LayoutNode(measure=lambda _: (10, content), height=percent(0.5))
+    row = LayoutNode(children=[child], width=fixed(100), height=grow(), wrap=True)
+    solve(LayoutNode(children=[row], height=column_height, direction=Direction.COLUMN))
+    return row, child
+
+
+def _bounded_wrap_row(content, row_height):
+    child = LayoutNode(measure=lambda _: (10, content), height=percent(0.5))
+    row = LayoutNode(children=[child], width=fixed(100), height=row_height, wrap=True)
+    solve(row)
+    return row, child
+
+
+@pytest.mark.parametrize(
+    "build,content,row_size,expected",
+    [
+        (_stretched_wrap_row, 30, 29, (29, 15)),
+        (_stretched_wrap_row, 30, 30, (30, 15)),
+        (_stretched_wrap_row, 30, 31, (31, 16)),
+        (_grow_wrap_row, 40, 40, (40, 20)),
+        (_grow_wrap_row, 40, 41, (41, 21)),
+        (_bounded_wrap_row, 20, fit(min=100), (100, 50)),
+        (_bounded_wrap_row, 100, fit(max=30), (30, 15)),
+    ],
+)
+def test_wrap_percent_height_follows_how_the_row_was_sized(
+    build, content, row_size, expected
+):
+    row, child = build(content, row_size)
+    assert (row.rect.height, child.rect.height) == expected
+
+
+def test_wrap_percent_height_in_grow_row_uses_final_height():
+    head = text_leaf(10, 30, height=percent(0.5))
+    row = LayoutNode(children=[head], width=fixed(100), height=grow(), wrap=True)
+    solve(LayoutNode(children=[row], height=100, direction=Direction.COLUMN))
+    assert row.rect.height == 100
+    assert head.rect.height == 50
+
+
+def test_wrap_percent_height_in_stretched_row_uses_final_height():
+    head = text_leaf(10, 30, height=percent(0.5))
+    row = LayoutNode(children=[head], width=fixed(100), wrap=True)
+    solve(LayoutNode(children=[row], height=100, align_cross=Align.STRETCH))
+    assert row.rect.height == 100
+    assert head.rect.height == 50
+
+
+def _solve_wrap_row_time(count):
+    """Return the best of three times to solve a wrap row of ``count`` boxes."""
+    times = []
+    for _ in range(3):
+        row = LayoutNode(children=[box() for _ in range(count)], wrap=True)
+        start = time.perf_counter()
+        solve(row)
+        times.append(time.perf_counter() - start)
+    return min(times)
+
+
+def test_wrap_line_breaking_scales_linearly():
+    small = _solve_wrap_row_time(1000)
+    large = _solve_wrap_row_time(4000)
+    npt.assert_array_less(large / small, 8)
+
+
+def test_wrap_cross_percent_uses_content_box():
+    child = box(width=10, height=percent(0.5))
+    solve(LayoutNode(children=[child], width=100, height=100, wrap=True))
+    assert child.rect.height == 50
+
+
+def test_floating_is_placed_after_its_floating_target():
+    button = box(50, 20)
+    menu = box(40, 30, position=Position.FLOATING)
+    menu.style.update(float_to=button, float_anchor=(1, 0))
+    submenu = box(20, 20, position=Position.FLOATING)
+    submenu.style.update(float_to=menu, float_anchor=(0, 1))
+    root = LayoutNode(children=[submenu, button, menu])
+    solve(root)
+    assert submenu.rect.position == (50, 30)
+    button.style.update(margin=(0, 0, 0, 100))
+    solve(root)
+    assert submenu.rect.position == (150, 30)
+
+
+def test_floating_cycle_is_placed_once_with_a_warning(caplog):
+    first = box(10, 10, position=Position.FLOATING)
+    second = box(10, 10, position=Position.FLOATING, offset=(5, 0))
+    first.style.update(float_to=second)
+    second.style.update(float_to=first)
+    root = LayoutNode(children=[first, second])
+    solve(root)
+    assert "2 floating nodes form a cycle" in caplog.text
+    assert second.rect.x == first.rect.x + 5
+
+
+def test_floating_cycle_warns_once_per_cycle(caplog):
+    first, second = box(position=Position.FLOATING), box(position=Position.FLOATING)
+    first.style.update(float_to=second)
+    second.style.update(float_to=first)
+    root = LayoutNode(children=[first, second])
+    for _ in range(3):
+        solve(root)
+    assert caplog.text.count("cycle") == 1
+
+
+def test_floating_attached_to_own_child_warns_in_the_singular(caplog):
+    menu = LayoutNode(position=Position.FLOATING, offset=(1, 0))
+    item = menu.add(box())
+    menu.style.update(float_to=item)
+    solve(LayoutNode(children=[menu]))
+    assert "itself or to its own descendant" in caplog.text
+    assert "1 floating nodes" not in caplog.text
+
+
+def test_floating_chain_into_cycle_places_followers_from_fresh_rects():
+    lead = box(position=Position.FLOATING, offset=(1, 0))
+    first = box(position=Position.FLOATING, offset=(10, 0))
+    second = box(position=Position.FLOATING, offset=(100, 0))
+    lead.style.update(float_to=first)
+    first.style.update(float_to=second)
+    second.style.update(float_to=first)
+    solve(LayoutNode(children=[lead, first, second]))
+    assert second.rect.x == first.rect.x + 100
+    assert lead.rect.x == first.rect.x + 1
+
+
+def test_long_floating_chain_in_reverse_order():
+    nodes = [box(position=Position.FLOATING, offset=(1, 0)) for _ in range(1500)]
+    for node, target in zip(nodes, nodes[1:], strict=False):
+        node.style.update(float_to=target)
+    solve(LayoutNode(children=nodes))
+    assert nodes[0].rect.x == 1500
+
+
+def test_floating_margin_moves_and_shrinks_alike():
+    menu = box(width=percent(0.5), position=Position.FLOATING, margin=5)
+    solve(LayoutNode(children=[menu], width=100, height=100))
+    assert menu.rect.position == (5, 5)
+    assert menu.rect.width == 45
+
+
+@pytest.mark.parametrize(
+    "height,align", [(grow(), Align.START), (fit(), Align.STRETCH)]
+)
+def test_shrink_zero_never_shrinks_on_cross_axis(height, align):
+    child = text_leaf(10, 50, height=height, shrink=0)
+    solve(LayoutNode(children=[child], width=10, height=10, align_cross=align))
+    assert child.rect.height == 50
+
+
+@pytest.mark.parametrize(
+    "width,content",
+    [(fit(max=50), 100), (grow(min=50), 5), (percent(0.1, max=50), 100)],
+)
+def test_non_resizable_fit_size_is_clamped(width, content):
+    leaf = LayoutNode(measure=lambda _: (content, 10), width=width, resizable=False)
+    solve(LayoutNode(children=[leaf], width=200))
+    assert leaf.rect.width == 50
+
+
+def test_absolute_grow_and_percent_respect_margin():
+    overlay = box(width=grow(), height=grow(), position=Position.ABSOLUTE, margin=5)
+    half = box(
+        width=percent(0.5),
+        height=percent(0.5),
+        position=Position.ABSOLUTE,
+        margin=5,
+    )
+    solve(LayoutNode(children=[overlay, half], width=50, height=60))
+    assert overlay.rect.position == (5, 5)
+    assert overlay.rect.size == (40, 50)
+    assert half.rect.size == (20, 25)
+
+
+@pytest.mark.parametrize(
+    "call",
+    [
+        lambda: fit(1, 2),
+        lambda: grow(2),
+        lambda: place(LayoutNode(), (0, 0)),
+        lambda: LayoutNode(LayoutStyle()),
+        lambda: LayoutStyle(fixed(10)),
+    ],
+)
+def test_optional_parameters_are_keyword_only(call):
+    with pytest.raises(TypeError):
+        call()
