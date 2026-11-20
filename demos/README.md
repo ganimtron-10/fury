@@ -29,6 +29,7 @@ cd demos/out && python ../physics_demos.py --record && python ../layout_demos.py
 | Layout fixes: solver, Tree2D in layouts, docs renames, e2e via real events | `ui-layout/fix-solver`, `fix-tree`, `fix-docs-renames`, `fix-e2e-tests` | #44, #34, #32 (fix-solver has no PR yet) |
 | UI themes: theme core, box style, Graphite, default Graphite, Switch/Segmented, built-in themes, theme files | `ui-theme/01` ... `07` (04 and 05 branch off 03, so they are merged separately; their Switch tests are pinned to the classic theme here) | #47-#53 |
 | Physics: core, boxes, containers, actors, render loop, forces | `physics/01-core` ... `06-forces` | #35, #36, #40-#43 |
+| GPU physics: `GPUWorld`, spheres stepped by WGSL compute shaders | `physics/11-gpu` | new PR |
 | `actor.line` offset fix | `bf/line-offset` | #37 |
 | Example files only: city drone shot, jungle sim, update-buffers tutorial, Lorenz WIP | `demo/city-drone-shot`, `fix/jungle-city-sims`, `tutorial/update-buffers`, `showcase/lorenz-ensemble` | #45, #38 (city-drone-shot and Lorenz have no PR) |
 | Kenney CC0 packs for city and jungle (`docs/examples/kenny_assets`) | copied from the `fury-sims` worktree | - |
@@ -66,6 +67,16 @@ shake, tilt and spin, FURY actors used directly as bodies,
 `record_physics` makes frame-rate-independent GIFs, force fields and
 `explode`. Planned next: collision events, sleeping, 2D, mouse drag, GPU
 spheres, gallery demos (PLAN in `~/Repositories/fury-physics/PLAN.md`).
+
+**GPU physics (`fury.physics.GPUWorld`).** The same idea on the GPU, spheres
+only: every sphere's state lives in GPU buffers, WGSL compute kernels step it
+(position-based dynamics, hashed grid, Jacobi contacts with friction and
+bounce), and the renderer draws from the same buffer, so nothing comes back to
+the CPU. Containers (shake, rock, spin, tilt), force fields and explode work
+as on the CPU world. `python demos/gpu_stress.py` runs 10k to 1M spheres and
+checks they stay finite, inside the box and non-overlapping. On a laptop GPU
+raise `SPHERES` in `viz_physics_gpu.py` to 1,000,000. Not ported: boxes,
+collision events, the jungle and city agents (branchy per-agent logic).
 
 **Jungle and city sims.** Jungle: Kenney elephant, lion and deer replace
 placeholder primitives, UI no longer rebuilt every tick, picking, sliders,

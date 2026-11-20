@@ -41,6 +41,8 @@ DEMOS = [
     ("physics", "Actors as bodies: a spinning drum driven by its actor", _demo("physics_demos.py", "04-actors")),
     ("physics", "Render loop: a domino run stepped with the frames", _demo("physics_demos.py", "05-loop")),
     ("physics", "Force fields: a vortex, then an explosion", _demo("physics_demos.py", "06-forces")),
+    ("physics", "GPU physics: 50k spheres on WGSL compute (shake, vortex, blast)", _example("viz_physics_gpu.py")),
+    ("physics", "GPU stress test: 10k to 1M spheres, timings and checks", _demo("gpu_stress.py")),
     ("sims", "Jungle ecosystem: lions, elephants, deer (WASD camera, click animals)", _example("viz_jungle_sim.py")),
     ("sims", "City drone shot: cinematic flythrough of a Kenney city", _example("viz_city_drone_shot.py")),
     ("layout", "Responsive page: sidebar and cards reflow as the window shrinks", _demo("layout_demos.py", "responsive")),
