@@ -31,9 +31,8 @@ from PIL import Image  # noqa: E402
 from fury import actor, ui, window  # noqa: E402
 from fury.lib import EventType  # noqa: E402
 
-PANEL = (0.14, 0.15, 0.2)
-DARK = (0.08, 0.09, 0.12)
-ACCENT = (0.75, 0.87, 1.0)
+# Page color behind the Graphite panels, as in viz_ui_graphite.py.
+PAGE = (0.08, 0.1, 0.13)
 
 
 def wave(frame, frames):
@@ -46,9 +45,9 @@ def lerp(start, end, amount):
     return round(start + (end - start) * amount)
 
 
-def heading(text, size=20):
-    """Create a heading whose size follows its text."""
-    return ui.TextBlock2D(text=text, font_size=size, dynamic_bbox=True)
+def heading(text, size=15):
+    """Create a semibold heading whose size follows its text."""
+    return ui.TextBlock2D(text=text, font_size=size, font_weight=600, dynamic_bbox=True)
 
 
 def field(label, widget):
@@ -61,9 +60,7 @@ def field(label, widget):
 
 def card_panel(width=None, **layout):
     """Create a panel that stacks its children vertically."""
-    panel = ui.Panel2D((width or 100, 100), color=PANEL, opacity=1)
-    layout.setdefault("padding", 14)
-    layout.setdefault("gap", 10)
+    panel = ui.Panel2D((width or 100, 100))
     layout.setdefault("height", ui.grow())
     layout.setdefault("width", ui.fixed(width) if width else ui.grow())
     panel.set_layout(
@@ -121,6 +118,8 @@ def page_root():
         position=(0, 0),
         width=ui.grow(),
         height=ui.grow(),
+        padding=16,
+        gap=16,
         align_cross=ui.Align.STRETCH,
     )
 
@@ -131,16 +130,18 @@ def settings():
     root = page_root()
 
     form = card_panel(340)
-    form.add(heading("Render settings", 22))
-    form.add(field("Samples", ui.SpinBox(size=(140, 38), initial_val=4)))
-    # A slider's value label sits above it and is not part of its layout size.
+    form.add(heading("Render settings", 16))
+    form.add(field("Samples", ui.SpinBox(size=(120, 30), initial_val=4)))
     form.add(
-        field("Exposure", ui.LineSlider2D(length=130, initial_value=40)).set_layout(
-            margin=(16, 0, 0, 0)
+        ui.LineSlider2D(
+            length=300,
+            initial_value=40,
+            label="Exposure",
+            text_template="{value:.0f}%",
         )
     )
     form.add(ui.Checkbox(labels=["Shadows", "Reflections", "Bloom"], gap=6))
-    form.add(heading("Quality", 17))
+    form.add(heading("Quality", 13))
     form.add(
         ui.RadioButton(
             labels=["Draft", "Balanced", "Final"],
@@ -151,20 +152,19 @@ def settings():
     )
     form.add(ui.Row(height=ui.grow()))
     buttons = ui.Row(gap=8, align_main=ui.Align.END)
-    buttons.add(ui.TextButton2D(label="Reset", size=(90, 34)))
-    buttons.add(ui.TextButton2D(label="Apply", size=(90, 34)))
+    buttons.add(ui.TextButton2D(label="Reset", size=(72, 28), variant="secondary"))
+    buttons.add(ui.TextButton2D(label="Apply", size=(72, 28)))
     form.add(buttons)
     root.add(form)
 
-    preview = card_panel(padding=18, gap=8)
+    preview = card_panel()
     preview.set_layout(align_main=ui.Align.CENTER, align_cross=ui.Align.CENTER)
-    preview.add(heading("Preview", 26))
+    preview.add(heading("Preview", 18))
     preview.add(
         ui.TextBlock2D(
             text="This area takes all the space the form leaves over.",
-            font_size=16,
+            muted=True,
             dynamic_bbox=True,
-            color=ACCENT,
         )
     )
     root.add(preview)
@@ -189,25 +189,26 @@ def viewer():
         align_cross=ui.Align.STRETCH,
     )
 
-    toolbar = ui.Panel2D((100, 54), color=PANEL, opacity=0.9)
+    toolbar = ui.Panel2D((100, 52))
     toolbar.set_layout(
         width=ui.grow(), align_cross=ui.Align.CENTER, padding=(0, 12), gap=8
     )
-    toolbar.add(heading("Molecule viewer", 20), width=ui.grow())
-    for name in ("Open", "Export", "Help"):
-        toolbar.add(ui.TextButton2D(label=name, size=(84, 34)))
+    toolbar.add(heading("Molecule viewer", 16), width=ui.grow())
+    for name in ("Open", "Export"):
+        toolbar.add(ui.TextButton2D(label=name, size=(72, 28), variant="secondary"))
+    toolbar.add(ui.TextButton2D(label="Help", size=(72, 28)))
     root.add(toolbar)
 
     middle = ui.Row(height=ui.grow(), align_cross=ui.Align.STRETCH)
     left = card_panel(250)
-    left.add(heading("Display", 18))
-    left.add(field("Atoms", ui.SpinBox(size=(120, 36), initial_val=64)))
+    left.add(heading("Display"))
+    left.add(field("Atoms", ui.SpinBox(size=(110, 30), initial_val=64)))
     left.add(ui.Checkbox(labels=["Bonds", "Labels", "Axes"], gap=6))
     left.add(ui.RadioButton(labels=["Ball", "Stick"], checked_labels=["Ball"], gap=6))
     middle.add(left)
     middle.add(ui.Row(width=ui.grow()))
     right = card_panel(220)
-    right.add(heading("Chains", 18))
+    right.add(heading("Chains"))
     right.add(
         ui.ListBox2D(
             values=[f"Chain {letter}" for letter in "ABCDEFGHIJKLMNOPQRST"],
@@ -260,23 +261,23 @@ def toolbar():
         gap=14,
         align_cross=ui.Align.STRETCH,
     )
-    note = ui.TextBlock2D(text="", font_size=18, dynamic_bbox=True, color=ACCENT)
-    root.add(heading("A toolbar of real controls", 24))
+    note = ui.TextBlock2D(text="", muted=True, dynamic_bbox=True)
+    root.add(heading("A toolbar of real controls", 18))
     root.add(note)
 
-    bar = ui.Panel2D((100, 70), color=PANEL, opacity=1)
-    bar.set_layout(width=ui.grow(), padding=12, align_cross=ui.Align.CENTER)
-    bar.add(ui.TextButton2D(label="Run", size=(80, 38)))
-    bar.add(ui.SpinBox(size=(130, 38), initial_val=3))
-    bar.add(ui.TextButton2D(label="Stop", size=(80, 38)))
+    bar = ui.Panel2D((100, 60))
+    bar.set_layout(width=ui.grow(), align_cross=ui.Align.CENTER)
+    bar.add(ui.TextButton2D(label="Run", size=(72, 28)))
+    bar.add(ui.SpinBox(size=(110, 30), initial_val=3))
+    bar.add(ui.TextButton2D(label="Stop", size=(72, 28), variant="secondary"))
     bar.add(
         ui.Checkbox(labels=["Loop"], orientation="horizontal"),
     )
     root.add(bar)
 
     form = card_panel()
-    form.add(field("Iterations", ui.SpinBox(size=(150, 38), initial_val=10)))
-    form.add(field("Step size", ui.SpinBox(size=(150, 38), initial_val=2)))
+    form.add(field("Iterations", ui.SpinBox(size=(120, 30), initial_val=10)))
+    form.add(field("Step size", ui.SpinBox(size=(120, 30), initial_val=2)))
     form.add(
         field(
             "Method",
@@ -309,8 +310,8 @@ def gallery():
         gap=12,
         align_cross=ui.Align.STRETCH,
     )
-    root.add(heading("Card gallery with wrap", 24))
-    area = ui.Panel2D((100, 100), color=PANEL, opacity=1)
+    root.add(heading("Card gallery with wrap", 18))
+    area = ui.Panel2D((100, 100))
     area.set_layout(
         width=ui.grow(), height=ui.grow(), padding=12, gap=12, wrap=True
     )
@@ -339,7 +340,7 @@ def app():
     root = page_root()
 
     side = card_panel(230)
-    side.add(heading("Datasets", 20))
+    side.add(heading("Datasets"))
     datasets = ui.ListBox2D(
         values=["Brain", "Cells", "Galaxy", "Protein", "Fibers", "Flow"],
         size=(200, 300),
@@ -348,8 +349,8 @@ def app():
     side.add(datasets)
     root.add(side)
 
-    main = card_panel(padding=14, gap=12)
-    title = heading("Select a dataset", 26)
+    main = card_panel()
+    title = heading("Select a dataset", 18)
     main.add(title)
 
     tabs = ui.TabUI(
@@ -366,8 +367,8 @@ def app():
         gap=12,
         align_cross=ui.Align.STRETCH,
     )
-    status = heading("Samples: 1", 20)
-    spin = ui.SpinBox(size=(150, 38), initial_val=1)
+    status = heading("Samples: 1", 13)
+    spin = ui.SpinBox(size=(120, 30), initial_val=1)
     spin.on_change = lambda box: setattr(status, "message", f"Samples: {box.value}")
     checks = ui.Checkbox(labels=["Shadows", "Bloom"], gap=6)
     combo = ui.ComboBox2D(
@@ -376,7 +377,8 @@ def app():
     render.add(status)
     render.add(field("Samples", spin))
     render.add(checks)
-    render.add(combo)
+    # A stretched ComboBox2D also stretches its arrow icon, so keep its width.
+    render.add(combo, width=ui.fixed(240))
 
     about = tabs.tabs[1].content_panel
     about.set_layout(direction=ui.Direction.COLUMN, padding=14, gap=8)
@@ -384,7 +386,6 @@ def app():
         ui.TextBlock2D(
             text="Every widget here is positioned by the layout engine, "
             "including this text, which wraps to the width of the tab.",
-            font_size=18,
             dynamic_bbox=True,
         ).set_layout(width=ui.grow())
     )
@@ -439,7 +440,7 @@ def click(show_manager, x, y):
 def run(name):
     """Show or record one demo."""
     demo = DEMOS[name]()
-    scene = window.Scene(background=(0.05, 0.05, 0.08))
+    scene = window.Scene(background=PAGE)
     scene.add(demo.root)
     for extra in demo.extras:
         scene.add(extra)
@@ -455,7 +456,7 @@ def run(name):
     show_manager = window.ShowManager(
         scene=scene,
         size=demo.size,
-        pixel_ratio=1,
+        pixel_ratio=1 if RECORD else None,
         title=f"widgets_{name}",
         window_type="offscreen" if RECORD else "default",
     )

@@ -319,7 +319,7 @@ def run(name):
     show_manager = window.ShowManager(
         scene=scene,
         size=size,
-        pixel_ratio=1,
+        pixel_ratio=1 if RECORD else None,
         title=f"layout_{name}",
         window_type="offscreen" if RECORD else "default",
     )
