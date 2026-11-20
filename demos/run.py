@@ -65,6 +65,7 @@ DEMOS = [
     ("themes", "Themes: global switch and theme_scope", _example("viz_ui_themes.py")),
     ("themes", "Graphite and Graphite Light: hover, pressed, disabled, focus", _example("viz_ui_graphite.py")),
     ("themes", "Theme gallery: Hairline, Soft Pill, Frost, Ember, compact density", _example("viz_ui_theme_gallery.py")),
+    ("themes", "Switch2D and SegmentedControl2D", _example("viz_ui_switch_segmented.py")),
     ("extras", "Tutorial: animate NumPy data by updating buffers in place", _example("viz_update_buffers.py")),
     ("extras", "Lorenz ensemble showcase (paused WIP)", _example("viz_lorenz_ensemble.py")),
 ]

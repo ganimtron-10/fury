@@ -27,7 +27,7 @@ cd demos/out && python ../physics_demos.py --record && python ../layout_demos.py
 |---|---|---|
 | UI layout engine (solver, containers, text layout, widget ports, tutorials, e2e tests) | `ui-layout/integration` | #15-#31 (merged into the fork stack) |
 | Layout fixes: solver, Tree2D in layouts, docs renames, e2e via real events | `ui-layout/fix-solver`, `fix-tree`, `fix-docs-renames`, `fix-e2e-tests` | #44, #34, #32 (fix-solver has no PR yet) |
-| UI themes: theme core, box style, Graphite, default Graphite, Switch/Segmented, built-in themes, theme files | `ui-theme/01` ... `07` | #47-#53 |
+| UI themes: theme core, box style, Graphite, default Graphite, Switch/Segmented, built-in themes, theme files | `ui-theme/01` ... `07` (04 and 05 branch off 03, so they are merged separately; their Switch tests are pinned to the classic theme here) | #47-#53 |
 | Physics: core, boxes, containers, actors, render loop, forces | `physics/01-core` ... `06-forces` | #35, #36, #40-#43 |
 | `actor.line` offset fix | `bf/line-offset` | #37 |
 | Example files only: city drone shot, jungle sim, update-buffers tutorial, Lorenz WIP | `demo/city-drone-shot`, `fix/jungle-city-sims`, `tutorial/update-buffers`, `showcase/lorenz-ensemble` | #45, #38 (city-drone-shot and Lorenz have no PR) |
