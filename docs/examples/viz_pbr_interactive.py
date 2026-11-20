@@ -331,6 +331,7 @@ for tab_index, (_title, rows) in enumerate(TABS):
             shape="disk",
             outer_radius=7,
             font_size=13,
+            layout="classic",
             text_template=f"{{value:.{decimals}f}}",
         )
         slider.on_moving_slider = callback

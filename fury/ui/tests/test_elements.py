@@ -145,7 +145,9 @@ def test_line_slider_2d_functional_initialization():
     npt.assert_equal(slider.shape, "square")
     npt.assert_equal(slider.orientation, "horizontal")
 
-    assert isinstance(slider.handle, ui.Rectangle2D)
+    inline = ui.get_theme().get(ui.LineSlider2D, "layout") == "inline"
+    handle_type = ui.RoundedRectangle2D if inline else ui.Rectangle2D
+    assert type(slider.handle) is handle_type
     npt.assert_equal(slider.handle.size, (30, 30))
 
 
@@ -200,20 +202,18 @@ def test_line_slider_2d_layout_logic():
 def test_line_slider_2d_preserves_internal_z_order():
     """Test slider restores child z-order after parent z-order changes."""
     slider = ui.LineSlider2D(z_order=2)
+    parts = [slider.track, slider.handle, slider.text]
+    if slider.fill is not None:
+        parts.insert(1, slider.fill)
 
-    npt.assert_equal(slider.track.z_order, 2)
-    npt.assert_equal(slider.handle.z_order, 3)
-    npt.assert_equal(slider.text.z_order, 4)
+    z_orders = [part.z_order for part in parts]
+    npt.assert_equal(z_orders, list(range(2, 2 + len(parts))))
 
     slider.z_order = 10
-    npt.assert_equal(slider.track.z_order, 10)
-    npt.assert_equal(slider.handle.z_order, 10)
-    npt.assert_equal(slider.text.z_order, 10)
+    npt.assert_equal([part.z_order for part in parts], [10] * len(parts))
 
     slider.set_position((50, 50))
-    npt.assert_equal(slider.track.z_order, 10)
-    npt.assert_equal(slider.handle.z_order, 11)
-    npt.assert_equal(slider.text.z_order, 12)
+    npt.assert_equal([part.z_order for part in parts], list(range(10, 10 + len(parts))))
 
 
 def test_line_slider_2d_text_formatting():
@@ -847,6 +847,7 @@ def test_textbox_handle_character_returns_false():
     assert result is False
 
 
+@pytest.mark.usefixtures("classic_theme")
 def test_ui_line_slider_2d_variations(recording=False):
     for orientation in ["horizontal", "vertical"]:
         for shape in ["disk", "square"]:
@@ -1791,7 +1792,8 @@ def test_ui_combobox_2d_initialization_and_properties():
     default_cb = ui.ComboBox2D(items=["placeholder"])
     npt.assert_equal(default_cb._selection, "Choose selection...")
     npt.assert_equal(default_cb.draggable, True)
-    npt.assert_equal(default_cb.font_size, 20)
+    base_font_size = ui.get_theme().get(ui.ComboBox2D, "font_size")
+    npt.assert_equal(default_cb.font_size, base_font_size)
 
     combobox.resize((450, 300))
     expected_text = (int(0.85 * 450), int(0.2 * 300))
@@ -1803,7 +1805,7 @@ def test_ui_combobox_2d_initialization_and_properties():
     npt.assert_equal(combobox.drop_button_size, expected_btn)
 
     # Test font scaling
-    expected_font_size = int(20 * (300 / 200))  # 30
+    expected_font_size = int(base_font_size * (300 / 200))
     npt.assert_equal(combobox.font_size, expected_font_size)
     npt.assert_equal(combobox.drop_down_menu.font_size, expected_font_size)
     npt.assert_equal(combobox.selection_box.font_size, expected_font_size)
@@ -2642,16 +2644,35 @@ def test_file_menu_2d_extension_filter(tmp_path):
     npt.assert_equal(file_names, ["a.txt", "c.txt"])
 
 
+def _file_menu_theme_colors():
+    """
+    Get the theme text colors of FileMenu2D entries, as RGB in [0, 1].
+
+    Returns
+    -------
+    tuple of ndarray
+        Color of directory entries and color of file entries.
+    """
+    theme = ui.get_theme()
+    return tuple(
+        ui.TextBlock2D(
+            text="x", dynamic_bbox=True, color=theme.get(ui.FileMenu2D, item)
+        ).color
+        for item in ("directory_color", "file_color")
+    )
+
+
 def test_file_menu_2d_slot_colors_by_entry_type(tmp_path):
     root = _make_file_menu_fixture(tmp_path)
     menu = ui.FileMenu2D(str(root), size=(200, 200))
 
+    directory_color, file_color = _file_menu_theme_colors()
     for idx, entry in enumerate(menu.directory_contents):
         slot = menu.listbox.slots[idx]
         if entry[1] == "directory":
-            npt.assert_array_almost_equal(slot.textblock.color, [0, 0.6, 0])
+            npt.assert_array_almost_equal(slot.textblock.color, directory_color)
         else:
-            npt.assert_array_almost_equal(slot.textblock.color, [0, 0, 0.7])
+            npt.assert_array_almost_equal(slot.textblock.color, file_color)
 
 
 def test_file_menu_2d_navigates_into_directory(tmp_path):
@@ -2737,11 +2758,12 @@ def test_file_menu_2d_slot_colors_after_scroll(tmp_path):
         menu.listbox.scroll_down()
 
     npt.assert_equal(menu.listbox.view_offset, 3)
+    directory_color, file_color = _file_menu_theme_colors()
     for idx, slot in enumerate(menu.listbox.slots):
         if slot.element is None:
             continue
         entry = menu.directory_contents[menu.listbox.view_offset + idx]
-        expected = [0, 0.6, 0] if entry[1] == "directory" else [0, 0, 0.7]
+        expected = directory_color if entry[1] == "directory" else file_color
         npt.assert_array_almost_equal(slot.textblock.color, expected)
 
 
@@ -2891,6 +2913,7 @@ def test_ui_playback_panel_visual(recording=False):
     )
 
 
+@pytest.mark.usefixtures("classic_theme")
 def test_ui_textbox2d_variations(recording=False):
     for multiline in [False, True]:
         filename = f"test_ui_textbox2d_multiline_{multiline}"
@@ -3531,6 +3554,7 @@ def test_button_group_not_public_but_subclasses_are():
     assert hasattr(ui, "RadioButton")
 
 
+@pytest.mark.usefixtures("classic_theme")
 def test_checkbox_uses_new_checkbox_state_icons():
     """Checkbox buttons load the four new_icons checkbox state textures."""
     fetch_viz_new_icons()
@@ -3543,6 +3567,7 @@ def test_checkbox_uses_new_checkbox_state_icons():
     )
 
 
+@pytest.mark.usefixtures("classic_theme")
 def test_radio_button_uses_new_circle_state_icons():
     """RadioButton buttons load the four new_icons circle state textures."""
     fetch_viz_new_icons()
@@ -3582,6 +3607,7 @@ def test_toggle_button_resolves_selected_state_icons():
     npt.assert_equal(button.resolve_state_key(keys), "pressed-selected")
 
 
+@pytest.mark.usefixtures("classic_theme")
 def test_checkbox_toggle_swaps_displayed_texture():
     """Toggling a checkbox option swaps the shown texture to the selected one."""
     checkbox = ui.Checkbox(labels=["A"])
@@ -3607,8 +3633,12 @@ def test_checkbox_initialization():
     npt.assert_equal(sorted(checkbox.options.keys()), ["Blue", "Green", "Red"])
     npt.assert_equal(checkbox.checked_labels, ["Green"])
 
+    indicator = ui.get_theme().get(ui.Checkbox, "indicator")
+    button_type = (
+        ui.elements._BoxToggle2D if indicator == "box" else ui.TexturedButton2D
+    )
     for label, (button, text) in checkbox.options.items():
-        assert isinstance(button, ui.TexturedButton2D)
+        assert isinstance(button, button_type)
         assert isinstance(text, ui.TextBlock2D)
         npt.assert_equal(button.toggled, label == "Green")
 
@@ -4209,6 +4239,7 @@ def test_inline_slider_places_label_and_value_above_track():
     npt.assert_array_equal(slider.handle.size, (14, 14))
 
 
+@pytest.mark.usefixtures("classic_theme")
 def test_classic_slider_warns_that_label_is_ignored(caplog):
     """The classic layout does not show a label and says so."""
     with caplog.at_level("WARNING"):

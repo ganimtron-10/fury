@@ -5,6 +5,8 @@ from hashlib import sha256
 import json
 import logging
 import os
+import subprocess
+import sys
 
 import numpy as np
 import numpy.testing as npt
@@ -16,13 +18,7 @@ from fury.data.fetcher import UI_THEME_SHA256
 from fury.ui.helpers import Anchor
 from fury.ui.tests._helpers import click, send_pointer
 
-
-@pytest.fixture(autouse=True)
-def classic_theme():
-    """Start and end every test with the classic global theme."""
-    ui.set_theme("classic")
-    yield
-    ui.set_theme("classic")
+pytestmark = pytest.mark.usefixtures("classic_theme")
 
 
 def red_panel_theme():
@@ -1741,6 +1737,129 @@ def test_per_side_values_read_back_after_leaving_rounded_mode():
         (1.0, 0.0, 0.0),
     ]
     assert panel.border_width[2] == 6
+
+
+@pytest.mark.skipif(
+    bool(os.environ.get("FURY_UI_THEME", "").strip()),
+    reason="FURY_UI_THEME changes the default theme.",
+)
+def test_widgets_use_graphite_when_no_theme_is_set():
+    """With no global theme set, new widgets get the Graphite theme."""
+    ui.UIContext.theme = None
+    panel = ui.Panel2D(size=(120, 100), position=(40, 40))
+
+    assert ui.get_theme().name == "graphite"
+    assert panel.theme.name == "graphite"
+    npt.assert_array_almost_equal(panel.color, _hex("#1C1D20"))
+    assert panel.background.corner_radius == 10
+    pixel = render_pixels(panel, [(100, 90)])[0]
+    npt.assert_allclose(pixel, _hex("#1C1D20") * 255, atol=2)
+
+
+def _default_theme_in_new_process(value):
+    """
+    Get the default theme name and log output of a fresh Python process.
+
+    Parameters
+    ----------
+    value : str
+        Value of ``FURY_UI_THEME`` in the new process.
+
+    Returns
+    -------
+    tuple of str
+        Name of the default theme, and the standard error output.
+    """
+    env = dict(os.environ, FURY_UI_THEME=value)
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "from fury import ui; print(ui.get_theme().name)",
+        ],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return result.stdout.strip().splitlines()[-1], result.stderr
+
+
+def test_fury_ui_theme_environment_variable_picks_default():
+    """FURY_UI_THEME names the default theme, ignoring case and empty values."""
+    name, _ = _default_theme_in_new_process("classic")
+    assert name == "classic"
+
+    name, _ = _default_theme_in_new_process("Graphite_Light")
+    assert name == "graphite_light"
+
+    name, log = _default_theme_in_new_process("")
+    assert name == "graphite"
+    assert "FURY_UI_THEME" not in log
+
+    name, log = _default_theme_in_new_process("Nope")
+    assert name == "graphite"
+    assert "FURY_UI_THEME='Nope'" in log
+
+
+RESTYLABLE_FROM_GRAPHITE = [
+    name
+    for name in COMPOSITES
+    if name
+    not in ("line_slider", "textbox", "checkbox", "radio", "playback", "filemenu")
+]
+
+
+@pytest.mark.parametrize("name", RESTYLABLE_FROM_GRAPHITE)
+def test_graphite_widget_restyled_to_classic_matches_classic_render(name, tmp_path):
+    """
+    A widget made under Graphite looks classic after set_theme.
+
+    Widgets left out keep structural items, such as the slider layout, the
+    check box indicator or sizes derived from font sizes, from the theme
+    they were created with; see ``UI.apply_theme``.
+    """
+    (tmp_path / "folder").mkdir()
+    (tmp_path / "notes.txt").write_text("notes")
+    factory = _composite_factories(tmp_path)[name]
+    reference = _render_scene(factory())
+
+    ui.UIContext.theme = ui.builtin_theme("graphite")
+    widget = factory()
+    assert widget.theme.name == "graphite"
+    ui.set_theme("classic")
+
+    npt.assert_array_equal(_render_scene(widget), reference)
+
+
+def test_structural_widgets_take_classic_colors_from_graphite(tmp_path):
+    """Widgets that keep structural items still get classic colors."""
+    (tmp_path / "folder").mkdir()
+    (tmp_path / "notes.txt").write_text("notes")
+    ui.UIContext.theme = ui.builtin_theme("graphite")
+    slider = ui.LineSlider2D()
+    text_box = ui.TextBox2D(20, 2, text="Type")
+    checkbox = ui.Checkbox(["a", "b"], checked_labels=["a"])
+    radio = ui.RadioButton(["a"])
+    playback = ui.PlaybackPanel(width=380)
+    file_menu = ui.FileMenu2D(directory_path=str(tmp_path), size=(300, 200))
+
+    ui.set_theme("classic")
+
+    npt.assert_array_almost_equal(slider.track.color, (1, 0, 0))
+    npt.assert_array_almost_equal(slider.text.color, (1, 1, 1))
+    npt.assert_array_almost_equal(text_box.text.color, (0, 0, 0))
+    npt.assert_array_almost_equal(text_box.text.background.color, (1, 1, 1))
+    npt.assert_array_almost_equal(checkbox.options["a"][1].color, (1, 1, 1))
+    npt.assert_array_almost_equal(radio.options["a"][1].color, (1, 1, 1))
+    npt.assert_array_almost_equal(playback.panel.color, (1, 1, 1))
+    npt.assert_array_almost_equal(file_menu.listbox.panel.color, (1, 1, 1))
+    entries = dict(file_menu.directory_contents)
+    for slot in file_menu.listbox.slots:
+        if slot.element is None or slot.element not in entries:
+            continue
+        expected = (0, 0.6, 0) if entries[slot.element] == "directory" else (0, 0, 0.7)
+        npt.assert_array_almost_equal(slot.textblock.color, expected)
 
 
 def _box(element):
