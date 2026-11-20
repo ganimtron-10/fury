@@ -4464,6 +4464,7 @@ def test_switch_click_on_label_toggles(offscreen):
     assert len(changes) == 2
 
 
+@pytest.mark.usefixtures("classic_theme")
 def test_switch_setter_fires_once_and_updates_render(offscreen):
     """Setting the state redraws the knob and calls on_change only on change."""
     changes = []
@@ -4507,6 +4508,7 @@ def test_switch_disabled_ignores_clicks(offscreen):
     assert changes == [switch]
 
 
+@pytest.mark.usefixtures("classic_theme")
 def test_switch_hover_styles_track(offscreen):
     """The track shows the hover color while the pointer is over the switch."""
     switch = ui.Switch2D(label="Shading", position=(40, 40))
@@ -4522,6 +4524,7 @@ def test_switch_hover_styles_track(offscreen):
     npt.assert_allclose(_pixel(_draw(show_m), right), (128, 128, 128), atol=3)
 
 
+@pytest.mark.usefixtures("classic_theme")
 def test_switch_label_side_and_size():
     """The size covers the track, the gap and the label, on either side."""
     right = ui.Switch2D(label="Shading", position=(10, 10))
@@ -4627,6 +4630,7 @@ def test_segmented_control_click_selects_each_segment(offscreen):
     assert control.selected == "Sagittal"
 
 
+@pytest.mark.usefixtures("classic_theme")
 def test_segmented_control_setters(offscreen):
     """Setting the selection redraws it and calls on_change only on change."""
     changes = []
@@ -4648,6 +4652,7 @@ def test_segmented_control_setters(offscreen):
     npt.assert_allclose(_pixel(image, _segment_point(control, 0)), (77,) * 3, atol=3)
 
 
+@pytest.mark.usefixtures("classic_theme")
 def test_segmented_control_disabled_ignores_clicks(offscreen):
     """A disabled control keeps its selection and ignores hover."""
     changes = []
@@ -4669,6 +4674,7 @@ def test_segmented_control_disabled_ignores_clicks(offscreen):
     assert changes == [control]
 
 
+@pytest.mark.usefixtures("classic_theme")
 def test_segmented_control_hover(offscreen):
     """An unselected segment is highlighted while the pointer is over it."""
     control = ui.SegmentedControl2D(["a", "b", "c"], position=(10, 40))
@@ -4689,6 +4695,7 @@ def test_segmented_control_hover(offscreen):
     )
 
 
+@pytest.mark.usefixtures("classic_theme")
 def test_segmented_control_size_from_text_and_explicit():
     """The natural width fits the widest option; an explicit size is split."""
     control = ui.SegmentedControl2D(["a", "a much longer option"])
@@ -4703,6 +4710,7 @@ def test_segmented_control_size_from_text_and_explicit():
     assert sized.segments[3].get_position()[0] == 2 + 3 * 51
 
 
+@pytest.mark.usefixtures("classic_theme")
 def test_segmented_control_grows_in_a_layout(offscreen):
     """A layout can stretch the control; its segments share the width."""
     control = ui.SegmentedControl2D(["a", "b"])
@@ -4794,6 +4802,7 @@ def _place(widget, how):
     return panel
 
 
+@pytest.mark.usefixtures("classic_theme")
 @pytest.mark.parametrize("how", ["add_element", "z_order"])
 def test_switch_parts_stay_stacked_when_placed(offscreen, how):
     """In a panel or after a Z-order change, the knob draws and picks on top."""
@@ -4815,6 +4824,7 @@ def test_switch_parts_stay_stacked_when_placed(offscreen, how):
     assert changes == [switch, switch]
 
 
+@pytest.mark.usefixtures("classic_theme")
 @pytest.mark.parametrize("how", ["add_element", "z_order"])
 def test_segmented_control_parts_stay_stacked_when_placed(offscreen, how):
     """In a panel or after a Z-order change, segments draw and pick on top."""
