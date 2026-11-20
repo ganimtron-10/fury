@@ -8074,6 +8074,12 @@ class SpinBox(UI):
         (TextBox2D) and increment/decrement buttons (TexturedButton2D).
         """
         self.panel = Panel2D(size=self.panel_size, color=self.panel_color)
+        # The panel is the field of the spin box, not a floating card, so it
+        # must not cast the panel shadow of the theme.
+        background = self.panel.background
+        background.shadow_blur = 0
+        background.shadow_spread = 0
+        background.shadow_offset = (0, 0)
 
         self.textbox = TextBox2D(width=self.max_column, height=self.max_line)
         self.increment_button = TexturedButton2D(
