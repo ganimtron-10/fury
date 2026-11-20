@@ -1145,6 +1145,77 @@ class BillboardEllipsoidShader(BillboardSphereShader):
         return load_wgsl("billboard_ellipsoid_render.wgsl", package_name="fury.wgsl")
 
 
+class GPUSpheresShader(BillboardEllipsoidShader):
+    """
+    Draw spheres whose centres and radii live in a physics storage buffer.
+
+    Parameters
+    ----------
+    wobject : fury.physics.GPUSpheres
+        Spheres of a GPU physics world.
+    """
+
+    def get_bindings(self, wobject, shared, _scene):
+        """
+        Bind the world's sphere records and colors.
+
+        Parameters
+        ----------
+        wobject : fury.physics.GPUSpheres
+            Spheres of a GPU physics world.
+        shared : Shared
+            Renderer-wide GPU resources, including the standard uniform buffer.
+        _scene : fury.lib.Scene
+            Scene argument required by the shader interface; unused here.
+
+        Returns
+        -------
+        dict
+            Bind groups keyed by group index, containing indexed bindings.
+        """
+        geometry = wobject.geometry
+        storage = "buffer/read_only_storage"
+        bindings = [
+            Binding("u_stdinfo", "buffer/uniform", shared.uniform_buffer),
+            Binding("u_wobject", "buffer/uniform", wobject.uniform_buffer),
+            Binding("u_material", "buffer/uniform", wobject.material.uniform_buffer),
+            Binding("s_spheres", storage, geometry.spheres, "VERTEX"),
+            Binding("s_colors", storage, geometry.colors, "VERTEX"),
+        ]
+        bindings = dict(enumerate(bindings))
+        self.define_bindings(0, bindings)
+        return {0: bindings}
+
+    def get_render_info(self, wobject, _shared):
+        """
+        Draw one six-vertex rectangle per sphere of this actor.
+
+        Parameters
+        ----------
+        wobject : fury.physics.GPUSpheres
+            Spheres of a GPU physics world.
+        _shared : Shared
+            Renderer-wide GPU resources; unused for instance counts.
+
+        Returns
+        -------
+        dict
+            Draw parameters starting at the actor's first sphere.
+        """
+        return {"indices": (6, wobject.count, 0, wobject.first)}
+
+    def get_code(self):
+        """
+        Return the GPU physics sphere shader.
+
+        Returns
+        -------
+        str
+            WGSL source for the sphere renderer.
+        """
+        return load_wgsl("physics_spheres_render.wgsl", package_name="fury.wgsl")
+
+
 class NetworkComputeShader(BaseShader):
     """
     Compute Shader implementing Fruchterman-Reingold layout.

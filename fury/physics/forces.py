@@ -138,6 +138,119 @@ class Relaxation:
         return _relax(world, self.target, self.coefficient)
 
 
+class _Uniform:
+    """
+    A constant force on every body.
+
+    Parameters
+    ----------
+    force : ndarray, shape (3,)
+        The force.
+    """
+
+    def __init__(self, force):
+        self.force = force
+
+    def __call__(self, world):
+        """
+        Compute this field's force on every body.
+
+        Parameters
+        ----------
+        world : World
+            The world being stepped.
+
+        Returns
+        -------
+        ndarray, shape (B, 3)
+            Force on each body.
+        """
+        return np.broadcast_to(self.force, (world.count, 3))
+
+
+class _Attractor:
+    """
+    A pull towards a point that fades with distance squared.
+
+    Parameters
+    ----------
+    point : ndarray, shape (3,)
+        The attracting point.
+    strength : float
+        Scale of the acceleration.
+    softening : float
+        Length that keeps the pull finite near the point.
+    """
+
+    def __init__(self, point, strength, softening):
+        self.point = point
+        self.strength = strength
+        self.softening = softening
+
+    def __call__(self, world):
+        """
+        Compute this field's force on every body.
+
+        Parameters
+        ----------
+        world : World
+            The world being stepped.
+
+        Returns
+        -------
+        ndarray, shape (B, 3)
+            Force on each body.
+        """
+        offset = self.point - world._positions
+        distance2 = (offset**2).sum(1) + self.softening**2
+        acceleration = self.strength * offset / distance2[:, None] ** 1.5
+        return acceleration * _masses(world)[:, None]
+
+
+class _Vortex:
+    """
+    A swirl around an axis.
+
+    Parameters
+    ----------
+    center : ndarray, shape (3,)
+        A point on the axis.
+    axis : ndarray, shape (3,)
+        Unit swirl axis.
+    strength : float
+        Sideways acceleration at unit distance.
+    pull : float
+        Acceleration towards the axis.
+    """
+
+    def __init__(self, center, axis, strength, pull):
+        self.center = center
+        self.axis = axis
+        self.strength = strength
+        self.pull = pull
+
+    def __call__(self, world):
+        """
+        Compute this field's force on every body.
+
+        Parameters
+        ----------
+        world : World
+            The world being stepped.
+
+        Returns
+        -------
+        ndarray, shape (B, 3)
+            Force on each body.
+        """
+        offset = world._positions - self.center
+        radial = offset - self.axis * (offset @ self.axis)[:, None]
+        distance2 = (radial**2).sum(1)[:, None] + 1e-3
+        swirl = np.cross(self.axis, radial) * self.strength / distance2
+        inward = -radial * self.pull / np.sqrt(distance2)
+        return (swirl + inward) * _masses(world)[:, None]
+
+
 def combined_relaxation(world, fields):
     """
     Return the force of several relaxation fields applied together.
@@ -175,25 +288,7 @@ def uniform(force):
     callable
         A force field for :meth:`World.add_force`.
     """
-    force = _vector(force, "force")
-
-    def field(world):
-        """
-        Compute this field's force on every body.
-
-        Parameters
-        ----------
-        world : World
-            The world being stepped.
-
-        Returns
-        -------
-        ndarray, shape (B, 3)
-            Force on each body.
-        """
-        return np.broadcast_to(force, (world.count, 3))
-
-    return field
+    return _Uniform(_vector(force, "force"))
 
 
 def drag(coefficient):
@@ -260,29 +355,11 @@ def attractor(point, *, strength=10.0, softening=0.5):
     callable
         A force field for :meth:`World.add_force`.
     """
-    point = _vector(point, "point")
-    strength = _number(strength, "strength")
-    softening = _number(softening, "softening", positive=True)
-
-    def field(world):
-        """
-        Compute this field's force on every body.
-
-        Parameters
-        ----------
-        world : World
-            The world being stepped.
-
-        Returns
-        -------
-        ndarray, shape (B, 3)
-            Force on each body.
-        """
-        offset = point - world._positions
-        distance2 = (offset**2).sum(1) + softening**2
-        return (strength * offset / distance2[:, None] ** 1.5) * _masses(world)[:, None]
-
-    return field
+    return _Attractor(
+        _vector(point, "point"),
+        _number(strength, "strength"),
+        _number(softening, "softening", positive=True),
+    )
 
 
 def vortex(*, center=(0.0, 0.0, 0.0), axis=(0.0, 1.0, 0.0), strength=5.0, pull=0.0):
@@ -309,31 +386,9 @@ def vortex(*, center=(0.0, 0.0, 0.0), axis=(0.0, 1.0, 0.0), strength=5.0, pull=0
     length = np.linalg.norm(axis)
     if length < 1e-12:
         raise ValueError("axis must be non-zero.")
-    axis = axis / length
-    strength, pull = _number(strength, "strength"), _number(pull, "pull")
-
-    def field(world):
-        """
-        Compute this field's force on every body.
-
-        Parameters
-        ----------
-        world : World
-            The world being stepped.
-
-        Returns
-        -------
-        ndarray, shape (B, 3)
-            Force on each body.
-        """
-        offset = world._positions - center
-        radial = offset - axis * (offset @ axis)[:, None]
-        distance2 = (radial**2).sum(1)[:, None] + 1e-3
-        swirl = np.cross(axis, radial) * strength / distance2
-        inward = -radial * pull / np.sqrt(distance2)
-        return (swirl + inward) * _masses(world)[:, None]
-
-    return field
+    return _Vortex(
+        center, axis / length, _number(strength, "strength"), _number(pull, "pull")
+    )
 
 
 def mutual_gravity(*, strength=1.0, softening=0.2):

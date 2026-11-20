@@ -30,6 +30,7 @@ readme = "file: _demos.rst"
 position = 4
 enable = true
 files = [
+    "viz_physics_gpu.py",
     "viz_animated_surfaces.py",
     "viz_fractals.py",
     "viz_helical_motion.py",
