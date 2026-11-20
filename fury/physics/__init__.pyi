@@ -6,6 +6,9 @@ __all__ = [
     "BodySet",
     "Box",
     "Container",
+    "GPUContainer",
+    "GPUSpheres",
+    "GPUWorld",
     "KinematicBodySet",
     "Sphere",
     "World",
@@ -19,6 +22,7 @@ __all__ = [
 
 from .bodies import Body, BodySet
 from .forces import attractor, drag, mutual_gravity, uniform, vortex, wind
+from .gpu import GPUContainer, GPUSpheres, GPUWorld
 from .kinematics import Container, KinematicBodySet
 from .shapes import Box, Sphere
 from .world import World
